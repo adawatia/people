@@ -80,6 +80,7 @@ app = FastAPI(
         {"name": "erp-attendance", "description": "ERP-only attendance punches, records, corrections, and reconciliation."},
         {"name": "erp-shifts", "description": "ERP-only shifts and employee shift assignments."},
         {"name": "erp-holidays", "description": "ERP-only organization-wide holiday synchronization."},
+        {"name": "erp-overtime", "description": "ERP-only overtime record synchronization."},
         {"name": "erp-leaves", "description": "ERP leave status change feed and acknowledgements."},
         {"name": "dashboard", "description": "Operational and technical administration dashboard metrics."},
         {"name": "notifications", "description": "In-app notifications."},
@@ -164,6 +165,7 @@ from routers import (
     erp_shifts,
     erp_leaves,
     erp_holidays,
+    erp_overtime,
     erp_employees,
     erp_master_data,
     leaves,
@@ -190,6 +192,7 @@ api_router.include_router(erp_attendance.router)
 api_router.include_router(erp_shifts.router)
 api_router.include_router(erp_leaves.router)
 api_router.include_router(erp_holidays.router)
+api_router.include_router(erp_overtime.router)
 api_router.include_router(erp_employees.router)
 api_router.include_router(erp_master_data.router)
 api_router.include_router(leaves.router)

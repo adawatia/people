@@ -594,6 +594,10 @@ class OvertimeRecord(Base):
     actioned_by: Mapped[int | None] = mapped_column(ForeignKey("users.user_id"), nullable=True)
     actioned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    erp_event_id: Mapped[str | None] = mapped_column(String(120), unique=True, nullable=True, index=True)
+    overtime_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    overtime_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    source: Mapped[str] = mapped_column(String(30), default="ERP", nullable=False)
 
     employee: Mapped[Employee] = relationship()
     attendance_record: Mapped[AttendanceRecord] = relationship()

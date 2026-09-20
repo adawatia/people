@@ -1,4 +1,13 @@
 <script setup lang="ts">
+/**
+ * Application shell: sidebar navigation, top bar and content slot.
+ *
+ * Nav visibility is decided by TWO filters, both of which must pass:
+ * - `roles`       — business role gate (EMPLOYEE / DEPARTMENT_MANAGER / HR_ADMIN).
+ * - `permissions` — at least one of the listed permission codes is held.
+ * Technical admins (superuser) skip the business nav entirely and get a
+ * dedicated "System administration" link instead.
+ */
 interface NavItem { label: string, icon: string, to: string, permissions?: string[], roles?: Array<'EMPLOYEE' | 'DEPARTMENT_MANAGER' | 'HR_ADMIN'> }
 const route = useRoute()
 const auth = useAuth()
@@ -10,7 +19,7 @@ const navItems: NavItem[] = [
   { label: 'Leave', icon: 'i-lucide-calendar-days', to: '/leaves' },
   { label: 'Work arrangements', icon: 'i-lucide-briefcase-business', to: '/work-arrangements' },
   { label: 'Overtime', icon: 'i-lucide-timer', to: '/overtime' },
-  { label: 'Approvals', icon: 'i-lucide-clipboard-check', to: '/approvals', roles: ['DEPARTMENT_MANAGER', 'HR_ADMIN'], permissions: ['leave.approve', 'attendance.approve_correction', 'overtime.approve', 'work_arrangement.approve'] },
+  { label: 'Approvals', icon: 'i-lucide-clipboard-check', to: '/approvals', roles: ['DEPARTMENT_MANAGER', 'HR_ADMIN'], permissions: ['leave.approve', 'attendance.approve_correction', 'work_arrangement.approve'] },
   { label: 'Shifts', icon: 'i-lucide-clock-3', to: '/shifts', permissions: ['shift.view_self', 'shift.assign', 'shift.update'] },
   { label: 'Holidays', icon: 'i-lucide-calendar-heart', to: '/holidays' },
   { label: 'Organization', icon: 'i-lucide-building-2', to: '/organization', roles: ['HR_ADMIN'], permissions: ['system.configure', 'designation.view', 'employee.view'] },
@@ -18,6 +27,9 @@ const navItems: NavItem[] = [
 ]
 const isTechnicalAdmin = computed(() => Boolean(auth.user.value?.is_superuser))
 const businessRole = computed(() => auth.user.value?.role)
+// Technical admins manage master data in ERP, not here — so they only see
+// the dashboard plus system administration. Everyone else passes both the
+// role gate and any-permission gate for each item.
 const visibleItems = computed(() => isTechnicalAdmin.value
   ? [{ label: 'Dashboard', icon: 'i-lucide-layout-dashboard', to: '/' }]
   : navItems.filter((item) => {
@@ -25,7 +37,9 @@ const visibleItems = computed(() => isTechnicalAdmin.value
       return !item.permissions || item.permissions.some(auth.hasPermission)
     }))
 const pageTitle = computed(() => route.path === '/settings' ? 'System administration' : navItems.find(item => item.to === route.path)?.label || 'People')
+const mobileItems = computed(() => visibleItems.value.filter(item => item.to !== '/').slice(0, 4))
 watch(() => route.fullPath, () => {
+  // Navigating should always collapse the mobile drawer.
   mobileOpen.value = false
 })
 </script>
@@ -83,7 +97,7 @@ watch(() => route.fullPath, () => {
         </NuxtLink>
       </nav>
       <div class="border-t border-[var(--people-border)] pt-4">
-        <div class="flex items-center gap-3 rounded-xl px-2 py-2">
+        <NuxtLink to="/profile" class="flex items-center gap-3 rounded-xl px-2 py-2 hover:bg-muted/10">
           <UAvatar
             :text="auth.initials.value"
             size="md"
@@ -102,19 +116,12 @@ watch(() => route.fullPath, () => {
             aria-label="Sign out"
             @click="auth.logout"
           />
-        </div>
+        </NuxtLink>
       </div>
     </aside>
     <div class="lg:pl-[17rem]">
       <header class="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-[var(--people-border)] bg-[var(--people-surface)]/90 px-4 backdrop-blur-xl sm:px-6 lg:px-8">
-        <UButton
-          class="lg:hidden"
-          icon="i-lucide-menu"
-          color="neutral"
-          variant="ghost"
-          aria-label="Open navigation"
-          @click="mobileOpen = true"
-        />
+        <UButton class="lg:hidden" icon="i-lucide-user-round" color="neutral" variant="ghost" to="/profile" aria-label="Open profile" />
         <h1 class="min-w-0 flex-1 truncate text-base font-semibold">
           {{ pageTitle }}
         </h1>
@@ -133,9 +140,29 @@ watch(() => route.fullPath, () => {
         />
         <UColorModeButton />
       </header>
-      <main class="mx-auto w-full max-w-[96rem] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+      <main class="mx-auto w-full max-w-[96rem] px-4 py-6 pb-24 sm:px-6 lg:px-8 lg:py-8 lg:pb-8">
         <slot />
       </main>
     </div>
+    <nav class="fixed inset-x-0 bottom-0 z-40 border-t border-[var(--people-border)] bg-[var(--people-surface)]/95 px-2 pb-[env(safe-area-inset-bottom)] pt-2 shadow-[0_-8px_24px_rgba(15,23,42,0.08)] backdrop-blur-xl lg:hidden" aria-label="Mobile navigation">
+      <div class="mx-auto flex max-w-lg items-center justify-around gap-1">
+        <UButton
+          v-for="item in mobileItems"
+          :key="item.to"
+          :to="item.to"
+          :icon="item.icon"
+          :color="route.path === item.to || (item.to !== '/' && route.path.startsWith(item.to)) ? 'primary' : 'neutral'"
+          :variant="route.path === item.to || (item.to !== '/' && route.path.startsWith(item.to)) ? 'soft' : 'ghost'"
+          size="sm"
+          class="min-w-0 flex-1 flex-col gap-0.5 px-1 py-2 text-[10px]"
+          :aria-label="item.label"
+        >
+          {{ item.label }}
+        </UButton>
+        <UButton to="/profile" icon="i-lucide-user-round" color="neutral" :variant="route.path === '/profile' ? 'soft' : 'ghost'" size="sm" class="min-w-0 flex-1 flex-col gap-0.5 px-1 py-2 text-[10px]" aria-label="Profile">
+          Profile
+        </UButton>
+      </div>
+    </nav>
   </div>
 </template>

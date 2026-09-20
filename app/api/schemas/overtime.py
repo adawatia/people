@@ -12,6 +12,10 @@ class OvertimeRecordRead(BaseModel):
     actioned_by: int | None = None
     actioned_at: datetime | None = None
     rejection_reason: str | None = None
+    erp_event_id: str | None = None
+    overtime_start: datetime | None = None
+    overtime_end: datetime | None = None
+    source: str = "ERP"
     model_config = ConfigDict(from_attributes=True)
 
 
