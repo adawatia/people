@@ -12,8 +12,6 @@ from core.employee_access import (
 )
 from db.models import User
 from schemas.leaves import (
-    LeaveAllocationCreate,
-    LeaveAllocationRead,
     LeaveApplicationAction,
     LeaveApplicationCreate,
     LeaveApplicationRead,
@@ -98,48 +96,6 @@ async def update_leave_type(
 ) -> LeaveTypeRead:
     service = LeaveService(session)
     return await service.update_type(type_id, data)
-
-
-# ── Leave Allocations ─────────────────────────────────────────────────────────
-
-@router.get("/allocations", response_model=list[LeaveAllocationRead])
-async def list_leave_allocations(
-    employee_id: int | None = None,
-    leave_period_id: int | None = None,
-    current_user: User = Depends(fastapi_users.current_user(active=True)),
-    session: AsyncSession = Depends(get_async_session),
-) -> list[LeaveAllocationRead]:
-    service = LeaveService(session)
-    current_employee = await get_current_employee(current_user, session)
-    scope = await get_permission_scope(current_user, "leave.manage", session)
-    if employee_id is None:
-        if not scope.organization and not scope.unit_ids and not scope.department_ids:
-            employee_id = current_employee.id
-    else:
-        employee = await service.employee_repo.get_by_id(employee_id)
-        if employee is None:
-            raise HTTPException(status_code=404, detail="Employee not found")
-        await require_employee_access(current_user, employee, "leave.manage", session, allow_self=True)
-    return await service.list_allocations(
-        employee_id=employee_id,
-        leave_period_id=leave_period_id,
-        unit_ids=None if scope.organization else scope.unit_ids,
-        department_ids=None if scope.organization else scope.department_ids,
-    )
-
-
-@router.post("/allocations", response_model=LeaveAllocationRead, status_code=status.HTTP_201_CREATED)
-async def allocate_leaves(
-    data: LeaveAllocationCreate,
-    current_user: User = Depends(require_permission("leave.manage")),
-    session: AsyncSession = Depends(get_async_session),
-) -> LeaveAllocationRead:
-    service = LeaveService(session)
-    employee = await service.employee_repo.get_by_id(data.employee_id)
-    if employee is None:
-        raise HTTPException(status_code=404, detail="Employee not found")
-    await require_employee_access(current_user, employee, "leave.manage", session)
-    return await service.allocate_leaves(data)
 
 
 # ── Leave Balances ────────────────────────────────────────────────────────────
