@@ -32,6 +32,15 @@ from services.shift_service import ShiftService
 
 
 class AttendanceService:
+    """Turns raw punches into daily attendance records.
+
+    Pipeline: device/web punches are ingested raw (`record_punch`), then the
+    processing engine (`process_attendance_*`) resolves each punch to a
+    shift window, computes worked time / late / overtime, and writes one
+    AttendanceRecord per employee per day. Corrections flow through an
+    approval workflow that rewrites the affected record.
+    """
+
     def __init__(self, session: AsyncSession):
         self.session = session
         self.punch_repo = AttendancePunchRepository(session)
@@ -43,6 +52,13 @@ class AttendanceService:
     # ── Punch Ingestion ────────────────────────────────────────────────────────
 
     async def record_punch(self, data: AttendancePunchCreate) -> AttendancePunchRead:
+        """Ingest a single raw punch (from biometric device, web, or ERP).
+
+        Idempotent: duplicate pushes (same employee/time/type, or the same
+        erp_event_id) return the existing punch instead of creating another.
+        The matching shift window is resolved now and stored on the punch so
+        later processing does not need to re-derive it.
+        """
         emp: Employee | None = None
         if data.employee_id:
             emp = await self.employee_repo.get_by_id(data.employee_id)
@@ -96,6 +112,12 @@ class AttendanceService:
         return AttendancePunchRead.model_validate(created)
 
     async def record_bulk_punches(self, data: BulkPunchCreate) -> list[AttendancePunchRead]:
+        """Ingest many punches at once; individual failures are skipped, not fatal.
+
+        Biometric devices push batches that may contain unknown employees or
+        duplicates — those entries are dropped silently so one bad row never
+        blocks the rest of the sync.
+        """
         results: list[AttendancePunchRead] = []
         for item in data.punches:
             try:
@@ -217,6 +239,8 @@ class AttendanceService:
 
             if first_in:
                 if first_in.tzinfo is not None:
+                    # Punches may arrive tz-aware; strip to naive local time so
+                    # they compare cleanly against the shift's naive window.
                     first_in = first_in.replace(tzinfo=None)
                 punch_in_val = first_in.time()
 
@@ -231,7 +255,9 @@ class AttendanceService:
                 worked_minutes = max(0, total_span_minutes - break_min)
                 worked_hours = worked_minutes / 60.0
 
-                # Thresholds
+                # Thresholds (shift-specific when configured, else sane defaults):
+                # below absent_th the employee essentially did not work a day;
+                # below half_day_th they worked, but not a full day.
                 absent_th = float(shift.absent_threshold_hours) if shift else 2.0
                 half_day_th = float(shift.half_day_threshold_hours) if shift else 4.0
 
@@ -260,15 +286,19 @@ class AttendanceService:
                     if worked_minutes > scheduled_minutes:
                         overtime_minutes = worked_minutes - scheduled_minutes
             else:
-                # Single punch only
+                # Exactly one punch in the window: we can tell when they
+                # arrived or left, but not both — flag for manual correction.
                 status_val = "MISSED_PUNCH"
                 worked_minutes = 0
 
         else:
-            # No punches at all
+            # No punches at all — fall through the exemption ladder:
+            # approved leave beats WFH/OD, which beats holiday/weekly off.
             if leave_app:
                 status_val = "ON_LEAVE"
             elif work_arr:
+                # On-duty/field work counts as a full standard day (480 min);
+                # plain WFH shows no worked time unless punches exist.
                 status_val = "WORK_FROM_HOME" if work_arr.arrangement_type == "WORK_FROM_HOME" else "PRESENT"
                 worked_minutes = 480 if status_val == "PRESENT" else 0
             elif is_hol_or_off:
@@ -303,7 +333,8 @@ class AttendanceService:
             )
             record = await self.record_repo.create(record)
 
-        # Mark punches processed and linked
+        # Mark punches processed and linked so they are not consumed again
+        # by a later processing run.
         for p in punches:
             p.attendance_record_id = record.id
             p.is_processed = True
@@ -375,6 +406,7 @@ class AttendanceService:
             )
 
         def parse_str_time(t: str | None) -> time | None:
+            """Parse the 'HH:MM' strings submitted by the correction form."""
             if not t:
                 return None
             try:
@@ -438,7 +470,9 @@ class AttendanceService:
         correction.actioned_by = actioned_by_user_id
         correction.actioned_at = now_ist()
 
-        # Update attendance record
+        # Update attendance record: apply the corrected times and recompute
+        # worked minutes. Status is simply PRESENT — a human approver has
+        # confirmed the employee did attend; threshold logic does not re-run.
         if record:
             if correction.requested_punch_in:
                 record.punch_in = correction.requested_punch_in

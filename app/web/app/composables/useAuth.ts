@@ -1,3 +1,10 @@
+/**
+ * composable for shared authentication state.
+ *
+ * State lives in `useState` so it is shared across all components (and
+ * SSR-safe). The user is fetched once per request via the session endpoint
+ * (`/api/session/me`) and cached until `force` refresh or logout.
+ */
 import type { CurrentUser, LoginPayload } from '#shared/types/auth'
 
 export function useAuth() {
@@ -5,18 +12,29 @@ export function useAuth() {
   const user = useState<CurrentUser | null>('auth-user', () => null)
   const initialized = useState('auth-initialized', () => false)
   const loading = useState('auth-loading', () => false)
+
+  /** "First Last" for display, falling back to username, then empty. */
   const displayName = computed(() => user.value
     ? [user.value.first_name, user.value.last_name].filter(Boolean).join(' ') || user.value.username
     : '')
+  /** Up to two uppercase initials for the avatar circle. */
   const initials = computed(() => displayName.value.split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase())
+  /** Super Admin bypasses permission checks; everyone else checks their list. */
   const hasPermission = (permission: string) => Boolean(user.value?.is_superuser || user.value?.permissions?.includes(permission))
+  /** Roles matter only for non-superusers, who see every role's nav. */
   const hasRole = (role: CurrentUser['role']) => Boolean(user.value?.is_superuser || user.value?.role === role)
 
+  /**
+   * Load the signed-in user from the cookie-backed session.
+   * Cached: subsequent calls return immediately unless `force` is set
+   * (used after login/logout or a manual profile refresh).
+   */
   async function fetchUser(force = false) {
     if (initialized.value && !force) return user.value
     try {
       user.value = await requestFetch<CurrentUser>('/api/session/me')
     } catch {
+      // 401 or network error — treat as signed out rather than crashing.
       user.value = null
     } finally {
       initialized.value = true

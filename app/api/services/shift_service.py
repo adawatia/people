@@ -20,6 +20,15 @@ from schemas.shifts import (
 
 
 class ShiftService:
+    """Shift definitions, employee assignments and punch-to-shift matching.
+
+    The trickiest concept here is the "shift window": a shift on calendar
+    date D starts at its configured start_time on D and ends at end_time —
+    on D+1 when it crosses midnight (night shift). Check-in/check-out buffer
+    margins extend the window so punches slightly outside the shift still
+    match it.
+    """
+
     def __init__(self, session: AsyncSession):
         self.session = session
         self.repo = ShiftRepository(session)
@@ -54,6 +63,7 @@ class ShiftService:
         return shift
 
     async def create_shift(self, data: ShiftCreate) -> ShiftRead:
+        """Create a shift; start > end (e.g. 22:00 → 06:00) means a night shift."""
         start = self.parse_time(data.start_time)
         end = self.parse_time(data.end_time)
         if start == end:
@@ -62,6 +72,8 @@ class ShiftService:
                 detail="Shift start time and end time cannot be identical",
             )
 
+        # start_time > end_time is the convention for a shift that crosses
+        # midnight; get_shift_window uses this to push the end into the next day.
         is_cross_midnight = start > end
         payload = data.model_dump()
         payload["start_time"] = start
@@ -138,7 +150,8 @@ class ShiftService:
                 detail="effective_to date must be greater than or equal to effective_from",
             )
 
-        # Overlap check
+        # Overlap check: an employee may hold only one shift assignment at a
+        # time — two active windows would make punch resolution ambiguous.
         overlap = await self.repo.find_overlapping_assignment(
             employee_id=data.employee_id,
             effective_from=data.effective_from,
@@ -160,7 +173,8 @@ class ShiftService:
             status="ACTIVE",
         )
         created = await self.repo.create_assignment(assignment)
-        # Update default shift_id on employee if not set
+        # Backfill the employee's default shift so punches outside any
+        # assignment window still have a sensible fallback.
         if emp.shift_id is None:
             emp.shift_id = data.shift_id
 
@@ -199,17 +213,21 @@ class ShiftService:
 
         results = []
         for emp_id in emp_ids:
-            # Skip or close overlapping
+            # Bulk assignment closes overlapping assignments instead of
+            # failing: HR reassigning a whole department should succeed.
             overlap = await self.repo.find_overlapping_assignment(
                 employee_id=emp_id,
                 effective_from=data.effective_from,
                 effective_to=data.effective_to,
             )
             if overlap:
-                # Mark previous assignment as inactive or end it right before new shift
                 if overlap.effective_from < data.effective_from:
+                    # Existing assignment started earlier: end it the day
+                    # before the new one begins, preserving its history.
                     overlap.effective_to = data.effective_from - timedelta(days=1)
                 else:
+                    # Existing assignment starts inside the new period:
+                    # deactivate it entirely in favour of the new shift.
                     overlap.status = "INACTIVE"
 
             assignment = ShiftAssignment(
@@ -270,7 +288,12 @@ class ShiftService:
 
     @staticmethod
     def get_shift_window(shift: Shift, shift_date: date) -> ShiftWindowDetail:
-        """Calculates actual start and end timestamps for a shift on a given calendar date."""
+        """Calculates actual start and end timestamps for a shift on a given calendar date.
+
+        For a night shift (start 22:00, end 06:00) on D, the end lands on D+1.
+        `actual_start`/`actual_end` add the check-in/check-out buffers, giving
+        the range in which a punch is attributed to this shift.
+        """
         is_cross_midnight = shift.start_time > shift.end_time
 
         shift_start = datetime.combine(shift_date, shift.start_time)
@@ -306,7 +329,9 @@ class ShiftService:
         # before comparing them with those windows.
         timestamp = self._local_naive(timestamp)
         check_date = timestamp.date()
-        # Look for active assignments covering yesterday, today, or tomorrow
+        # A punch at 01:00 may belong to the previous day's night shift, and a
+        # punch just before a shift may belong to tomorrow's — so assignments
+        # for yesterday, today, and tomorrow are all considered.
         candidate_dates = [check_date - timedelta(days=1), check_date, check_date + timedelta(days=1)]
 
         best_match = None
@@ -319,7 +344,9 @@ class ShiftService:
                 if window.actual_start <= timestamp <= window.actual_end:
                     return window
 
-        # Fallback to employee's default shift if defined
+        # Fallback to the employee's default shift if no dated assignment
+        # matched — most employees have a fixed shift without formal
+        # assignment rows for every day.
         emp = await self.employee_repo.get_by_id(employee_id)
         if emp and emp.shift_id:
             default_shift = await self.repo.get_by_id(emp.shift_id)

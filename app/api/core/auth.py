@@ -1,3 +1,12 @@
+"""
+core/auth.py — Authentication, password policy and permission helpers.
+
+Built on fastapi-users. Login accepts email, username, or Indian mobile
+number; passwords are enforced by a strict local policy; API access is
+authorized through fixed role-based permission sets (see
+FIXED_ROLE_PERMISSIONS at the bottom of this file) or the ERP API key.
+"""
+
 import asyncio
 import secrets
 import re
@@ -30,14 +39,26 @@ settings = get_settings()
 async def get_user_db(
     session: AsyncSession = Depends(get_async_session),
 ) -> SQLAlchemyUserDatabase[User, int]:
+    """fastapi-users hook: expose the User table as its user database."""
     yield SQLAlchemyUserDatabase(session, User)
 
 
 class UserManager(IntegerIDMixin, BaseUserManager[User, int]):
+    """Core user operations: validation, authentication and lifecycle hooks."""
+
     reset_password_token_secret = settings.jwt_secret
     verification_token_secret = settings.jwt_secret
 
     async def validate_password(self, password: str, user: User | UserCreate) -> None:
+        """Enforce the password policy; called on register and password change.
+
+        Layers, in order:
+        1. Hard rules — minimum length and character-class requirements.
+        2. Personal-info check — reject passwords containing the user's own
+           email, username, or name fragments.
+        3. Strength scoring — zxcvbn (real-world crack estimation) must rate
+           the password at least 3/4, considering the personal info above.
+        """
         if not password:
             raise InvalidPasswordException(reason="Password is required")
 
@@ -88,6 +109,12 @@ class UserManager(IntegerIDMixin, BaseUserManager[User, int]):
           1. email  — if it contains '@'
           2. mobile / username — lookup
         """
+        """Override to support login by email OR mobile_number OR username.
+
+        fastapi-users sends the form `username` field. We treat it as:
+          1. email  — if it contains '@'
+          2. mobile / username — lookup
+        """
         from fastapi_users.exceptions import UserNotExists
 
         login_value: str = credentials.username.strip()
@@ -120,7 +147,9 @@ class UserManager(IntegerIDMixin, BaseUserManager[User, int]):
                 break
 
         if user is None:
-            # Run dummy hash to mitigate timing attacks (matching BaseUserManager pattern)
+            # Run dummy hash to mitigate timing attacks (matching BaseUserManager pattern):
+            # hashing even for unknown users keeps response times uniform, so an
+            # attacker cannot infer whether an account exists from latency.
             try:
                 self.password_helper.hash(credentials.password)
             except Exception:
@@ -135,6 +164,8 @@ class UserManager(IntegerIDMixin, BaseUserManager[User, int]):
         if not verified:
             return None
         if updated_hash is not None:
+            # Opportunistic hash upgrade: if the hashing scheme parameters have
+            # changed since this password was stored, persist the new hash.
             user.hashed_password = updated_hash
             try:
                 await self.user_db.update(user, {"hashed_password": updated_hash})
@@ -152,6 +183,7 @@ class UserManager(IntegerIDMixin, BaseUserManager[User, int]):
         safe: bool = False,
         request: Request | None = None,
     ) -> User:
+        """Intercept profile updates to handle email-change security."""
         original_email = user.email
 
         # Prevent manual 'is_verified=True' from overriding the unverify logic when email changes
@@ -162,9 +194,8 @@ class UserManager(IntegerIDMixin, BaseUserManager[User, int]):
         updated_user = await super().update(user_update, user, safe, request)
 
         if original_email != updated_user.email:
-            # Email has actually changed
-
-            # 1. Send Security Alert to Old Email
+            # The email actually changed: force re-verification so a stale
+            # verified flag cannot be carried over to the new address.
             updated_user.is_verified = False
 
         return updated_user
@@ -179,6 +210,7 @@ class UserManager(IntegerIDMixin, BaseUserManager[User, int]):
 async def get_user_manager(
     user_db: SQLAlchemyUserDatabase[User, int] = Depends(get_user_db),
 ) -> UserManager:
+    """fastapi-users hook: provide the request-scoped UserManager."""
     yield UserManager(user_db)
 
 
@@ -190,6 +222,7 @@ from fastapi_users.authentication import AuthenticationBackend, BearerTransport
 bearer_transport = BearerTransport(tokenUrl="/api/v1/auth/employee/login")
 
 def get_jwt_strategy() -> object:
+    """Build the JWT strategy — access tokens live 8 hours per workday."""
     from fastapi_users.authentication.strategy.jwt import JWTStrategy
 
     return JWTStrategy(secret=settings.jwt_secret, lifetime_seconds=28800)  # 8 hours
@@ -206,12 +239,18 @@ current_active_user = fastapi_users.current_user(active=True)
 
 
 async def user_has_permission(user: User, permission_code: str, session: AsyncSession) -> bool:
+    """Convenience check: does this user hold the given permission?"""
     permissions = await get_user_permissions(user, session)
     return permission_code in permissions
 
 
-
 async def get_user_permissions(user: User, session: AsyncSession) -> list[str]:
+    """Resolve the effective permission set for a user.
+
+    Permissions are derived from the fixed role on the linked Employee
+    record; Super Admins always receive the full HR_ADMIN set. Users
+    without an employee profile fall back to the plain EMPLOYEE set.
+    """
     if user.is_superuser:
         return sorted(FIXED_ROLE_PERMISSIONS["HR_ADMIN"])
 
@@ -220,8 +259,8 @@ async def get_user_permissions(user: User, session: AsyncSession) -> list[str]:
     return sorted(FIXED_ROLE_PERMISSIONS[role])
 
 
-
 def require_permission(permission_code: str):
+    """FastAPI dependency factory: allow the route only with this permission."""
     async def dependency(
         current_user: User = Depends(fastapi_users.current_user(active=True)),
         session: AsyncSession = Depends(get_async_session),
@@ -236,6 +275,9 @@ def require_permission(permission_code: str):
     return dependency
 
 
+# The single source of truth for what each business role can do.
+# Roles live on Employee.role and are provisioned by ERP; the web UI also
+# queries this mapping indirectly via /auth/account permissions.
 FIXED_ROLE_PERMISSIONS: dict[str, set[str]] = {
     "EMPLOYEE": {
         "employee.view_self", "attendance.view_self", "leave.apply", "leave.view_self",
@@ -283,6 +325,8 @@ def check_database_connection() -> None:
     _check_database_connection()
 
 
+# ── ERP machine-to-machine authentication ────────────────────────────────────
+
 api_key_header = APIKeyHeader(
     name="X-API-Key",
     auto_error=False,
@@ -291,6 +335,11 @@ api_key_header = APIKeyHeader(
 
 
 async def verify_api_key(api_key_header: str = Security(api_key_header)):
+    """Validate the ERP integration key sent in the X-API-Key header.
+
+    compare_digest runs in constant time so key length/content cannot be
+    probed via timing differences.
+    """
     expected = settings.erp_api_key or settings.api_key
     if api_key_header and secrets.compare_digest(api_key_header, expected):
         return True
