@@ -4,12 +4,10 @@ defineProps<{ compact?: boolean }>()
 
 <template>
   <div class="flex items-center gap-3">
-    <span class="grid size-9 shrink-0 place-items-center rounded-xl bg-primary text-white shadow-sm shadow-primary/20">
-      <UIcon
-        name="i-lucide-users-round"
-        class="size-5"
-      />
-    </span>
+    <picture class="block size-9 shrink-0 overflow-hidden rounded-xl shadow-sm shadow-primary/20">
+      <source media="(prefers-color-scheme: dark)" srcset="/branding/people-app-icon-dark.svg">
+      <img src="/branding/people-app-icon-light.svg" alt="People" class="size-full object-cover">
+    </picture>
     <span
       v-if="!compact"
       class="leading-none"
