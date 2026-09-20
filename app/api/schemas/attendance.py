@@ -1,5 +1,5 @@
 from datetime import date, datetime, time
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class AttendancePunchCreate(BaseModel):
@@ -11,6 +11,8 @@ class AttendancePunchCreate(BaseModel):
     source: str = "BIOMETRIC"  # "BIOMETRIC" | "MOBILE" | "WEB" | "MANUAL"
     latitude: float | None = None
     longitude: float | None = None
+    erp_event_id: str | None = None
+    model_config = ConfigDict(json_schema_extra={"example": {"employee_code": "EMP001", "punch_time": "2026-09-20T09:15:00+05:30", "punch_type": "IN", "device_id": "BIO-01", "erp_event_id": "ERP-PUNCH-1001"}})
 
 
 class BulkPunchCreate(BaseModel):
@@ -32,6 +34,8 @@ class AttendancePunchRead(BaseModel):
     latitude: float | None = None
     longitude: float | None = None
     created_at: datetime
+    erp_event_id: str | None = None
+    last_synced_at: datetime | None = None
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -47,6 +51,10 @@ class AttendanceRecordRead(BaseModel):
     overtime_minutes: int
     late_minutes: int
     early_exit_minutes: int
+    source: str = "HRMS"
+    erp_record_id: str | None = None
+    sync_status: str = "LOCAL"
+    last_synced_at: datetime | None = None
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -74,6 +82,7 @@ class AttendanceCorrectionCreate(BaseModel):
     requested_punch_in: str | None = None   # HH:MM
     requested_punch_out: str | None = None  # HH:MM
     reason: str
+    erp_correction_id: str | None = None
 
 
 class AttendanceCorrectionRead(BaseModel):
@@ -87,6 +96,8 @@ class AttendanceCorrectionRead(BaseModel):
     actioned_by: int | None = None
     actioned_at: datetime | None = None
     rejection_reason: str | None = None
+    erp_correction_id: str | None = None
+    sync_status: str = "PENDING_ERP_RECONCILIATION"
     model_config = ConfigDict(from_attributes=True)
 
     def __getitem__(self, item: str):
@@ -119,3 +130,34 @@ class ProcessAttendanceResponse(BaseModel):
     created_records: int
     updated_records: int
 
+
+class ErpAttendanceRecordCreate(BaseModel):
+    employee_id: int | None = None
+    employee_code: str | None = None
+    erp_record_id: str
+    attendance_date: date
+    status: str
+    punch_in: time | None = None
+    punch_out: time | None = None
+    worked_minutes: int = 0
+    overtime_minutes: int = 0
+    late_minutes: int = 0
+    early_exit_minutes: int = 0
+    model_config = ConfigDict(json_schema_extra={"example": {"employee_code": "EMP001", "erp_record_id": "ERP-ATT-20260920-EMP001", "attendance_date": "2026-09-20", "status": "PRESENT", "punch_in": "09:15:00", "punch_out": "18:05:00", "worked_minutes": 530}})
+
+
+class ErpCorrectionCreate(BaseModel):
+    erp_correction_id: str
+    employee_id: int | None = None
+    employee_code: str | None = None
+    attendance_date: date
+    requested_punch_in: time | None = None
+    requested_punch_out: time | None = None
+    reason: str
+    model_config = ConfigDict(json_schema_extra={"example": {"employee_code": "EMP001", "erp_correction_id": "ERP-CORR-5001", "attendance_date": "2026-09-20", "requested_punch_in": "09:00:00", "reason": "Biometric device correction"}})
+
+
+class ErpSyncResult(BaseModel):
+    accepted: list[dict] = Field(default_factory=list)
+    duplicates: list[dict] = Field(default_factory=list)
+    failed: list[dict] = Field(default_factory=list)

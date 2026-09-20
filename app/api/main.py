@@ -15,13 +15,12 @@ warnings.filterwarnings("ignore", category=DeprecationWarning, message=r".*on_ev
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, FastAPI, HTTPException, Request
+from fastapi.openapi.utils import get_openapi
 from core.auth import (
-    auth_backend,
     fastapi_users,
     limiter,
     setup_rate_limits,
 )
-from schemas import UserRead, UserUpdate
 from routers import auth_sessions
 from core.database import check_database_connection
 from core.logging import setup_logging
@@ -60,17 +59,26 @@ from fastapi.middleware.cors import CORSMiddleware
 app = FastAPI(
     title="HRMS API",
     version="0.1.0",
-    description="Human Resource Management System API: users, roles, and notifications foundation.",
+    description="People HRMS API. ERP is the source of truth for employee and organization master data.",
     docs_url="/docs",
     redoc_url="/redoc",
     openapi_url="/openapi.json",
     lifespan=lifespan,
     openapi_tags=[
-        {"name": "auth", "description": "Authentication and token management."},
-        {"name": "users", "description": "User profile management and account administration."},
-        {"name": "rbac", "description": "Dynamic scoped role assignments."},
-        {"name": "roles", "description": "Role definitions and permission metadata."},
-        {"name": "dashboard", "description": "Dynamic dashboard widget visibility."},
+        {"name": "auth-employee", "description": "Regular employee login using Indian mobile number and password."},
+        {"name": "auth-super-admin", "description": "Technical Super Admin login using username and password only."},
+        {"name": "auth-account", "description": "Authenticated account password and username management."},
+        {"name": "auth-session", "description": "Short-lived access tokens and rotating refresh sessions."},
+        {"name": "auth-hr", "description": "HR Admin temporary password operations for employee accounts."},
+        {"name": "account", "description": "The authenticated account profile and permissions. Employee provisioning is ERP-only."},
+        {"name": "employees", "description": "Read and manage employee operational records. Creation and identity provisioning are ERP-only."},
+        {"name": "erp-employees", "description": "ERP-only employee and linked-user provisioning and synchronization."},
+        {"name": "erp-organization", "description": "ERP-only updates for the single organization record."},
+        {"name": "erp-units", "description": "ERP-only unit creation, updates, and deletion."},
+        {"name": "erp-departments", "description": "ERP-only department creation, updates, and deletion."},
+        {"name": "erp-designations", "description": "ERP-only designation creation, updates, activation, and deletion."},
+        {"name": "erp-attendance", "description": "ERP-only attendance punches, records, corrections, and reconciliation."},
+        {"name": "dashboard", "description": "Operational and technical administration dashboard metrics."},
         {"name": "notifications", "description": "In-app notifications."},
     ],
 )
@@ -140,16 +148,18 @@ async def log_requests(request: Request, call_next):
 
 
 from routers import (
-    auth_invitation,
+    auth_login,
     dashboard,
     notifications,
-    roles,
     users,
     org,
     designations,
     employees,
     shifts,
     attendance,
+    erp_attendance,
+    erp_employees,
+    erp_master_data,
     leaves,
     overtime,
     holidays,
@@ -161,8 +171,7 @@ api_router = APIRouter(prefix="/api/v1")
 
 api_router.include_router(users.router)
 api_router.include_router(notifications.router)
-api_router.include_router(roles.router)
-api_router.include_router(auth_invitation.router)
+api_router.include_router(auth_login.router)
 api_router.include_router(auth_sessions.router)
 api_router.include_router(dashboard.router)
 api_router.include_router(org.router)
@@ -171,36 +180,39 @@ api_router.include_router(employees.router)
 api_router.include_router(shifts.router)
 api_router.include_router(holidays.router)
 api_router.include_router(attendance.router)
+api_router.include_router(erp_attendance.router)
+api_router.include_router(erp_employees.router)
+api_router.include_router(erp_master_data.router)
 api_router.include_router(leaves.router)
 api_router.include_router(overtime.router)
 api_router.include_router(work_arrangements.router)
 api_router.include_router(reports.router)
 
-api_router.include_router(
-    fastapi_users.get_auth_router(auth_backend),
-    prefix="/auth/jwt",
-    tags=["auth"],
-)
-
-api_router.include_router(
-    fastapi_users.get_reset_password_router(),
-    prefix="/auth",
-    tags=["auth"],
-)
-
-api_router.include_router(
-    fastapi_users.get_verify_router(UserRead),
-    prefix="/auth",
-    tags=["auth"],
-)
-
-api_router.include_router(
-    fastapi_users.get_users_router(UserRead, UserUpdate),
-    prefix="/users",
-    tags=["users"],
-)
-
 app.include_router(api_router)
+
+
+def custom_openapi() -> dict:
+    if app.openapi_schema:
+        return app.openapi_schema
+    schema = get_openapi(title=app.title, version=app.version, description=app.description, routes=app.routes, tags=app.openapi_tags)
+    schemes = schema.setdefault("components", {}).setdefault("securitySchemes", {})
+    schemes["SuperAdminOAuth2"] = {
+        "type": "oauth2",
+        "flows": {"password": {"scopes": {}, "tokenUrl": "/api/v1/auth/super-admin/login"}},
+        "description": "Super Admin username/password flow. Use the returned access token as Bearer authentication.",
+    }
+    for path_item in schema.get("paths", {}).values():
+        for operation in path_item.values():
+            if not isinstance(operation, dict):
+                continue
+            security = operation.get("security", [])
+            if any("OAuth2PasswordBearer" in item for item in security):
+                operation["security"] = [{"OAuth2PasswordBearer": []}, {"SuperAdminOAuth2": []}]
+    app.openapi_schema = schema
+    return schema
+
+
+app.openapi = custom_openapi
 
 @app.get("/")
 def root() -> dict[str, str]:

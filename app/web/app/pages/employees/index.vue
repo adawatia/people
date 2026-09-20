@@ -17,7 +17,7 @@ const page = ref(1)
 const createOpen = ref(false)
 const saving = ref(false)
 const editingId = ref<number | null>(null)
-const form = reactive({ employee_code: '', first_name: '', last_name: '', official_email: '', phone_number: '', unit_id: undefined as number | undefined, department_id: undefined as number | undefined, designation_id: undefined as number | undefined, date_of_joining: '', employment_type: 'PERMANENT', create_user_account: true, username: '', send_invitation: true, initial_password: '' })
+const form = reactive({ employee_code: '', first_name: '', last_name: '', official_email: '', phone_number: '', unit_id: undefined as number | undefined, department_id: undefined as number | undefined, designation_id: undefined as number | undefined, date_of_joining: '', employment_type: 'PERMANENT', create_user_account: true, username: '', send_invitation: false, initial_password: '' })
 let searchTimer: ReturnType<typeof setTimeout> | undefined
 watch(search, (value) => {
   clearTimeout(searchTimer)
@@ -35,11 +35,10 @@ const { data: masters } = await useAsyncData('employee-masters', async () => {
 })
 const { data, pending, error, refresh } = await useAsyncData('employees', () => api.request<EmployeePage>('employees/', { query: { page: page.value, page_size: 20, q: debouncedSearch.value || undefined, unit_id: unitId.value || undefined, department_id: departmentId.value || undefined, status: status.value === 'ALL' ? undefined : status.value } }), { watch: [page, debouncedSearch, unitId, departmentId, status] })
 const departments = computed(() => (masters.value?.departments || []).filter(item => !unitId.value || item.unit_id === unitId.value))
-const canCreate = computed(() => auth.hasPermission('employee.create'))
 const initials = (item: Employee) => `${item.first_name[0] || ''}${item.last_name?.[0] || ''}`.toUpperCase()
 function resetForm() {
   editingId.value = null
-  Object.assign(form, { employee_code: '', first_name: '', last_name: '', official_email: '', phone_number: '', unit_id: undefined, department_id: undefined, designation_id: undefined, date_of_joining: '', employment_type: 'PERMANENT', create_user_account: true, username: '', send_invitation: true, initial_password: '' })
+  Object.assign(form, { employee_code: '', first_name: '', last_name: '', official_email: '', phone_number: '', unit_id: undefined, department_id: undefined, designation_id: undefined, date_of_joining: '', employment_type: 'PERMANENT', create_user_account: true, username: '', send_invitation: false, initial_password: '' })
   createOpen.value = true
 }
 function editEmployee(item: Employee) {
@@ -85,14 +84,14 @@ async function deleteEmployee(item: Employee) {
         </h2><p class="mt-2 text-sm text-muted">
           Find people, understand reporting context, and manage employment records.
         </p>
-      </div><UButton
-        v-if="canCreate"
-        size="lg"
-        icon="i-lucide-user-round-plus"
-        @click="resetForm"
-      >
-        Add employee
-      </UButton>
+      </div><UAlert
+        class="max-w-md"
+        color="info"
+        variant="soft"
+        icon="i-lucide-database"
+        title="Employee records are managed by ERP"
+        description="Create or provision employees in ERP. Changes will sync here automatically."
+      />
     </div>
     <section class="people-card mt-7 p-4 sm:p-5">
       <div class="grid gap-3 md:grid-cols-4">
@@ -168,7 +167,7 @@ async function deleteEmployee(item: Employee) {
             :color="item.status === 'ACTIVE' ? 'success' : 'neutral'"
             variant="soft"
             size="sm"
-          >{{ item.status }}</UBadge></div><p class="mt-1 truncate text-sm text-muted">{{ item.designation_name || 'No designation' }} · {{ item.employee_code }}</p><p class="mt-1 truncate text-xs text-muted">{{ item.department_name || 'No department' }} · {{ item.unit_name || 'No unit' }}</p></div><div class="flex shrink-0 gap-1" @click.stop><UButton icon="i-lucide-pencil" color="neutral" variant="ghost" aria-label="Edit employee" title="Edit employee" @click.prevent="editEmployee(item)" /><USwitch size="sm" class="shrink-0" :model-value="item.status === 'ACTIVE'" :aria-label="item.status === 'ACTIVE' ? 'Deactivate employee' : 'Activate employee'" @update:model-value="toggleEmployee(item)" /><UButton icon="i-lucide-trash-2" color="error" variant="ghost" aria-label="Delete employee" title="Delete employee" @click.prevent="deleteEmployee(item)" /></div></NuxtLink>
+          >{{ item.status }}</UBadge></div><p class="mt-1 truncate text-sm text-muted">{{ item.designation_name || 'No designation' }} · {{ item.employee_code }}</p><p class="mt-1 truncate text-xs text-muted">{{ item.department_name || 'No department' }} · {{ item.unit_name || 'No unit' }}</p></div></NuxtLink>
         </div>
         <div class="hidden overflow-x-auto md:block">
           <table class="w-full min-w-[780px] text-left text-sm">
@@ -203,7 +202,7 @@ async function deleteEmployee(item: Employee) {
                   <span class="block">{{ item.department_name || '—' }}</span><span class="text-xs text-muted">{{ item.unit_name }}</span>
                 </td><td class="px-4 py-4">
                   {{ item.employment_type }}
-                </td><td class="px-4 py-4 text-right"><div class="flex justify-end gap-1"><UButton icon="i-lucide-pencil" color="neutral" variant="ghost" aria-label="Edit employee" title="Edit employee" @click="editEmployee(item)" /><USwitch size="sm" class="shrink-0" :model-value="item.status === 'ACTIVE'" :aria-label="item.status === 'ACTIVE' ? 'Deactivate employee' : 'Activate employee'" @update:model-value="toggleEmployee(item)" /><UButton icon="i-lucide-trash-2" color="error" variant="ghost" aria-label="Delete employee" title="Delete employee" @click="deleteEmployee(item)" /></div>
+                </td><td class="px-4 py-4 text-right">—
                 </td><td class="px-6 py-4 text-right">
                   <UBadge
                     :color="item.status === 'ACTIVE' ? 'success' : 'neutral'"
@@ -312,8 +311,7 @@ async function deleteEmployee(item: Employee) {
               <UFormField label="Username (optional)">
                 <UInput v-model="form.username" class="w-full" placeholder="Defaults to email prefix" />
               </UFormField>
-              <UCheckbox v-model="form.send_invitation" class="self-end" label="Send invitation email" />
-              <UFormField v-if="!form.send_invitation" label="Initial password" required>
+              <UFormField label="Initial password" required>
                 <UInput
                   v-model="form.initial_password"
                   class="w-full"

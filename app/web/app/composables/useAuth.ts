@@ -9,7 +9,8 @@ export function useAuth() {
     ? [user.value.first_name, user.value.last_name].filter(Boolean).join(' ') || user.value.username
     : '')
   const initials = computed(() => displayName.value.split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase())
-  const hasPermission = (permission: string) => Boolean(user.value?.is_superuser || user.value?.permissions.includes(permission))
+  const hasPermission = (permission: string) => Boolean(user.value?.is_superuser || user.value?.permissions?.includes(permission))
+  const hasRole = (role: CurrentUser['role']) => Boolean(user.value?.is_superuser || user.value?.role === role)
 
   async function fetchUser(force = false) {
     if (initialized.value && !force) return user.value
@@ -40,5 +41,5 @@ export function useAuth() {
     await navigateTo('/login')
   }
 
-  return { user, initialized, loading, displayName, initials, hasPermission, fetchUser, login, logout }
+  return { user, initialized, loading, displayName, initials, hasPermission, hasRole, fetchUser, login, logout }
 }

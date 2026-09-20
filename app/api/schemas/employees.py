@@ -1,6 +1,9 @@
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Literal
 from pydantic import BaseModel, ConfigDict, EmailStr
+
+BusinessRole = Literal["EMPLOYEE", "DEPARTMENT_MANAGER", "HR_ADMIN"]
 
 
 class ShiftRead(BaseModel):
@@ -18,6 +21,7 @@ class ShiftRead(BaseModel):
 
 class EmployeeBase(BaseModel):
     employee_code: str
+    role: BusinessRole = "EMPLOYEE"
     first_name: str
     last_name: str | None = None
     official_email: str | None = None
@@ -66,14 +70,29 @@ class EmployeeCreate(EmployeeBase):
 
 
 class EmployeeOnboardingCreate(EmployeeCreate):
-    """Employee HR record plus optional portal-account provisioning."""
+    """Employee HR record plus its required portal-account provisioning."""
     create_user_account: bool = True
     username: str | None = None
-    send_invitation: bool = True
+    send_invitation: bool = False
     initial_password: str | None = None
+    model_config = ConfigDict(json_schema_extra={"example": {
+        "employee_code": "EMP001", "role": "EMPLOYEE", "first_name": "Rahul", "last_name": "Sharma",
+        "official_email": "rahul.sharma@example.com", "personal_email": "rahul.personal@example.com",
+        "phone_number": "9876543210", "date_of_birth": "1992-04-15", "gender": "MALE", "marital_status": "MARRIED", "blood_group": "O+",
+        "emergency_contact_name": "Priya Sharma", "emergency_contact_phone": "9876501234", "emergency_contact_relation": "Spouse",
+        "current_address": "Andheri East, Mumbai", "permanent_address": "Jaipur, Rajasthan",
+        "pan_number": "ABCDE1234F", "aadhaar_number": "123456789012",
+        "bank_name": "Example Bank", "bank_account_number": "123456789012", "bank_ifsc_code": "EXMP0001234",
+        "designation": "Senior Engineer", "designation_id": 1, "date_of_joining": "2026-09-20", "employment_type": "PERMANENT",
+        "status": "ACTIVE", "biometric_id": "BIO-EMP001", "overtime_eligible": True,
+        "unit_id": 1, "department_id": 1, "shift_id": None, "reporting_manager_id": None, "monthly_salary": None,
+        "user_id": None, "create_user_account": True, "username": "rahul.sharma", "send_invitation": False,
+        "initial_password": "StrongPassword@123"
+    }})
 
 
 class EmployeeUpdate(BaseModel):
+    role: BusinessRole | None = None
     first_name: str | None = None
     last_name: str | None = None
     official_email: str | None = None
@@ -112,6 +131,18 @@ class EmployeeUpdate(BaseModel):
     monthly_salary: float | None = None
     exit_date: date | None = None
     exit_reason: str | None = None
+    model_config = ConfigDict(json_schema_extra={"example": {
+        "role": "EMPLOYEE", "first_name": "Rahul", "last_name": "Sharma",
+        "official_email": "rahul.sharma@example.com", "personal_email": "rahul.personal@example.com", "phone_number": "9876543210",
+        "date_of_birth": "1992-04-15", "gender": "MALE", "marital_status": "MARRIED", "blood_group": "O+",
+        "emergency_contact_name": "Priya Sharma", "emergency_contact_phone": "9876501234", "emergency_contact_relation": "Spouse",
+        "current_address": "Andheri East, Mumbai", "permanent_address": "Jaipur, Rajasthan",
+        "pan_number": "ABCDE1234F", "aadhaar_number": "123456789012", "bank_name": "Example Bank",
+        "bank_account_number": "123456789012", "bank_ifsc_code": "EXMP0001234", "designation": "Senior Engineer", "designation_id": 1,
+        "date_of_joining": "2026-09-20", "employment_type": "PERMANENT", "status": "ACTIVE", "biometric_id": "BIO-EMP001",
+        "overtime_eligible": True, "department_id": 1, "unit_id": 1, "shift_id": None, "reporting_manager_id": None,
+        "monthly_salary": None, "exit_date": None, "exit_reason": None
+    }})
 
 
 class EmployeeDeactivateRequest(BaseModel):
@@ -153,7 +184,20 @@ class EmployeeRead(EmployeeBase):
     designation_name: str | None = None
     reporting_manager_name: str | None = None
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, json_schema_extra={"example": {
+        "employee_code": "EMP001", "role": "EMPLOYEE", "first_name": "Rahul", "last_name": "Sharma",
+        "official_email": "rahul.sharma@example.com", "personal_email": None, "phone_number": "9876543210",
+        "date_of_birth": "1992-04-15", "gender": "MALE", "marital_status": "MARRIED", "blood_group": "O+",
+        "emergency_contact_name": "Priya Sharma", "emergency_contact_phone": "9876501234", "emergency_contact_relation": "Spouse",
+        "current_address": "Andheri East, Mumbai", "permanent_address": "Jaipur, Rajasthan", "pan_number": "ABCDE1234F", "aadhaar_number": None,
+        "bank_name": "Example Bank", "bank_account_number": None, "bank_ifsc_code": None, "designation": "Senior Engineer", "designation_id": 1,
+        "date_of_joining": "2026-09-20", "employment_type": "PERMANENT", "status": "ACTIVE", "biometric_id": "BIO-EMP001",
+        "overtime_eligible": True, "id": 1, "user_id": 5, "department_id": 1, "unit_id": 1, "shift_id": None,
+        "reporting_manager_id": None, "monthly_salary": None, "exit_date": None, "exit_reason": None,
+        "created_at": "2026-09-20T23:49:36.607372+05:30", "updated_at": "2026-09-20T23:49:36.607377+05:30",
+        "full_name": "Rahul Sharma", "department_name": "Engineering", "unit_name": "Mumbai Unit", "shift_name": None,
+        "designation_name": "Senior Engineer", "reporting_manager_name": None
+    }})
 
 
 class PaginatedEmployeesResponse(BaseModel):

@@ -8,7 +8,7 @@ from sqlalchemy import func, select
 
 from core.auth import UserManager
 from core.database import async_session_maker
-from db.models import Role, User
+from db.models import User
 
 
 async def reset_super_admin_password():
@@ -37,14 +37,8 @@ async def reset_super_admin_password():
             print(f"Error: User '{email_or_username}' not found.")
             sys.exit(1)
             
-        # Verify if the user is a super admin
-        if not user.role_id:
-            print("Error: User does not have a role assigned.")
-            sys.exit(1)
-            
-        role = await session.get(Role, user.role_id)
-        if not role or role.role_name != "SUPER_ADMIN":
-            print(f"Error: User '{email_or_username}' is not a Super Admin (current role: {role.role_name if role else 'None'}).")
+        if not user.is_superuser:
+            print(f"Error: User '{email_or_username}' is not a Super Admin.")
             sys.exit(1)
             
         print(f"Found Super Admin account: {user.email}")

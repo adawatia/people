@@ -4,7 +4,7 @@ from datetime import datetime, date, time
 from zoneinfo import ZoneInfo
 
 from fastapi_users.db import SQLAlchemyBaseUserTable
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, Time
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, Time, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -18,75 +18,11 @@ class Base(DeclarativeBase):
     pass
 
 
-class Permission(Base):
-    __tablename__ = "permissions"
-
-    permission_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True, index=True)
-    permission_code: Mapped[str] = mapped_column(String(120), unique=True, nullable=False, index=True)
-    name: Mapped[str] = mapped_column(String(120), nullable=False)
-    description: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    is_system_permission: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_ist)
-
-    role_links: Mapped[list[RolePermission]] = relationship(back_populates="permission", cascade="all, delete-orphan")
-
-
-class RolePermission(Base):
-    __tablename__ = "role_permissions"
-
-    role_id: Mapped[int] = mapped_column(ForeignKey("roles.role_id", ondelete="CASCADE"), primary_key=True)
-    permission_id: Mapped[int] = mapped_column(
-        ForeignKey("permissions.permission_id", ondelete="CASCADE"), primary_key=True
-    )
-    granted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_ist)
-
-    role: Mapped[Role] = relationship(back_populates="permission_links")
-    permission: Mapped[Permission] = relationship(back_populates="role_links")
-
-
-class UserRoleAssignment(Base):
-    """Dynamic scoped role assignment.
-
-    scope_type: 'organization' | 'unit' | 'department'
-    scope_id:   The specific unit/department id, or NULL when scope_type='organization'.
-    """
-
-    __tablename__ = "user_role_assignments"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True, index=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True)
-    role_id: Mapped[int] = mapped_column(ForeignKey("roles.role_id", ondelete="CASCADE"), nullable=False, index=True)
-    scope_type: Mapped[str] = mapped_column(String(32), nullable=False, default="organization")  # organization | unit | department
-    scope_id: Mapped[int | None] = mapped_column(Integer, nullable=True)  # null = org-wide
-    assigned_by: Mapped[int | None] = mapped_column(ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True)
-    assigned_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_ist)
-
-    user: Mapped[User] = relationship("User", foreign_keys=[user_id], back_populates="role_assignments")
-    role: Mapped[Role] = relationship(back_populates="user_assignments")
-
-
-class Role(Base):
-    """HRMS RBAC role. Generic, not tied to any org node. Scope is applied at assignment time."""
-
-    __tablename__ = "roles"
-    __table_args__ = {"comment": "HRMS role definitions — owned exclusively by Super Admin"}
-
-    role_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True, index=True)
-    role_name: Mapped[str] = mapped_column(String(80), unique=True, nullable=False, index=True)
-    description: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    is_system_role: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_ist)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_ist, onupdate=now_ist)
-
-    permission_links: Mapped[list[RolePermission]] = relationship(back_populates="role", cascade="all, delete-orphan")
-    user_assignments: Mapped[list[UserRoleAssignment]] = relationship(back_populates="role", cascade="all, delete-orphan")
-
-
 class User(SQLAlchemyBaseUserTable[int], Base):
     """HRMS portal user. Login via email or mobile_number + password."""
 
     __tablename__ = "users"
-    __table_args__ = {"comment": "HRMS users — scoped RBAC via user_role_assignments"}
+    __table_args__ = {"comment": "HRMS portal users"}
 
     id: Mapped[int] = mapped_column("user_id", Integer, primary_key=True, autoincrement=True, index=True)
     username: Mapped[str] = mapped_column(String(120), unique=True, nullable=False, index=True)
@@ -104,20 +40,9 @@ class User(SQLAlchemyBaseUserTable[int], Base):
     invitation_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     invitation_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    role_assignments: Mapped[list[UserRoleAssignment]] = relationship(
-        "UserRoleAssignment", foreign_keys="[UserRoleAssignment.user_id]", back_populates="user", cascade="all, delete-orphan"
-    )
-
     @property
     def is_super_admin(self) -> bool:
-        """True if the user holds an org-wide SUPER_ADMIN assignment or the is_superuser flag."""
-        try:
-            from sqlalchemy.exc import MissingGreenlet  # noqa: PLC0415
-            for assignment in self.role_assignments:
-                if assignment.role and assignment.role.role_name == "SUPER_ADMIN":
-                    return True
-        except MissingGreenlet:
-            pass
+        """Technical administrator flag; business roles are stored on Employee."""
         return bool(self.is_superuser)
 
 
@@ -166,8 +91,10 @@ class Notification(Base):
 
 class Organization(Base):
     __tablename__ = "organizations"
+    __table_args__ = (UniqueConstraint("singleton_key"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    singleton_key: Mapped[int] = mapped_column(Integer, default=1, server_default="1", nullable=False)
     name: Mapped[str] = mapped_column(String(200), unique=True, nullable=False)
     short_name: Mapped[str | None] = mapped_column(String(50), nullable=True)
     industry: Mapped[str | None] = mapped_column(String(100), nullable=True)
@@ -182,6 +109,7 @@ class Organization(Base):
     website: Mapped[str | None] = mapped_column(String(255), nullable=True)
     tax_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_ist)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_ist, onupdate=now_ist)
 
     units: Mapped[list[Unit]] = relationship(back_populates="organization", cascade="all, delete-orphan")
 
@@ -196,6 +124,7 @@ class Unit(Base):
     city: Mapped[str | None] = mapped_column(String(100), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_ist)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_ist, onupdate=now_ist)
 
     organization: Mapped[Organization] = relationship(back_populates="units")
     departments: Mapped[list[Department]] = relationship(back_populates="unit", cascade="all, delete-orphan")
@@ -211,6 +140,7 @@ class Department(Base):
     code: Mapped[str | None] = mapped_column(String(30), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_ist)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_ist, onupdate=now_ist)
 
     unit: Mapped[Unit] = relationship(back_populates="departments")
     employees: Mapped[list[Employee]] = relationship(back_populates="department")
@@ -226,6 +156,7 @@ class Designation(Base):
     description: Mapped[str | None] = mapped_column(String(255), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_ist)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_ist, onupdate=now_ist)
 
     employees: Mapped[list[Employee]] = relationship(back_populates="designation_rel")
 
@@ -254,6 +185,7 @@ class Employee(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int | None] = mapped_column(ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True, unique=True, index=True)
     employee_code: Mapped[str] = mapped_column(String(30), unique=True, nullable=False, index=True)
+    role: Mapped[str] = mapped_column(String(30), default="EMPLOYEE", nullable=False, index=True)
 
     # Basic Profile
     first_name: Mapped[str] = mapped_column(String(100), default="", nullable=False)
@@ -556,6 +488,7 @@ class WorkArrangementRequest(Base):
 
 class AttendanceRecord(Base):
     __tablename__ = "attendance_records"
+    __table_args__ = (UniqueConstraint("employee_id", "attendance_date", name="uq_attendance_employee_date"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     employee_id: Mapped[int] = mapped_column(ForeignKey("employees.id", ondelete="CASCADE"), nullable=False, index=True)
@@ -568,6 +501,10 @@ class AttendanceRecord(Base):
     overtime_minutes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     late_minutes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     early_exit_minutes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    source: Mapped[str] = mapped_column(String(30), default="HRMS", nullable=False)
+    erp_record_id: Mapped[str | None] = mapped_column(String(120), unique=True, nullable=True, index=True)
+    sync_status: Mapped[str] = mapped_column(String(30), default="LOCAL", nullable=False)
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     employee: Mapped[Employee] = relationship()
     shift: Mapped[Shift | None] = relationship()
@@ -583,6 +520,8 @@ class AttendancePunch(Base):
     punch_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     punch_type: Mapped[str] = mapped_column(String(10), nullable=False)  # 'IN' or 'OUT'
     source: Mapped[str] = mapped_column(String(50), default="BIOMETRIC", nullable=False)
+    erp_event_id: Mapped[str | None] = mapped_column(String(120), unique=True, nullable=True, index=True)
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     device_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     # Resolved shift window at punch time
@@ -627,6 +566,8 @@ class AttendanceCorrectionRequest(Base):
     actioned_by: Mapped[int | None] = mapped_column(ForeignKey("users.user_id"), nullable=True)
     actioned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    erp_correction_id: Mapped[str | None] = mapped_column(String(120), unique=True, nullable=True, index=True)
+    sync_status: Mapped[str] = mapped_column(String(30), default="PENDING_ERP_RECONCILIATION", nullable=False)
 
     attendance_record: Mapped[AttendanceRecord] = relationship()
 

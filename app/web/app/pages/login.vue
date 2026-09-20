@@ -3,13 +3,15 @@ definePageMeta({ layout: false })
 useSeoMeta({ title: 'Sign in' })
 const route = useRoute()
 const auth = useAuth()
-const form = reactive({ identity: '', password: '' })
+const form = reactive({ identity: '', password: '', accountType: 'employee' as 'employee' | 'super_admin' })
 const errorMessage = ref('')
 const showPassword = ref(false)
 async function submit() {
   errorMessage.value = ''
   if (!form.identity.trim() || !form.password) {
-    errorMessage.value = 'Enter your email, username or mobile number and password.'
+    errorMessage.value = form.accountType === 'employee'
+      ? 'Enter your 10-digit Indian mobile number and password.'
+      : 'Enter your username and password.'
     return
   }
   try {
@@ -54,14 +56,14 @@ async function submit() {
           Sign in to People
         </h2>
         <p class="mt-3 text-sm leading-6 text-muted">
-          Use your work email, username or mobile number.
+          {{ form.accountType === 'employee' ? 'Employees sign in with their mobile number.' : 'Technical access uses a username and password.' }}
         </p>
         <form
           class="mt-9 space-y-5"
           @submit.prevent="submit"
         >
           <UFormField
-            label="Email, username or mobile"
+            :label="form.accountType === 'employee' ? 'Mobile number' : 'Username'"
             name="identity"
             required
           >
@@ -69,9 +71,9 @@ async function submit() {
               v-model="form.identity"
               class="w-full"
               size="xl"
-              icon="i-lucide-user-round"
+              :icon="form.accountType === 'employee' ? 'i-lucide-phone' : 'i-lucide-user-round'"
               autocomplete="username"
-              placeholder="you@company.com"
+              :placeholder="form.accountType === 'employee' ? '9876543210' : 'Enter username'"
               autofocus
             />
           </UFormField>
@@ -104,11 +106,17 @@ async function submit() {
               </template>
             </UInput>
           </UFormField>
-          <div class="flex justify-end">
-            <NuxtLink
-              to="/forgot-password"
-              class="text-sm font-medium text-primary hover:underline"
-            >Forgot password?</NuxtLink>
+          <div class="flex items-center justify-between">
+            <UButton
+              type="button"
+              variant="link"
+              size="sm"
+              class="px-0"
+              @click="form.accountType = form.accountType === 'employee' ? 'super_admin' : 'employee'"
+            >
+              {{ form.accountType === 'employee' ? 'Super Admin login' : 'Employee login' }}
+            </UButton>
+            <span class="text-xs text-muted">Password reset: contact HR</span>
           </div>
           <UAlert
             v-if="errorMessage"

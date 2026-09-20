@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import (
     AttendanceCorrectionRequest,
+    now_ist,
     AttendancePunch,
     AttendanceRecord,
     Employee,
@@ -60,6 +61,10 @@ class AttendanceService:
             punch_time=data.punch_time,
             punch_type=data.punch_type,
         )
+        if data.erp_event_id:
+            duplicate = await self.session.scalar(
+                select(AttendancePunch).where(AttendancePunch.erp_event_id == data.erp_event_id)
+            ) or duplicate
         if duplicate:
             return AttendancePunchRead.model_validate(duplicate)
 
@@ -75,6 +80,8 @@ class AttendanceService:
             punch_type=data.punch_type.upper(),
             device_id=data.device_id,
             source=data.source.upper(),
+            erp_event_id=data.erp_event_id,
+            last_synced_at=now_ist() if data.erp_event_id else None,
             latitude=data.latitude,
             longitude=data.longitude,
             shift_id=shift_window.shift_id if shift_window else None,
@@ -133,6 +140,11 @@ class AttendanceService:
         """
         existing_record = await self.record_repo.get_by_employee_and_date(employee.id, target_date)
         is_created = existing_record is None
+
+        # ERP-finalized records are the source of truth and must not be replaced
+        # by the local calculation pass.
+        if existing_record and existing_record.sync_status == "ERP_CONFIRMED":
+            return existing_record, False
 
         # 1. Resolve Shift
         assignments = await self.shift_service.repo.list_active_assignments_for_date(employee.id, target_date)
@@ -286,6 +298,7 @@ class AttendanceService:
                 overtime_minutes=overtime_minutes,
                 late_minutes=late_minutes,
                 early_exit_minutes=early_exit_minutes,
+                source="HRMS",
             )
             record = await self.record_repo.create(record)
 
@@ -363,15 +376,36 @@ class AttendanceService:
         def parse_str_time(t: str | None) -> time | None:
             if not t:
                 return None
-            parts = t.strip().split(":")
-            return time(int(parts[0]), int(parts[1]))
+            try:
+                parts = t.strip().split(":")
+                if len(parts) != 2:
+                    raise ValueError
+                return time(int(parts[0]), int(parts[1]))
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=400, detail="Time must use HH:MM format") from exc
+
+        requested_in = parse_str_time(data.requested_punch_in)
+        requested_out = parse_str_time(data.requested_punch_out)
+        if requested_in is None and requested_out is None:
+            raise HTTPException(status_code=400, detail="At least one corrected punch time is required")
+        if requested_in and requested_out and requested_out <= requested_in:
+            raise HTTPException(status_code=400, detail="Punch-out time must be later than punch-in time")
+
+        existing = await self.session.scalar(select(AttendanceCorrectionRequest).where(
+            AttendanceCorrectionRequest.attendance_record_id == record.id,
+            AttendanceCorrectionRequest.status == "PENDING",
+        ))
+        if existing:
+            raise HTTPException(status_code=409, detail="A correction request is already pending for this attendance record")
 
         correction = AttendanceCorrectionRequest(
             attendance_record_id=record.id,
-            requested_punch_in=parse_str_time(data.requested_punch_in),
-            requested_punch_out=parse_str_time(data.requested_punch_out),
+            requested_punch_in=requested_in,
+            requested_punch_out=requested_out,
             reason=data.reason,
             status="PENDING",
+            erp_correction_id=data.erp_correction_id,
+            sync_status="PENDING_ERP_RECONCILIATION",
         )
         created = await self.record_repo.create_correction(correction)
         await self.session.commit()
@@ -401,7 +435,7 @@ class AttendanceService:
 
         correction.status = "APPROVED"
         correction.actioned_by = actioned_by_user_id
-        correction.actioned_at = datetime.now()
+        correction.actioned_at = now_ist()
 
         # Update attendance record
         if record:
@@ -411,9 +445,8 @@ class AttendanceService:
                 record.punch_out = correction.requested_punch_out
 
             if record.punch_in and record.punch_out:
-                today = date.today()
-                start_dt = datetime.combine(today, record.punch_in)
-                end_dt = datetime.combine(today, record.punch_out)
+                start_dt = datetime.combine(record.attendance_date, record.punch_in)
+                end_dt = datetime.combine(record.attendance_date, record.punch_out)
                 if end_dt > start_dt:
                     total_min = int((end_dt - start_dt).total_seconds() / 60)
                     record.worked_minutes = max(0, total_min)
@@ -451,7 +484,7 @@ class AttendanceService:
 
         correction.status = "REJECTED"
         correction.actioned_by = actioned_by_user_id
-        correction.actioned_at = datetime.now()
+        correction.actioned_at = now_ist()
         correction.rejection_reason = rejection_reason
         await self.session.commit()
         await self.session.refresh(correction)

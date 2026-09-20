@@ -16,8 +16,11 @@ const navItems: NavItem[] = [
   { label: 'Organization', icon: 'i-lucide-building-2', to: '/organization', permissions: ['system.configure', 'designation.view', 'employee.view'] },
   { label: 'Reports', icon: 'i-lucide-chart-no-axes-combined', to: '/reports', permissions: ['reports.attendance', 'reports.leave'] }
 ]
-const visibleItems = computed(() => navItems.filter(item => !item.permissions || item.permissions.some(auth.hasPermission)))
-const pageTitle = computed(() => navItems.find(item => item.to === route.path)?.label || 'People')
+const isTechnicalAdmin = computed(() => Boolean(auth.user.value?.is_superuser))
+const visibleItems = computed(() => isTechnicalAdmin.value
+  ? [{ label: 'Dashboard', icon: 'i-lucide-layout-dashboard', to: '/' }]
+  : navItems.filter(item => !item.permissions || item.permissions.some(auth.hasPermission)))
+const pageTitle = computed(() => route.path === '/settings' ? 'System administration' : navItems.find(item => item.to === route.path)?.label || 'People')
 watch(() => route.fullPath, () => {
   mobileOpen.value = false
 })
@@ -51,7 +54,7 @@ watch(() => route.fullPath, () => {
         class="mt-9 flex-1 space-y-1"
         aria-label="Primary navigation"
       >
-        <NuxtLink
+          <NuxtLink
           v-for="item in visibleItems"
           :key="item.to"
           :to="item.to"
@@ -62,6 +65,14 @@ watch(() => route.fullPath, () => {
             :name="item.icon"
             class="size-[18px] shrink-0"
           />{{ item.label }}
+        </NuxtLink>
+        <NuxtLink
+          v-if="isTechnicalAdmin"
+          to="/settings"
+          class="flex min-h-11 items-center gap-3 rounded-xl px-3 text-sm font-medium transition-colors"
+          :class="route.path === '/settings' ? 'bg-[var(--people-lavender)] text-primary-700 dark:text-primary-300' : 'text-muted hover:bg-muted/10 hover:text-highlighted'"
+        >
+          <UIcon name="i-lucide-shield-check" class="size-[18px] shrink-0" />System administration
         </NuxtLink>
       </nav>
       <div class="border-t border-[var(--people-border)] pt-4">

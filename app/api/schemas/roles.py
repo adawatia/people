@@ -31,6 +31,9 @@ class RoleUpdate(BaseModel):
     permission_codes: list[str] | None = None
 
 
+FIXED_BUSINESS_ROLES = ("EMPLOYEE", "DEPARTMENT_MANAGER", "HR_ADMIN")
+
+
 class RoleAssignment(BaseModel):
     """Legacy: assign role_ids to a user (flat, no scope). Prefer UserRoleAssignment for new code."""
     role_ids: list[int] = Field(default_factory=list, min_length=1)

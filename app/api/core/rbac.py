@@ -15,10 +15,9 @@ from typing import Literal
 from fastapi import Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from core.database import get_async_session
-from db.models import Permission, Role, RolePermission, User, UserRoleAssignment
+from db.models import Employee, User
 
 ScopeLevel = Literal["department", "unit", "organization"]
 
@@ -41,45 +40,22 @@ def scope_satisfies(user_max_scope: ScopeLevel | None, required_min_scope: Scope
     return scope_level(user_max_scope) >= scope_level(required_min_scope)
 
 
-async def get_user_role_assignments(
-    user_id: int, session: AsyncSession
-) -> list[UserRoleAssignment]:
-    """Load all role assignments for a user, with role and permissions eager-loaded."""
-    result = await session.execute(
-        select(UserRoleAssignment)
-        .options(
-            selectinload(UserRoleAssignment.role).selectinload(Role.permission_links).selectinload(RolePermission.permission)
-        )
-        .where(UserRoleAssignment.user_id == user_id)
-    )
-    return list(result.scalars().all())
-
-
 async def get_effective_permissions(user_id: int, session: AsyncSession) -> set[str]:
-    """Return the union of all permission codes across all of a user's role assignments."""
-    assignments = await get_user_role_assignments(user_id, session)
-    permissions: set[str] = set()
-    for assignment in assignments:
-        if assignment.role:
-            for link in assignment.role.permission_links:
-                if link.permission:
-                    permissions.add(link.permission.permission_code)
-    return permissions
+    from core.auth import get_user_permissions
+    user = await session.get(User, user_id)
+    return set(await get_user_permissions(user, session)) if user else set()
 
 
 async def get_max_scope_level(user_id: int, session: AsyncSession) -> ScopeLevel | None:
-    """Return the broadest scope level the user holds (organization > unit > department)."""
-    assignments = await get_user_role_assignments(user_id, session)
-    if not assignments:
-        return None
-    max_level = -1
-    max_scope: ScopeLevel | None = None
-    for assignment in assignments:
-        lvl = scope_level(assignment.scope_type)  # type: ignore[arg-type]
-        if lvl > max_level:
-            max_level = lvl
-            max_scope = assignment.scope_type  # type: ignore[assignment]
-    return max_scope
+    user = await session.get(User, user_id)
+    employee = await session.scalar(select(Employee).where(Employee.user_id == user_id))
+    if user and user.is_superuser:
+        return "organization"
+    if employee and employee.role == "HR_ADMIN":
+        return "unit"
+    if employee and employee.role == "DEPARTMENT_MANAGER":
+        return "department"
+    return None
 
 
 async def has_permission(
@@ -96,23 +72,13 @@ async def has_permission(
 
     Super Admin (is_superuser=True) always returns True.
     """
-    if user.is_superuser:
+    from core.auth import user_has_permission
+    if not await user_has_permission(user, permission_code, session):
+        return False
+    if scope_type is None:
         return True
-
-    assignments = await get_user_role_assignments(user.id, session)
-    for assignment in assignments:
-        # Scope check: if caller specifies a required scope, must match or be broader
-        if scope_type is not None:
-            if scope_level(assignment.scope_type) < scope_level(scope_type):  # type: ignore[arg-type]
-                continue
-            if scope_id is not None and assignment.scope_id is not None and assignment.scope_id != scope_id:
-                continue
-
-        if assignment.role:
-            for link in assignment.role.permission_links:
-                if link.permission and link.permission.permission_code == permission_code:
-                    return True
-    return False
+    maximum = await get_max_scope_level(user.id, session)
+    return maximum is not None and scope_satisfies(maximum, scope_type)
 
 
 async def require_rbac_permission(

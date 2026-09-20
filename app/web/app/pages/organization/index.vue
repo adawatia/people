@@ -6,15 +6,12 @@ import type { Department, Designation, Organization, Unit } from '#shared/types/
 type Tab = 'units' | 'departments' | 'designations'
 useSeoMeta({ title: 'Organization' })
 const api = useHrmsApi()
-const auth = useAuth()
 const toast = useToast()
 const activeTab = ref<Tab>('units')
 const createOpen = ref(false)
 const saving = ref(false)
 const editingId = ref<number | null>(null)
 const form = reactive({ name: '', code: '', city: '', description: '', unit_id: undefined as number | undefined })
-const canConfigure = computed(() => auth.hasPermission('system.configure'))
-const canCreateDesignation = computed(() => auth.hasPermission('designation.create'))
 const { data, pending, error, refresh } = await useAsyncData('organization-workspace', async () => {
   const [organization, units, departments, designations] = await Promise.all([api.request<Organization>('org/organization'), api.request<Unit[]>('org/units'), api.request<Department[]>('org/departments'), api.request<Designation[]>('designations/')])
   return { organization, units, departments, designations }
@@ -60,7 +57,6 @@ async function deleteItem(item: Unit | Department | Designation) {
   if (!confirm(`Delete ${item.name}? This cannot be undone.`)) return
   try { await api.request(itemPath(item.id), { method: 'DELETE' }); toast.add({ title: `${item.name} deleted`, color: 'success' }); await refresh() } catch (deleteError) { const candidate = deleteError as { data?: { detail?: string, statusMessage?: string } }; toast.add({ title: 'Could not delete item', description: candidate.data?.detail || candidate.data?.statusMessage, color: 'error' }) }
 }
-const canAdd = computed(() => activeTab.value === 'designations' ? canCreateDesignation.value : canConfigure.value)
 </script>
 
 <template>
@@ -72,16 +68,9 @@ const canAdd = computed(() => activeTab.value === 'designations' ? canCreateDesi
         </p><h2 class="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">
           Organization
         </h2><p class="mt-2 text-sm text-muted">
-          Manage operating units, departments, and the designation catalogue.
+          Organization structure is synchronized from ERP and shown here as read-only data.
         </p>
-      </div><UButton
-        v-if="canAdd"
-        size="lg"
-        icon="i-lucide-plus"
-        @click="openCreate"
-      >
-        Add {{ activeTab.slice(0, -1) }}
-      </UButton>
+      </div><UBadge color="info" variant="soft" icon="i-lucide-database">Managed by ERP</UBadge>
     </div>
     <section class="mt-7 grid gap-4 sm:grid-cols-3">
       <article
@@ -158,7 +147,7 @@ const canAdd = computed(() => activeTab.value === 'designations' ? canCreateDesi
           {{ item.code || 'No code' }}<span v-if="item.city"> · {{ item.city }}</span>
         </p><div class="mt-5 flex items-center gap-2 text-sm text-muted">
           <UIcon name="i-lucide-network" />{{ item.departments?.length || data?.departments.filter(dept => dept.unit_id === item.id).length || 0 }} departments
-        </div><div class="mt-5 flex justify-end gap-1">
+        </div><div v-if="false" class="mt-5 flex justify-end gap-1">
           <UButton icon="i-lucide-pencil" color="neutral" variant="ghost" aria-label="Edit unit" title="Edit unit" @click="openEdit(item)" /><USwitch size="sm" class="shrink-0" :model-value="item.is_active" :aria-label="item.is_active ? 'Disable unit' : 'Enable unit'" @update:model-value="toggleItem(item)" /><UButton icon="i-lucide-trash-2" color="error" variant="ghost" aria-label="Delete unit" title="Delete unit" @click="deleteItem(item)" />
         </div>
       </article>
@@ -184,7 +173,7 @@ const canAdd = computed(() => activeTab.value === 'designations' ? canCreateDesi
             variant="soft"
           >
             {{ item.is_active ? 'Active' : 'Inactive' }}
-          </UBadge><div class="flex shrink-0 gap-1">
+          </UBadge><div v-if="false" class="flex shrink-0 gap-1">
             <UButton icon="i-lucide-pencil" color="neutral" variant="ghost" aria-label="Edit department" title="Edit department" @click="openEdit(item)" /><USwitch size="sm" class="shrink-0" :model-value="item.is_active" :aria-label="item.is_active ? 'Disable department' : 'Enable department'" @update:model-value="toggleItem(item)" /><UButton icon="i-lucide-trash-2" color="error" variant="ghost" aria-label="Delete department" title="Delete department" @click="deleteItem(item)" />
           </div>
         </article>
@@ -212,9 +201,7 @@ const canAdd = computed(() => activeTab.value === 'designations' ? canCreateDesi
           {{ item.code || 'No code' }}
         </p><p class="mt-3 line-clamp-2 text-sm text-muted">
           {{ item.description || 'No description provided.' }}
-        </p><div class="mt-4 flex justify-end gap-1">
-          <UButton icon="i-lucide-pencil" color="neutral" variant="ghost" aria-label="Edit designation" title="Edit designation" @click="openEdit(item)" /><USwitch size="sm" class="shrink-0" :model-value="item.is_active" :aria-label="item.is_active ? 'Disable designation' : 'Enable designation'" @update:model-value="toggleItem(item)" /><UButton icon="i-lucide-trash-2" color="error" variant="ghost" aria-label="Delete designation" title="Delete designation" @click="deleteItem(item)" />
-        </div>
+        </p><p class="mt-4 flex items-center justify-end gap-2 text-xs text-muted"><UIcon name="i-lucide-refresh-cw" />Managed by ERP</p>
       </article>
     </section>
     <USlideover

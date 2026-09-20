@@ -18,8 +18,9 @@ export interface CurrentUser {
   is_superuser: boolean
   is_verified: boolean
   must_change_password: boolean
-  assignments: RoleAssignment[]
-  permissions: string[]
+  role: 'EMPLOYEE' | 'DEPARTMENT_MANAGER' | 'HR_ADMIN' | 'SUPER_ADMIN'
+  assignments?: RoleAssignment[]
+  permissions?: string[]
   employee_id?: number | null
   employee_code?: string | null
 }
@@ -27,4 +28,5 @@ export interface CurrentUser {
 export interface LoginPayload {
   identity: string
   password: string
+  accountType?: 'employee' | 'super_admin'
 }

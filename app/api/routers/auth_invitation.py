@@ -1,10 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi_users import exceptions as fu_exceptions
 from fastapi_users.password import PasswordHelper
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import UserManager, get_user_manager
-from db.models import AuthSession, Role
+from db.models import AuthSession, Employee
 from sqlalchemy import update
 from core.database import get_async_session
 from core.invitation import find_user_by_invitation_token
@@ -30,11 +31,8 @@ async def validate_invitation_token(
             detail=error or "Invitation link is invalid or expired.",
         )
 
-    role_name = None
-    if user.role_id:
-        role = await session.get(Role, user.role_id)
-        if role:
-            role_name = role.role_name
+    employee = await session.scalar(select(Employee).where(Employee.user_id == user.id))
+    role_name = employee.role if employee else "EMPLOYEE"
 
     return ValidateInvitationResponse(
         valid=True,

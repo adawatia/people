@@ -160,7 +160,16 @@ function hasPendingCorrection(recordId: number) {
     </div>
 
     <UAlert
-      v-if="!employeeId"
+      v-if="auth.user.value?.is_superuser"
+      class="mt-6"
+      color="info"
+      variant="soft"
+      icon="i-lucide-shield-check"
+      title="Technical account"
+      description="This account is not an employee and does not have attendance records. Use System administration for technical account and integration settings."
+    />
+    <UAlert
+      v-else-if="!employeeId"
       class="mt-6"
       color="warning"
       variant="soft"

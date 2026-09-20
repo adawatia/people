@@ -2,9 +2,10 @@ from datetime import datetime
 from typing import Literal
 
 from fastapi_users.schemas import BaseUser, BaseUserCreate, BaseUserUpdate
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from core.pagination import PaginatedResponse
+from core.mobile import normalize_indian_mobile
 
 
 # ---------------------------------------------------------------------------
@@ -55,6 +56,7 @@ class UserRead(BaseUser[int]):
     invitation_used_at: datetime | None = None
     employee_id: int | None = Field(default=None, description="Linked Employee ID if profile exists")
     employee_code: str | None = Field(default=None, description="Linked Employee Code if profile exists")
+    role: Literal["EMPLOYEE", "DEPARTMENT_MANAGER", "HR_ADMIN", "SUPER_ADMIN"] = "EMPLOYEE"
 
     @property
     def is_invitation_pending(self) -> bool:
@@ -71,6 +73,9 @@ class UserCreate(BaseUserCreate):
     last_name: str | None = Field(default=None, max_length=100, examples=["Doe"], description="User last name")
     mobile_number: str | None = Field(default=None, max_length=20, examples=["+919876543210"], description="E.164 mobile number (optional, usable for login)")
     must_change_password: bool = Field(default=False, description="Force password change on first login")
+    role: Literal["EMPLOYEE", "DEPARTMENT_MANAGER", "HR_ADMIN"] = Field(
+        default="EMPLOYEE", description="Fixed business role"
+    )
     # Scoped role assignments at creation time
     role_assignments: list[RoleAssignmentCreate] = Field(
         default_factory=list, description="Scoped role+scope assignments for this user"
@@ -95,6 +100,11 @@ class UserCreate(BaseUserCreate):
         },
     )
 
+    @field_validator("mobile_number")
+    @classmethod
+    def normalize_mobile(cls, value: str | None) -> str | None:
+        return normalize_indian_mobile(value)
+
 
 class UserCreateRequest(UserCreate):
     """Request body for admin-created users. Extends UserCreate with invitation flow options."""
@@ -113,6 +123,11 @@ class UserUpdate(BaseUserUpdate):
     created_by: int | None = None
 
     model_config = ConfigDict(from_attributes=True)
+
+    @field_validator("mobile_number")
+    @classmethod
+    def normalize_mobile(cls, value: str | None) -> str | None:
+        return normalize_indian_mobile(value)
 
 
 class SetPasswordRequest(BaseModel):

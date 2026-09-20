@@ -56,3 +56,11 @@ class DashboardMetricsResponse(BaseModel):
     pendingApprovals: list[PendingApprovalItem] = []
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class TechnicalAdminMetrics(BaseModel):
+    users: int = 0
+    employees: int = 0
+    units: int = 0
+    departments: int = 0
+    designations: int = 0

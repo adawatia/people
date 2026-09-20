@@ -4,12 +4,13 @@ import { apiUrl, REFRESH_COOKIE, SESSION_COOKIE, upstreamError } from '../../uti
 export default defineEventHandler(async (event) => {
   const payload = await readBody<LoginPayload>(event)
   if (!payload.identity?.trim() || !payload.password) {
-    throw createError({ statusCode: 400, statusMessage: 'Enter your email, username or mobile number and password.' })
+    throw createError({ statusCode: 400, statusMessage: 'Enter your mobile number or username and password.' })
   }
 
   try {
     const form = new URLSearchParams({ username: payload.identity.trim(), password: payload.password })
-    const auth = await $fetch<{ access_token: string, token_type: string }>(apiUrl(event, 'auth/jwt/login'), {
+    const loginPath = payload.accountType === 'super_admin' ? 'auth/super-admin/login' : 'auth/employee/login'
+    const auth = await $fetch<{ access_token: string, token_type: string, must_change_password: boolean }>(apiUrl(event, loginPath), {
       method: 'POST',
       body: form,
       headers: { 'content-type': 'application/x-www-form-urlencoded' }

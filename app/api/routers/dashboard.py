@@ -8,18 +8,33 @@ from sqlalchemy.orm import selectinload
 
 from core.auth import fastapi_users
 from core.database import get_async_session
-from core.rbac import (
-    get_effective_permissions,
-    get_user_role_assignments,
-    get_visible_widgets,
-)
+from core.auth import get_user_permissions
+from core.rbac import get_visible_widgets
 from db.models import (
     User, Employee, AttendanceRecord, LeaveApplication, LeaveBalance, LeaveType,
     AttendanceCorrectionRequest, OvertimeRecord, Shift, WorkArrangementRequest
 )
-from schemas.dashboard import DashboardMetricsResponse, DashboardWidgetsResponse
+from schemas.dashboard import DashboardMetricsResponse, DashboardWidgetsResponse, TechnicalAdminMetrics
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
+
+
+@router.get("/technical-metrics", response_model=TechnicalAdminMetrics, summary="Get technical administration counts")
+async def get_technical_metrics(
+    user: User = Depends(fastapi_users.current_user(active=True)),
+    session: AsyncSession = Depends(get_async_session),
+) -> TechnicalAdminMetrics:
+    if not user.is_superuser:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=403, detail="Technical administrator access required")
+    from db.models import Department, Designation, Unit
+    return TechnicalAdminMetrics(
+        users=await session.scalar(select(func.count(User.id)).where(User.is_superuser.is_(False))) or 0,
+        employees=await session.scalar(select(func.count(Employee.id)).where(Employee.status == "ACTIVE")) or 0,
+        units=await session.scalar(select(func.count(Unit.id)).where(Unit.is_active.is_(True))) or 0,
+        departments=await session.scalar(select(func.count(Department.id)).where(Department.is_active.is_(True))) or 0,
+        designations=await session.scalar(select(func.count(Designation.id)).where(Designation.is_active.is_(True))) or 0,
+    )
 
 
 @router.get(
@@ -84,7 +99,7 @@ async def get_dashboard_metrics(
     )).scalar_one_or_none()
 
     # Check if user has manager, HR, or admin privileges
-    user_perms = await get_effective_permissions(user.id, session)
+    user_perms = set(await get_user_permissions(user, session))
     has_mgr_access = (
         user.is_super_admin
         or user.is_superuser
@@ -94,12 +109,9 @@ async def get_dashboard_metrics(
     )
 
     if has_mgr_access:
-        assignments = await get_user_role_assignments(user.id, session)
-        has_org_scope = user.is_super_admin or user.is_superuser or any(
-            a.scope_type == "organization" for a in assignments
-        )
-        unit_scope_ids = [a.scope_id for a in assignments if a.scope_type == "unit" and a.scope_id is not None]
-        dept_scope_ids = [a.scope_id for a in assignments if a.scope_type == "department" and a.scope_id is not None]
+        has_org_scope = user.is_superuser
+        unit_scope_ids = [emp.unit_id] if emp and emp.role == "HR_ADMIN" and emp.unit_id else []
+        dept_scope_ids = [emp.department_id] if emp and emp.role == "DEPARTMENT_MANAGER" and emp.department_id else []
 
         if not has_org_scope and not unit_scope_ids and not dept_scope_ids and emp:
             if emp.unit_id:

@@ -303,6 +303,9 @@ class EmployeeService:
         emp.exit_date = exit_date or date.today()
         emp.exit_reason = exit_reason or "Deactivated by Administrator"
         if emp.user_id:
+            user = await self.session.get(User, emp.user_id)
+            if user:
+                user.is_active = False
             await self.session.execute(
                 update(AuthSession)
                 .where(AuthSession.user_id == emp.user_id, AuthSession.revoked_at.is_(None))
@@ -318,6 +321,10 @@ class EmployeeService:
         emp.status = "ACTIVE"
         emp.exit_date = None
         emp.exit_reason = None
+        if emp.user_id:
+            user = await self.session.get(User, emp.user_id)
+            if user:
+                user.is_active = True
         await self.session.commit()
         self.session.expire_all()
         refreshed = await self.get_employee(employee_id)

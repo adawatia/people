@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.rbac import get_user_role_assignments
+from core.auth import get_user_permissions
 from db.models import Employee, User
 from repositories.employee_repo import EmployeeRepository
 
@@ -47,23 +47,17 @@ async def get_permission_scope(
 ) -> EmployeeAccessScope:
     if user.is_superuser:
         return EmployeeAccessScope(organization=True)
-
-    scope = EmployeeAccessScope()
-    for assignment in await get_user_role_assignments(user.id, session):
-        permissions = {
-            link.permission.permission_code
-            for link in assignment.role.permission_links
-            if link.permission is not None
-        }
-        if permission_code not in permissions:
-            continue
-        if assignment.scope_type == "organization":
-            scope.organization = True
-        elif assignment.scope_type == "unit" and assignment.scope_id is not None:
-            scope.unit_ids.add(assignment.scope_id)
-        elif assignment.scope_type == "department" and assignment.scope_id is not None:
-            scope.department_ids.add(assignment.scope_id)
-    return scope
+    employee = await get_current_employee(user, session)
+    permissions = set(await get_user_permissions(user, session))
+    requested = {permission_code} if isinstance(permission_code, str) else set(permission_code)
+    if not permissions.intersection(requested):
+        return EmployeeAccessScope()
+    role = employee.role
+    if role == "HR_ADMIN":
+        return EmployeeAccessScope(unit_ids={employee.unit_id} if employee.unit_id else set())
+    if role == "DEPARTMENT_MANAGER":
+        return EmployeeAccessScope(department_ids={employee.department_id} if employee.department_id else set())
+    return EmployeeAccessScope()
 
 
 async def require_employee_access(

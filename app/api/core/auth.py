@@ -1,4 +1,5 @@
 import asyncio
+import secrets
 import re
 from typing import AsyncGenerator
 
@@ -19,7 +20,8 @@ from zxcvbn import zxcvbn
 from core.database import check_database_connection as _check_database_connection
 from core.database import get_async_session
 from core.settings import get_settings
-from db.models import Permission, RolePermission, User, UserRoleAssignment
+from core.mobile import normalize_indian_mobile
+from db.models import Employee, User
 from schemas import UserCreate
 
 settings = get_settings()
@@ -104,7 +106,15 @@ class UserManager(IntegerIDMixin, BaseUserManager[User, int]):
             from core.database import get_async_session as _get_session  # noqa: PLC0415
 
             async for session in _get_session():
-                stmt = sa_select(User).where((User.username == login_value) | (User.mobile_number == login_value))
+                normalized_mobile = None
+                try:
+                    normalized_mobile = normalize_indian_mobile(login_value)
+                except ValueError:
+                    pass
+                filters = [User.username == login_value]
+                if normalized_mobile:
+                    filters.append(User.mobile_number == normalized_mobile)
+                stmt = sa_select(User).where(or_(*filters))
                 result = await session.execute(stmt)
                 user = result.scalar_one_or_none()
                 break
@@ -133,21 +143,7 @@ class UserManager(IntegerIDMixin, BaseUserManager[User, int]):
         return user
 
     async def on_after_request_verify(self, user: User, token: str, request: Request | None = None) -> None:
-        from core.email import get_email_service
-
-        email_svc = get_email_service()
-
-        frontend_url = settings.frontend_url.rstrip("/")
-        verify_url = f"{frontend_url}/verify-email?token={token}"
-        user_name = user.first_name or user.username or "User"
-
-        asyncio.create_task(
-            email_svc.send_verification_email(
-                to_email=user.email,
-                user_name=user_name,
-                verify_url=verify_url,
-            )
-        )
+        return None
 
     async def update(
         self,
@@ -169,44 +165,12 @@ class UserManager(IntegerIDMixin, BaseUserManager[User, int]):
             # Email has actually changed
 
             # 1. Send Security Alert to Old Email
-            from core.email import get_email_service
-
-            email_svc = get_email_service()
-            asyncio.create_task(
-                email_svc.send_email_changed_alert(
-                    old_email=original_email,
-                    new_email=updated_user.email,
-                )
-            )
-
-            # 2. Trigger Verification Email to New Email
-            from fastapi_users.exceptions import UserAlreadyVerified
-
-            try:
-                await self.request_verify(updated_user, request)
-            except UserAlreadyVerified:
-                # Fallback if somehow it's marked verified (e.g. superadmin bypass)
-                pass
+            updated_user.is_verified = False
 
         return updated_user
 
     async def on_after_forgot_password(self, user: User, token: str, request: Request | None = None) -> None:
-        from core.email import get_email_service
-
-        email_svc = get_email_service()
-
-        frontend_url = settings.frontend_url.rstrip("/")
-        reset_url = f"{frontend_url}/reset-password?token={token}"
-        user_name = user.first_name or user.username or "User"
-
-        asyncio.create_task(
-            email_svc.send_password_reset_email(
-                to_email=user.email,
-                user_name=user_name,
-                username=user.username or user.email,
-                reset_url=reset_url,
-            )
-        )
+        return None
 
     async def on_after_reset_password(self, user: User, request: Request | None = None) -> None:
         return None
@@ -218,18 +182,12 @@ async def get_user_manager(
     yield UserManager(user_db)
 
 
-from fastapi_users.authentication import AuthenticationBackend, BearerTransport, CookieTransport
+from fastapi_users.authentication import AuthenticationBackend, BearerTransport
 
-bearer_transport = BearerTransport(tokenUrl="/api/v1/auth/jwt/login")
-
-cookie_transport = CookieTransport(
-    cookie_name="hrms_auth",
-    cookie_max_age=28800,  # 8 hours — suitable for a full work day
-    cookie_secure=False,  # Set to True in production
-    cookie_httponly=True,
-    cookie_samesite="lax",
-)
-
+# Swagger's OAuth2 Authorize dialog needs one concrete password-flow URL.
+# Employee login is the regular application flow; Super Admin uses its
+# dedicated endpoint directly because OAuth2 supports only one tokenUrl here.
+bearer_transport = BearerTransport(tokenUrl="/api/v1/auth/employee/login")
 
 def get_jwt_strategy() -> object:
     from fastapi_users.authentication.strategy.jwt import JWTStrategy
@@ -243,49 +201,24 @@ auth_backend = AuthenticationBackend(
     get_strategy=get_jwt_strategy,
 )
 
-cookie_backend = AuthenticationBackend(
-    name="cookie",
-    transport=cookie_transport,
-    get_strategy=get_jwt_strategy,
-)
-
-fastapi_users = FastAPIUsers[User, int](get_user_manager, [auth_backend, cookie_backend])
+fastapi_users = FastAPIUsers[User, int](get_user_manager, [auth_backend])
 current_active_user = fastapi_users.current_user(active=True)
 
 
 async def user_has_permission(user: User, permission_code: str, session: AsyncSession) -> bool:
-    if user.is_superuser:
-        return True
+    permissions = await get_user_permissions(user, session)
+    return permission_code in permissions
 
-    # Read exclusively from UserRoleAssignment (no legacy UserRole)
-    user_role_ids = select(UserRoleAssignment.role_id).where(UserRoleAssignment.user_id == user.id)
-    query = (
-        select(Permission.permission_id)
-        .join(RolePermission, RolePermission.permission_id == Permission.permission_id)
-        .where(
-            RolePermission.role_id.in_(user_role_ids),
-            Permission.permission_code == permission_code,
-        )
-        .limit(1)
-    )
-    return await session.scalar(query) is not None
 
 
 async def get_user_permissions(user: User, session: AsyncSession) -> list[str]:
     if user.is_superuser:
-        all_perms = await session.execute(select(Permission.permission_code))
-        return sorted(all_perms.scalars().all())
+        return sorted(FIXED_ROLE_PERMISSIONS["HR_ADMIN"])
 
-    # Read exclusively from UserRoleAssignment
-    user_role_ids = select(UserRoleAssignment.role_id).where(UserRoleAssignment.user_id == user.id)
-    query = (
-        select(Permission.permission_code)
-        .join(RolePermission, RolePermission.permission_id == Permission.permission_id)
-        .where(RolePermission.role_id.in_(user_role_ids))
-        .distinct()
-    )
-    perms = (await session.execute(query)).scalars().all()
-    return sorted(perms)
+    employee = await session.scalar(select(Employee).where(Employee.user_id == user.id))
+    role = employee.role if employee and employee.role in FIXED_ROLE_PERMISSIONS else "EMPLOYEE"
+    return sorted(FIXED_ROLE_PERMISSIONS[role])
+
 
 
 def require_permission(permission_code: str):
@@ -301,6 +234,34 @@ def require_permission(permission_code: str):
         return current_user
 
     return dependency
+
+
+FIXED_ROLE_PERMISSIONS: dict[str, set[str]] = {
+    "EMPLOYEE": {
+        "employee.view_self", "attendance.view_self", "leave.apply", "leave.view_self",
+        "leave.cancel", "work_arrangement.apply", "work_arrangement.view_self",
+        "work_arrangement.cancel", "shift.view_self", "overtime.view_self",
+    },
+    "DEPARTMENT_MANAGER": {
+        "employee.view", "employee.view_self", "attendance.view_department", "attendance.view_self",
+        "leave.approve", "leave.reject", "leave.apply", "leave.view_self", "leave.cancel",
+        "work_arrangement.approve", "work_arrangement.reject", "work_arrangement.apply",
+        "work_arrangement.view_self", "work_arrangement.cancel", "overtime.view_department",
+        "overtime.approve", "reports.attendance", "reports.leave", "shift.view_self",
+        "overtime.view_self",
+    },
+    "HR_ADMIN": {
+        "user.view", "user.create", "user.update", "user.deactivate", "employee.view", "employee.create",
+        "employee.update", "employee.deactivate", "designation.view", "designation.create",
+        "designation.update", "designation.delete", "attendance.view", "attendance.view_unit",
+        "attendance.view_department", "attendance.process", "attendance.correct", "leave.manage",
+        "leave.approve", "leave.reject", "leave.cancel", "work_arrangement.manage",
+        "work_arrangement.approve", "work_arrangement.reject", "work_arrangement.cancel",
+        "shift.assign", "shift.update", "overtime.approve", "overtime.view_department",
+        "reports.view", "reports.attendance", "reports.leave", "reports.overtime", "reports.salary_cost",
+        "system.configure", "audit.view", "salary_cost.view_unit", "salary_cost.view_department",
+    },
+}
 
 
 limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"], storage_uri="memory://")
@@ -322,10 +283,18 @@ def check_database_connection() -> None:
     _check_database_connection()
 
 
-api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+api_key_header = APIKeyHeader(
+    name="X-API-Key",
+    auto_error=False,
+    description="ERP integration key. Configure ERP_API_KEY on the API server; never expose this key in the browser.",
+)
 
 
 async def verify_api_key(api_key_header: str = Security(api_key_header)):
-    if api_key_header == settings.api_key:
+    expected = settings.erp_api_key or settings.api_key
+    if api_key_header and secrets.compare_digest(api_key_header, expected):
         return True
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Could not validate API KEY")
+
+
+verify_erp_api_key = verify_api_key

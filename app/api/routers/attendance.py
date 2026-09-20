@@ -4,6 +4,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import fastapi_users, require_permission
+from core.attendance_access import require_hr_admin, require_hr_unit_access
 from core.database import get_async_session
 from core.employee_access import (
     EmployeeAccessScope,
@@ -50,23 +51,7 @@ async def record_checkin(
     current_user: User = Depends(fastapi_users.current_user(active=True)),
     session: AsyncSession = Depends(get_async_session),
 ) -> AttendancePunchRead:
-    """Ingests a single biometric/mobile attendance punch and associates it with the active shift."""
-    service = AttendanceService(session)
-    employee = None
-    if data.employee_id is not None:
-        employee = await service.employee_repo.get_by_id(data.employee_id)
-    elif data.employee_code is not None:
-        employee = await service.employee_repo.get_by_code(data.employee_code)
-    if employee is None:
-        raise HTTPException(status_code=404, detail="Employee not found")
-    await require_employee_access(
-        current_user,
-        employee,
-        "attendance.correct",
-        session,
-        allow_self=True,
-    )
-    return await service.record_punch(data)
+    raise HTTPException(status_code=403, detail="Attendance punches are supplied by ERP")
 
 
 @router.post("/checkins/bulk", response_model=list[AttendancePunchRead], status_code=status.HTTP_201_CREATED)
@@ -75,9 +60,7 @@ async def record_bulk_checkins(
     _: User = Depends(require_permission("attendance.process")),
     session: AsyncSession = Depends(get_async_session),
 ) -> list[AttendancePunchRead]:
-    """Bulk records attendance punches from biometric devices or sync tools."""
-    service = AttendanceService(session)
-    return await service.record_bulk_punches(data)
+    raise HTTPException(status_code=403, detail="Attendance punches are supplied by ERP")
 
 
 @router.get("/checkins", response_model=list[AttendancePunchRead])
@@ -236,21 +219,15 @@ async def process_attendance(
 @router.post("/corrections", response_model=AttendanceCorrectionRead, status_code=status.HTTP_201_CREATED)
 async def submit_correction(
     data: AttendanceCorrectionCreate,
-    current_user: User = Depends(fastapi_users.current_user(active=True)),
+    current_user: User = Depends(require_hr_admin),
     session: AsyncSession = Depends(get_async_session),
 ) -> AttendanceCorrectionRead:
-    """Employee submits an attendance correction request."""
+    """HR submits a correction for ERP reconciliation; ERP remains authoritative."""
     service = AttendanceService(session)
     record = await service.record_repo.get_by_id(data.attendance_record_id)
     if record is None:
         raise HTTPException(status_code=404, detail="Attendance record not found")
-    await require_employee_access(
-        current_user,
-        record.employee,
-        "attendance.correct",
-        session,
-        allow_self=True,
-    )
+    await require_hr_unit_access(current_user, record.employee, session)
     return await service.submit_correction(data)
 
 
@@ -280,11 +257,14 @@ async def approve_correction(
     current_user: User = Depends(require_permission("attendance.approve_correction")),
     session: AsyncSession = Depends(get_async_session),
 ) -> AttendanceCorrectionRead:
+    raise HTTPException(status_code=403, detail="ERP confirmation is the attendance correction approval")
     service = AttendanceService(session)
     correction = await service.record_repo.get_correction_by_id(correction_id)
     if correction is None:
         raise HTTPException(status_code=404, detail="Correction request not found")
     record = await service.record_repo.get_by_id(correction.attendance_record_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Attendance record not found")
     await require_employee_access(current_user, record.employee, "attendance.approve_correction", session)
     return await service.approve_correction(correction_id, current_user.id)
 
@@ -296,11 +276,14 @@ async def reject_correction(
     current_user: User = Depends(require_permission("attendance.approve_correction")),
     session: AsyncSession = Depends(get_async_session),
 ) -> AttendanceCorrectionRead:
+    raise HTTPException(status_code=403, detail="ERP confirmation is the attendance correction approval")
     service = AttendanceService(session)
     correction = await service.record_repo.get_correction_by_id(correction_id)
     if correction is None:
         raise HTTPException(status_code=404, detail="Correction request not found")
     record = await service.record_repo.get_by_id(correction.attendance_record_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Attendance record not found")
     await require_employee_access(current_user, record.employee, "attendance.approve_correction", session)
     return await service.reject_correction(
         correction_id,

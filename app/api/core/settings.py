@@ -52,6 +52,7 @@ class Settings(BaseSettings):
 
     # API Keys for M2M Integration
     api_key: str = Field(default="hrms_api_key_dev_only", alias="API_KEY")
+    erp_api_key: str = Field(default="", alias="ERP_API_KEY")
 
     def resolved_database_url(self) -> str:
         configured_database_url = self.database_url.strip()

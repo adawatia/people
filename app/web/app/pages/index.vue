@@ -4,11 +4,13 @@ import type { DashboardMetrics } from '#shared/types/dashboard'
 useSeoMeta({ title: 'Dashboard' })
 const auth = useAuth()
 const api = useHrmsApi()
+const isTechnicalAdmin = computed(() => Boolean(auth.user.value?.is_superuser))
 const greeting = computed(() => {
   const hour = new Date().getHours()
   return hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
 })
 const { data, pending, error, refresh } = await useAsyncData('dashboard-metrics', () => api.request<DashboardMetrics>('dashboard/metrics'))
+const { data: technicalMetrics } = await useAsyncData('technical-admin-metrics', () => api.request<{ users: number, employees: number, units: number, departments: number, designations: number }>('dashboard/technical-metrics'), { immediate: isTechnicalAdmin.value })
 const stats = computed(() => [
   { label: 'Team members', value: data.value?.unitMetrics.totalHeadcount ?? 0, icon: 'i-lucide-users-round', tone: 'var(--people-blue)' },
   { label: 'Present today', value: data.value?.unitMetrics.presentCount ?? 0, icon: 'i-lucide-circle-check-big', tone: 'var(--people-mint)' },
@@ -19,6 +21,15 @@ const stats = computed(() => [
 
 <template>
   <div>
+    <UAlert
+      v-if="auth.user.value?.is_superuser"
+      color="info"
+      variant="soft"
+      icon="i-lucide-shield-check"
+      title="Technical administration workspace"
+      description="Manage system access, ERP integrations, synchronization health and technical account settings. This account is not an employee and does not have attendance, leave or approval records."
+      :actions="[{ label: 'Open system administration', to: '/settings' }]"
+    />
     <!-- eslint-disable better-tailwindcss/no-unknown-classes -->
     <div class="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
       <div>
@@ -33,6 +44,27 @@ const stats = computed(() => [
         {{ new Intl.DateTimeFormat('en-IN', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date()) }}
       </p>
     </div>
+
+    <template v-if="isTechnicalAdmin">
+      <div class="mt-7 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        <div v-for="item in [
+          { label: 'Users', value: technicalMetrics?.users ?? 0, icon: 'i-lucide-users-round', tone: 'var(--people-blue)' },
+          { label: 'Employees', value: technicalMetrics?.employees ?? 0, icon: 'i-lucide-user-round', tone: 'var(--people-mint)' },
+          { label: 'Units', value: technicalMetrics?.units ?? 0, icon: 'i-lucide-building-2', tone: 'var(--people-lavender)' },
+          { label: 'Departments', value: technicalMetrics?.departments ?? 0, icon: 'i-lucide-network', tone: 'var(--people-peach)' },
+          { label: 'Designations', value: technicalMetrics?.designations ?? 0, icon: 'i-lucide-badge', tone: 'var(--people-yellow)' }
+        ]" :key="item.label" class="people-card p-5">
+          <div class="flex items-start justify-between"><p class="text-sm font-medium text-muted">{{ item.label }}</p><span class="grid size-10 place-items-center rounded-xl" :style="{ background: item.tone }"><UIcon :name="item.icon" class="size-5" /></span></div>
+          <p class="mt-4 text-3xl font-semibold tabular-nums">{{ item.value }}</p>
+        </div>
+      </div>
+      <div class="mt-6 grid gap-6 lg:grid-cols-2">
+        <section class="people-card p-5 sm:p-6"><div class="flex items-start gap-3"><span class="grid size-10 place-items-center rounded-xl bg-[var(--people-lavender)]"><UIcon name="i-lucide-settings-2" class="size-5" /></span><div><h3 class="font-semibold">Technical administration</h3><p class="mt-1 text-sm text-muted">Monitor the structure managed by ERP and maintain this technical account.</p></div></div><UButton class="mt-5" to="/settings" icon="i-lucide-shield-check">Account settings</UButton></section>
+        <section class="people-card p-5 sm:p-6"><div class="flex items-start gap-3"><span class="grid size-10 place-items-center rounded-xl bg-[var(--people-blue)]"><UIcon name="i-lucide-refresh-cw" class="size-5" /></span><div><h3 class="font-semibold">ERP ownership</h3><p class="mt-1 text-sm text-muted">Employees, users, units, departments and designations are synchronized from ERP.</p></div></div><UButton class="mt-5" to="/organization" color="neutral" variant="soft" icon="i-lucide-eye">View organization</UButton></section>
+      </div>
+    </template>
+
+    <template v-else>
 
     <UAlert
       v-if="error"
@@ -189,5 +221,6 @@ const stats = computed(() => [
         </div>
       </section>
     </div>
+    </template>
   </div>
 </template>

@@ -215,3 +215,5 @@ mnesia/
 rabbitmq/
 rabbitmq-data/
 activemq-data/
+
+app/api/.env

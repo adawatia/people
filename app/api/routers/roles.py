@@ -7,6 +7,7 @@ from core.auth import fastapi_users, require_permission
 from core.database import get_async_session
 from db.models import Permission, Role, RolePermission, User, UserRoleAssignment
 from schemas import PermissionRead, RoleCreate, RoleRead, RoleUpdate
+from schemas.roles import FIXED_BUSINESS_ROLES
 
 router = APIRouter(prefix="/roles", tags=["roles"])
 
@@ -42,7 +43,9 @@ async def list_roles(
     _: User = Depends(require_permission("role.view")),
     session: AsyncSession = Depends(get_async_session),
 ) -> list[RoleRead]:
-    roles = (await session.execute(select(Role).order_by(Role.role_name))).scalars().all()
+    roles = (await session.execute(
+        select(Role).where(Role.role_name.in_(FIXED_BUSINESS_ROLES)).order_by(Role.role_name)
+    )).scalars().all()
     return [await _role_response(role, session) for role in roles]
 
 
@@ -52,6 +55,7 @@ async def create_role(
     _: User = Depends(require_permission("role.create")),
     session: AsyncSession = Depends(get_async_session),
 ) -> RoleRead:
+    raise HTTPException(status_code=status.HTTP_405_METHOD_NOT_ALLOWED, detail="Business roles are fixed")
     existing = await session.scalar(select(Role).where(Role.role_name == payload.role_name))
     if existing:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Role name already exists")
@@ -84,6 +88,7 @@ async def update_role(
     current_user: User = Depends(require_permission("role.update")),
     session: AsyncSession = Depends(get_async_session),
 ) -> RoleRead:
+    raise HTTPException(status_code=status.HTTP_405_METHOD_NOT_ALLOWED, detail="Business roles are fixed")
     role = await session.get(Role, role_id)
     if role is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Role not found")
@@ -121,6 +126,7 @@ async def delete_role(
     _: User = Depends(require_permission("role.delete")),
     session: AsyncSession = Depends(get_async_session),
 ) -> None:
+    raise HTTPException(status_code=status.HTTP_405_METHOD_NOT_ALLOWED, detail="Business roles are fixed")
     role = await session.get(Role, role_id)
     if role is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Role not found")
