@@ -1,0 +1,24 @@
+Datlab People
+--------------------------------------------------
+
+Verify Your Email Address
+
+Hello {user_name},
+
+We received a request to use this email address for your Datlab People account.
+
+ACCOUNT DETAILS:
+- Email: {to_email}
+- Action Required: Verify Email
+
+To verify your email address and continue using your account, please visit the following link:
+{verify_url}
+
+If you did not request this change, please contact your administrator or ignore this email.
+
+Regards,
+Datlab People Team
+
+--------------------------------------------------
+This message was sent to {to_email}.
+&copy; Datlabs. All rights reserved.

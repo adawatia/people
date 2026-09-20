@@ -1,0 +1,16 @@
+Hello {user_name},
+
+You have been invited to access the Datlab People portal.
+
+ACCOUNT DETAILS:
+- Account: {to_email}
+- Assigned Role: {role_name}
+- Invitation Valid: 48 hours
+
+To set your password and activate your account, visit the following link:
+{invite_url}
+
+If you were not expecting this invitation, please contact your administrator or ignore this email.
+
+Regards,
+Datlab People Team

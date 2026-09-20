@@ -1,0 +1,14 @@
+Hello,
+
+We noticed that the email address associated with your Datlab People account has been changed to {new_email}.
+
+Account Information:
+- Old Registered Email: {old_email}
+- New Registered Email: {new_email}
+
+If you made this change, you can safely ignore this email. A verification link has been sent to your new email address.
+
+If you did NOT request this change, please contact your administrator or security team immediately, as your account may have been compromised.
+
+Regards,
+Datlab People Team

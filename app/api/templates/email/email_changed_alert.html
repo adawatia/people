@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Security Alert: Email Address Changed</title>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #334155; margin: 0; padding: 0; background-color: #f8fafc; }}
+        .container {{ max-width: 600px; margin: 40px auto; background: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); border: 1px solid #e2e8f0; }}
+        .header {{ background: linear-gradient(135deg, #e11d48, #be123c); padding: 32px 40px; text-align: center; }}
+        .header h1 {{ color: #ffffff; margin: 0; font-size: 24px; font-weight: 700; letter-spacing: -0.025em; }}
+        .content {{ padding: 40px; }}
+        .greeting {{ font-size: 18px; font-weight: 600; color: #0f172a; margin-top: 0; margin-bottom: 24px; }}
+        .message {{ font-size: 16px; color: #475569; margin-bottom: 32px; }}
+        .info-box {{ background: #fff1f2; border-left: 4px solid #e11d48; padding: 16px 24px; margin-bottom: 32px; border-radius: 0 4px 4px 0; }}
+        .info-box p {{ margin: 8px 0; font-size: 14px; }}
+        .info-label {{ font-weight: 600; color: #9f1239; width: 140px; display: inline-block; }}
+        .info-value {{ color: #0f172a; font-family: monospace; font-size: 15px; }}
+        .warning {{ background: #fef2f2; border: 1px solid #fecdd3; padding: 20px; border-radius: 6px; margin-bottom: 32px; text-align: center; color: #9f1239; font-weight: 500; font-size: 15px; }}
+        .footer {{ background: #f8fafc; padding: 24px 40px; text-align: center; border-top: 1px solid #e2e8f0; }}
+        .footer p {{ color: #64748b; font-size: 14px; margin: 0; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div style="background-color: #87CEEB; height: 4px;"></div>
+        <div style="padding: 18px 32px; border-bottom: 1px solid #f1f5f9; text-align: left; background-color: #ffffff;">
+          <table style="border-collapse: collapse; margin: 0; padding: 0;">
+            <tr>
+              <td style="vertical-align: middle; padding-right: 14px;">
+                <img src="cid:bsl-logo" width="36" height="36" alt="Datlabs Logo" style="display: block; border-radius: 8px; border: 1px solid #e2e8f0; padding: 3px; background-color: #ffffff;" />
+              </td>
+              <td style="vertical-align: middle;">
+                <div style="font-size: 16px; font-weight: 700; color: #0f172a; line-height: 1.2;">
+                  Datlabs
+                </div>
+                <div style="font-size: 11px; font-weight: 700; color: #0284c7; letter-spacing: 0.1em; text-transform: uppercase; margin-top: 1px;">
+                  People
+                </div>
+              </td>
+            </tr>
+          </table>
+        </div>
+        <div class="header">
+            <h1>Security Alert: Email Changed</h1>
+        </div>
+        <div class="content">
+            <p class="greeting">Hello,</p>
+            <p class="message">We noticed that the email address associated with your Datlab People account has been changed.</p>
+            
+            <div class="info-box">
+                <p><span class="info-label">Old Email:</span> <span class="info-value"><a href="mailto:{old_email}" style="color: #0f172a; text-decoration: none;">{old_email}</a></span></p>
+                <p><span class="info-label">New Email:</span> <span class="info-value"><a href="mailto:{new_email}" style="color: #0f172a; text-decoration: none;">{new_email}</a></span></p>
+            </div>
+            
+            <p class="message" style="font-size: 15px;">If you made this change, you can safely ignore this email. A verification link has been sent to your new email address.</p>
+            
+            <div class="warning">
+                If you did <strong>not</strong> request this change, please contact your administrator or the security team immediately, as your account may have been compromised.
+            </div>
+        </div>
+        <div class="footer">
+            <p>&copy; Datlabs. All rights reserved.</p>
+        </div>
+    </div>
+</body>
+</html>
