@@ -9,6 +9,7 @@ from db.models import (
     LeaveLedgerEntry,
     LeavePeriod,
     LeaveType,
+    Employee,
 )
 
 
@@ -94,6 +95,8 @@ class LeaveRepository:
         self,
         employee_id: int | None = None,
         leave_period_id: int | None = None,
+        unit_ids: set[int] | None = None,
+        department_ids: set[int] | None = None,
     ) -> list[LeaveAllocation]:
         stmt = (
             select(LeaveAllocation)
@@ -106,6 +109,14 @@ class LeaveRepository:
         )
         if employee_id is not None:
             stmt = stmt.where(LeaveAllocation.employee_id == employee_id)
+        elif unit_ids or department_ids:
+            stmt = stmt.join(Employee, LeaveAllocation.employee_id == Employee.id)
+            filters = []
+            if unit_ids:
+                filters.append(Employee.unit_id.in_(unit_ids))
+            if department_ids:
+                filters.append(Employee.department_id.in_(department_ids))
+            stmt = stmt.where(or_(*filters))
         if leave_period_id is not None:
             stmt = stmt.where(LeaveAllocation.leave_period_id == leave_period_id)
         return list((await self.session.execute(stmt)).scalars().all())
@@ -195,6 +206,8 @@ class LeaveRepository:
         status: str | None = None,
         from_date: date | None = None,
         to_date: date | None = None,
+        unit_ids: set[int] | None = None,
+        department_ids: set[int] | None = None,
     ) -> list[LeaveApplication]:
         stmt = (
             select(LeaveApplication)
@@ -207,6 +220,14 @@ class LeaveRepository:
         )
         if employee_id is not None:
             stmt = stmt.where(LeaveApplication.employee_id == employee_id)
+        elif unit_ids or department_ids:
+            stmt = stmt.join(Employee, LeaveApplication.employee_id == Employee.id)
+            filters = []
+            if unit_ids:
+                filters.append(Employee.unit_id.in_(unit_ids))
+            if department_ids:
+                filters.append(Employee.department_id.in_(department_ids))
+            stmt = stmt.where(or_(*filters))
         if status is not None:
             stmt = stmt.where(LeaveApplication.status == status.upper())
         if from_date is not None:

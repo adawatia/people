@@ -19,6 +19,8 @@ class WorkArrangementAction(BaseModel):
 class WorkArrangementRead(BaseModel):
     id: int
     employee_id: int
+    employee_name: str | None = None
+    employee_code: str | None = None
     arrangement_type: str
     from_date: date
     to_date: date

@@ -198,6 +198,8 @@ class WorkArrangementService:
         arrangement_type: str | None = None,
         from_date: date | None = None,
         to_date: date | None = None,
+        unit_ids: set[int] | None = None,
+        department_ids: set[int] | None = None,
     ) -> list[WorkArrangementRead]:
         requests = await self.repo.list_requests(
             employee_id=employee_id,
@@ -205,5 +207,7 @@ class WorkArrangementService:
             arrangement_type=arrangement_type,
             from_date=from_date,
             to_date=to_date,
+            unit_ids=unit_ids,
+            department_ids=department_ids,
         )
         return [WorkArrangementRead.model_validate(r) for r in requests]

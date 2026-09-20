@@ -1,0 +1,4 @@
+export interface Shift { id: number, unit_id?: number | null, name: string, code?: string | null, start_time: string, end_time: string, grace_minutes: number, break_minutes: number, is_cross_midnight: boolean, is_active: boolean, enable_auto_attendance: boolean }
+export interface ShiftAssignment { id: number, employee_id: number, shift_id: number, effective_from: string, effective_to?: string | null, status: string, employee_name?: string | null, employee_code?: string | null, shift_name?: string | null, shift_code?: string | null, start_time?: string | null, end_time?: string | null }
+export interface Holiday { id: number, name: string, holiday_date: string, description?: string | null, is_weekly_off: boolean, is_organization_wide: boolean }
+export interface HolidayList { id: number, unit_id?: number | null, name: string, from_date: string, to_date: string, weekly_off_day: string, is_default: boolean, created_at: string, holidays: Holiday[] }

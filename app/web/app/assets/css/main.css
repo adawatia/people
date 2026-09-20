@@ -2,17 +2,40 @@
 @import "@nuxt/ui";
 
 @theme static {
-  --font-sans: 'Public Sans', sans-serif;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
 
-  --color-green-50: #EFFDF5;
-  --color-green-100: #D9FBE8;
-  --color-green-200: #B3F5D1;
-  --color-green-300: #75EDAE;
-  --color-green-400: #00DC82;
-  --color-green-500: #00C16A;
-  --color-green-600: #00A155;
-  --color-green-700: #007F45;
-  --color-green-800: #016538;
-  --color-green-900: #0A5331;
-  --color-green-950: #052E16;
+:root {
+  --people-canvas: #f7f8fb;
+  --people-surface: #ffffff;
+  --people-border: #e6e8ef;
+  --people-text: #202332;
+  --people-muted: #697083;
+  --people-lavender: #eee9fa;
+  --people-mint: #e5f5eb;
+  --people-peach: #fbebdd;
+  --people-blue: #e5eeff;
+}
+
+html, body { background: var(--people-canvas); }
+body { color: var(--people-text); }
+button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
+
+.people-card {
+  border: 1px solid var(--people-border);
+  border-radius: 1rem;
+  background: color-mix(in srgb, var(--people-surface) 96%, transparent);
+  box-shadow: 0 1px 2px rgb(28 32 45 / 0.04), 0 10px 32px rgb(28 32 45 / 0.035);
+}
+
+.dark {
+  --people-canvas: #12131a;
+  --people-surface: #191b24;
+  --people-border: #292c38;
+  --people-text: #f0f1f6;
+  --people-muted: #a4a9b8;
+  --people-lavender: #2b253c;
+  --people-mint: #183228;
+  --people-peach: #36291f;
+  --people-blue: #202d48;
 }

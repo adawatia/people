@@ -103,12 +103,16 @@ class AttendanceService:
         from_time: datetime | None = None,
         to_time: datetime | None = None,
         is_processed: bool | None = None,
+        unit_ids: set[int] | None = None,
+        department_ids: set[int] | None = None,
     ) -> list[AttendancePunchRead]:
         punches = await self.punch_repo.list_punches(
             employee_id=employee_id,
             from_time=from_time,
             to_time=to_time,
             is_processed=is_processed,
+            unit_ids=unit_ids,
+            department_ids=department_ids,
         )
         return [AttendancePunchRead.model_validate(p) for p in punches]
 
@@ -463,6 +467,8 @@ class AttendanceService:
         status_filter: str | None = None,
         page: int = 1,
         page_size: int = 50,
+        unit_ids: set[int] | None = None,
+        department_ids: set[int] | None = None,
     ) -> list[AttendanceRecordRead]:
         records = await self.record_repo.list_records(
             employee_id=employee_id,
@@ -471,6 +477,8 @@ class AttendanceService:
             status=status_filter,
             page=page,
             page_size=page_size,
+            unit_ids=unit_ids,
+            department_ids=department_ids,
         )
         return [AttendanceRecordRead.model_validate(r) for r in records]
 
@@ -537,7 +545,14 @@ class AttendanceService:
     async def list_corrections(
         self,
         status: str | None = None,
+        employee_id: int | None = None,
+        unit_ids: set[int] | None = None,
+        department_ids: set[int] | None = None,
     ) -> list[AttendanceCorrectionRead]:
-        corrections = await self.record_repo.list_corrections(status=status)
+        corrections = await self.record_repo.list_corrections(
+            status=status,
+            employee_id=employee_id,
+            unit_ids=unit_ids,
+            department_ids=department_ids,
+        )
         return [AttendanceCorrectionRead.model_validate(c) for c in corrections]
-

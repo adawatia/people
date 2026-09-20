@@ -1,11 +1,8 @@
-// https://nuxt.com/docs/api/configuration/nuxt-config
 export default defineNuxtConfig({
   modules: [
     '@nuxt/eslint',
     '@nuxt/ui',
     '@nuxt/icon',
-    '@nuxtjs/svg-sprite',
-    '@nuxt/fonts',
     '@nuxt/image',
     'nuxt-auth-utils'
   ],
@@ -16,8 +13,8 @@ export default defineNuxtConfig({
 
   css: ['~/assets/css/main.css'],
 
-  routeRules: {
-    '/': { prerender: true }
+  runtimeConfig: {
+    hrmsApiBase: process.env.NUXT_HRMS_API_BASE || 'http://127.0.0.1:8000'
   },
 
   compatibilityDate: '2026-06-30',

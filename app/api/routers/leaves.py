@@ -1,9 +1,15 @@
 from datetime import date
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import fastapi_users, require_permission
 from core.database import get_async_session
+from core.employee_access import (
+    EmployeeAccessScope,
+    get_current_employee,
+    get_permission_scope,
+    require_employee_access,
+)
 from db.models import User
 from schemas.leaves import (
     LeaveAllocationCreate,
@@ -21,6 +27,15 @@ from schemas.leaves import (
 from services.leave_service import LeaveService
 
 router = APIRouter(prefix="/leaves", tags=["leaves"])
+
+LEAVE_MANAGEMENT_PERMISSIONS = ("leave.manage", "leave.approve", "leave.reject")
+
+
+async def _leave_management_scope(user: User, session: AsyncSession) -> EmployeeAccessScope:
+    scope = EmployeeAccessScope()
+    for permission in LEAVE_MANAGEMENT_PERMISSIONS:
+        scope.include(await get_permission_scope(user, permission, session))
+    return scope
 
 
 # ── Leave Periods ─────────────────────────────────────────────────────────────
@@ -94,20 +109,39 @@ async def update_leave_type(
 async def list_leave_allocations(
     employee_id: int | None = None,
     leave_period_id: int | None = None,
-    _: User = Depends(fastapi_users.current_user(active=True)),
+    current_user: User = Depends(fastapi_users.current_user(active=True)),
     session: AsyncSession = Depends(get_async_session),
 ) -> list[LeaveAllocationRead]:
     service = LeaveService(session)
-    return await service.list_allocations(employee_id=employee_id, leave_period_id=leave_period_id)
+    current_employee = await get_current_employee(current_user, session)
+    scope = await get_permission_scope(current_user, "leave.manage", session)
+    if employee_id is None:
+        if not scope.organization and not scope.unit_ids and not scope.department_ids:
+            employee_id = current_employee.id
+    else:
+        employee = await service.employee_repo.get_by_id(employee_id)
+        if employee is None:
+            raise HTTPException(status_code=404, detail="Employee not found")
+        await require_employee_access(current_user, employee, "leave.manage", session, allow_self=True)
+    return await service.list_allocations(
+        employee_id=employee_id,
+        leave_period_id=leave_period_id,
+        unit_ids=None if scope.organization else scope.unit_ids,
+        department_ids=None if scope.organization else scope.department_ids,
+    )
 
 
 @router.post("/allocations", response_model=LeaveAllocationRead, status_code=status.HTTP_201_CREATED)
 async def allocate_leaves(
     data: LeaveAllocationCreate,
-    _: User = Depends(require_permission("leave.manage")),
+    current_user: User = Depends(require_permission("leave.manage")),
     session: AsyncSession = Depends(get_async_session),
 ) -> LeaveAllocationRead:
     service = LeaveService(session)
+    employee = await service.employee_repo.get_by_id(data.employee_id)
+    if employee is None:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    await require_employee_access(current_user, employee, "leave.manage", session)
     return await service.allocate_leaves(data)
 
 
@@ -117,10 +151,14 @@ async def allocate_leaves(
 async def get_leave_balance(
     emp_id: int,
     for_date: date | None = Query(None),
-    _: User = Depends(fastapi_users.current_user(active=True)),
+    current_user: User = Depends(fastapi_users.current_user(active=True)),
     session: AsyncSession = Depends(get_async_session),
 ) -> list[LeaveBalanceRead]:
     service = LeaveService(session)
+    employee = await service.employee_repo.get_by_id(emp_id)
+    if employee is None:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    await require_employee_access(current_user, employee, "leave.manage", session, allow_self=True)
     return await service.get_employee_leave_balances(emp_id, for_date=for_date)
 
 
@@ -132,35 +170,66 @@ async def list_leave_applications(
     status_filter: str | None = Query(None, alias="status"),
     from_date: date | None = None,
     to_date: date | None = None,
-    _: User = Depends(fastapi_users.current_user(active=True)),
+    current_user: User = Depends(fastapi_users.current_user(active=True)),
     session: AsyncSession = Depends(get_async_session),
 ) -> list[LeaveApplicationRead]:
     service = LeaveService(session)
+    current_employee = await get_current_employee(current_user, session)
+    scope = await _leave_management_scope(current_user, session)
+    if employee_id is not None:
+        employee = await service.employee_repo.get_by_id(employee_id)
+        if employee is None:
+            raise HTTPException(status_code=404, detail="Employee not found")
+        await require_employee_access(
+            current_user,
+            employee,
+            LEAVE_MANAGEMENT_PERMISSIONS,
+            session,
+            allow_self=True,
+        )
+    elif not scope.organization and not scope.unit_ids and not scope.department_ids:
+        employee_id = current_employee.id
     return await service.list_applications(
         employee_id=employee_id,
         status=status_filter,
         from_date=from_date,
         to_date=to_date,
+        unit_ids=None if scope.organization else scope.unit_ids,
+        department_ids=None if scope.organization else scope.department_ids,
     )
 
 
 @router.get("/{app_id}", response_model=LeaveApplicationRead)
 async def get_leave_application(
     app_id: int,
-    _: User = Depends(fastapi_users.current_user(active=True)),
+    current_user: User = Depends(fastapi_users.current_user(active=True)),
     session: AsyncSession = Depends(get_async_session),
 ) -> LeaveApplicationRead:
     service = LeaveService(session)
+    application = await service.repo.get_application_by_id(app_id)
+    if application is None:
+        raise HTTPException(status_code=404, detail="Leave application not found")
+    await require_employee_access(
+        current_user,
+        application.employee,
+        LEAVE_MANAGEMENT_PERMISSIONS,
+        session,
+        allow_self=True,
+    )
     return await service.get_application(app_id)
 
 
 @router.post("/", response_model=LeaveApplicationRead, status_code=status.HTTP_201_CREATED)
 async def apply_leave(
     data: LeaveApplicationCreate,
-    _: User = Depends(fastapi_users.current_user(active=True)),
+    current_user: User = Depends(fastapi_users.current_user(active=True)),
     session: AsyncSession = Depends(get_async_session),
 ) -> LeaveApplicationRead:
     service = LeaveService(session)
+    employee = await service.employee_repo.get_by_id(data.employee_id)
+    if employee is None:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    await require_employee_access(current_user, employee, "leave.manage", session, allow_self=True)
     return await service.apply_leave(data)
 
 
@@ -171,6 +240,10 @@ async def approve_leave(
     session: AsyncSession = Depends(get_async_session),
 ) -> LeaveApplicationRead:
     service = LeaveService(session)
+    application = await service.repo.get_application_by_id(app_id)
+    if application is None:
+        raise HTTPException(status_code=404, detail="Leave application not found")
+    await require_employee_access(current_user, application.employee, "leave.approve", session)
     return await service.approve_leave(app_id, current_user.id)
 
 
@@ -182,6 +255,10 @@ async def reject_leave(
     session: AsyncSession = Depends(get_async_session),
 ) -> LeaveApplicationRead:
     service = LeaveService(session)
+    application = await service.repo.get_application_by_id(app_id)
+    if application is None:
+        raise HTTPException(status_code=404, detail="Leave application not found")
+    await require_employee_access(current_user, application.employee, "leave.reject", session)
     return await service.reject_leave(app_id, current_user.id, action.rejection_reason)
 
 
@@ -192,4 +269,8 @@ async def cancel_leave(
     session: AsyncSession = Depends(get_async_session),
 ) -> LeaveApplicationRead:
     service = LeaveService(session)
+    application = await service.repo.get_application_by_id(app_id)
+    if application is None:
+        raise HTTPException(status_code=404, detail="Leave application not found")
+    await require_employee_access(current_user, application.employee, "leave.cancel", session, allow_self=True)
     return await service.cancel_leave(app_id, current_user.id)

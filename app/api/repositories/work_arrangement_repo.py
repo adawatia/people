@@ -1,9 +1,9 @@
 from datetime import date
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from db.models import WorkArrangementRequest
+from db.models import Employee, WorkArrangementRequest
 
 
 class WorkArrangementRepository:
@@ -47,6 +47,8 @@ class WorkArrangementRepository:
         arrangement_type: str | None = None,
         from_date: date | None = None,
         to_date: date | None = None,
+        unit_ids: set[int] | None = None,
+        department_ids: set[int] | None = None,
     ) -> list[WorkArrangementRequest]:
         stmt = (
             select(WorkArrangementRequest)
@@ -55,6 +57,14 @@ class WorkArrangementRepository:
         )
         if employee_id is not None:
             stmt = stmt.where(WorkArrangementRequest.employee_id == employee_id)
+        elif unit_ids or department_ids:
+            stmt = stmt.join(Employee, WorkArrangementRequest.employee_id == Employee.id)
+            filters = []
+            if unit_ids:
+                filters.append(Employee.unit_id.in_(unit_ids))
+            if department_ids:
+                filters.append(Employee.department_id.in_(department_ids))
+            stmt = stmt.where(or_(*filters))
         if status is not None:
             stmt = stmt.where(WorkArrangementRequest.status == status.upper())
         if arrangement_type is not None:

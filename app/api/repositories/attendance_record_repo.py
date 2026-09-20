@@ -1,5 +1,5 @@
 from datetime import date
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -49,6 +49,8 @@ class AttendanceRecordRepository:
         status: str | None = None,
         page: int = 1,
         page_size: int = 50,
+        unit_ids: set[int] | None = None,
+        department_ids: set[int] | None = None,
     ) -> list[AttendanceRecord]:
         stmt = (
             select(AttendanceRecord)
@@ -70,6 +72,14 @@ class AttendanceRecordRepository:
             stmt = stmt.join(Employee, AttendanceRecord.employee_id == Employee.id).where(
                 Employee.unit_id == unit_id
             )
+        elif unit_ids or department_ids:
+            stmt = stmt.join(Employee, AttendanceRecord.employee_id == Employee.id)
+            filters = []
+            if unit_ids:
+                filters.append(Employee.unit_id.in_(unit_ids))
+            if department_ids:
+                filters.append(Employee.department_id.in_(department_ids))
+            stmt = stmt.where(or_(*filters))
 
         offset = (page - 1) * page_size
         stmt = stmt.offset(offset).limit(page_size)
@@ -104,8 +114,29 @@ class AttendanceRecordRepository:
         await self.session.flush()
         return correction
 
-    async def list_corrections(self, status: str | None = None) -> list[AttendanceCorrectionRequest]:
+    async def list_corrections(
+        self,
+        status: str | None = None,
+        employee_id: int | None = None,
+        unit_ids: set[int] | None = None,
+        department_ids: set[int] | None = None,
+    ) -> list[AttendanceCorrectionRequest]:
         stmt = select(AttendanceCorrectionRequest).order_by(AttendanceCorrectionRequest.requested_at.desc())
+        if employee_id is not None or unit_ids or department_ids:
+            stmt = stmt.join(
+                AttendanceRecord,
+                AttendanceCorrectionRequest.attendance_record_id == AttendanceRecord.id,
+            )
+        if employee_id is not None:
+            stmt = stmt.where(AttendanceRecord.employee_id == employee_id)
+        elif unit_ids or department_ids:
+            stmt = stmt.join(Employee, AttendanceRecord.employee_id == Employee.id)
+            filters = []
+            if unit_ids:
+                filters.append(Employee.unit_id.in_(unit_ids))
+            if department_ids:
+                filters.append(Employee.department_id.in_(department_ids))
+            stmt = stmt.where(or_(*filters))
         if status is not None:
             stmt = stmt.where(AttendanceCorrectionRequest.status == status.upper())
         return list((await self.session.execute(stmt)).scalars().all())
@@ -113,4 +144,3 @@ class AttendanceRecordRepository:
     async def delete(self, record: AttendanceRecord) -> None:
         await self.session.delete(record)
         await self.session.flush()
-

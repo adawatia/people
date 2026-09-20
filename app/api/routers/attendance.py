@@ -5,6 +5,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import fastapi_users, require_permission
 from core.database import get_async_session
+from core.employee_access import (
+    EmployeeAccessScope,
+    get_current_employee,
+    get_permission_scope,
+    require_employee_access,
+)
 from db.models import User
 from schemas.attendance import (
     AttendanceCorrectionAction,
@@ -22,24 +28,51 @@ from services.attendance_service import AttendanceService
 
 router = APIRouter(prefix="/attendance", tags=["attendance"])
 
+ATTENDANCE_READ_PERMISSIONS = (
+    "attendance.view",
+    "attendance.view_unit",
+    "attendance.view_department",
+)
+
+
+async def _attendance_read_scope(user: User, session: AsyncSession) -> EmployeeAccessScope:
+    scope = EmployeeAccessScope()
+    for permission in ATTENDANCE_READ_PERMISSIONS:
+        scope.include(await get_permission_scope(user, permission, session))
+    return scope
+
 
 # ── Raw Biometric / Mobile Punch Ingestion ────────────────────────────────────
 
 @router.post("/checkins", response_model=AttendancePunchRead, status_code=status.HTTP_201_CREATED)
 async def record_checkin(
     data: AttendancePunchCreate,
-    _: User = Depends(fastapi_users.current_user(active=True)),
+    current_user: User = Depends(fastapi_users.current_user(active=True)),
     session: AsyncSession = Depends(get_async_session),
 ) -> AttendancePunchRead:
     """Ingests a single biometric/mobile attendance punch and associates it with the active shift."""
     service = AttendanceService(session)
+    employee = None
+    if data.employee_id is not None:
+        employee = await service.employee_repo.get_by_id(data.employee_id)
+    elif data.employee_code is not None:
+        employee = await service.employee_repo.get_by_code(data.employee_code)
+    if employee is None:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    await require_employee_access(
+        current_user,
+        employee,
+        "attendance.correct",
+        session,
+        allow_self=True,
+    )
     return await service.record_punch(data)
 
 
 @router.post("/checkins/bulk", response_model=list[AttendancePunchRead], status_code=status.HTTP_201_CREATED)
 async def record_bulk_checkins(
     data: BulkPunchCreate,
-    _: User = Depends(fastapi_users.current_user(active=True)),
+    _: User = Depends(require_permission("attendance.process")),
     session: AsyncSession = Depends(get_async_session),
 ) -> list[AttendancePunchRead]:
     """Bulk records attendance punches from biometric devices or sync tools."""
@@ -53,15 +86,32 @@ async def list_checkins(
     from_time: datetime | None = None,
     to_time: datetime | None = None,
     is_processed: bool | None = None,
-    _: User = Depends(fastapi_users.current_user(active=True)),
+    current_user: User = Depends(fastapi_users.current_user(active=True)),
     session: AsyncSession = Depends(get_async_session),
 ) -> list[AttendancePunchRead]:
     service = AttendanceService(session)
+    current_employee = await get_current_employee(current_user, session)
+    scope = await _attendance_read_scope(current_user, session)
+    if employee_id is not None:
+        employee = await service.employee_repo.get_by_id(employee_id)
+        if employee is None:
+            raise HTTPException(status_code=404, detail="Employee not found")
+        await require_employee_access(
+            current_user,
+            employee,
+            ATTENDANCE_READ_PERMISSIONS,
+            session,
+            allow_self=True,
+        )
+    elif not scope.organization and not scope.unit_ids and not scope.department_ids:
+        employee_id = current_employee.id
     return await service.list_punches(
         employee_id=employee_id,
         from_time=from_time,
         to_time=to_time,
         is_processed=is_processed,
+        unit_ids=None if scope.organization else scope.unit_ids,
+        department_ids=None if scope.organization else scope.department_ids,
     )
 
 
@@ -73,10 +123,25 @@ async def list_attendance(
     status_filter: str | None = Query(None, alias="status"),
     page: int = 1,
     page_size: int = 50,
-    _: User = Depends(fastapi_users.current_user(active=True)),
+    current_user: User = Depends(fastapi_users.current_user(active=True)),
     session: AsyncSession = Depends(get_async_session),
 ) -> list[AttendanceRecordRead]:
     service = AttendanceService(session)
+    current_employee = await get_current_employee(current_user, session)
+    scope = await _attendance_read_scope(current_user, session)
+    if employee_id is not None:
+        employee = await service.employee_repo.get_by_id(employee_id)
+        if employee is None:
+            raise HTTPException(status_code=404, detail="Employee not found")
+        await require_employee_access(
+            current_user,
+            employee,
+            ATTENDANCE_READ_PERMISSIONS,
+            session,
+            allow_self=True,
+        )
+    elif not scope.organization and not scope.unit_ids and not scope.department_ids:
+        employee_id = current_employee.id
     return await service.list_attendance(
         employee_id=employee_id,
         from_date=from_date,
@@ -84,17 +149,29 @@ async def list_attendance(
         status_filter=status_filter,
         page=page,
         page_size=page_size,
+        unit_ids=None if scope.organization else scope.unit_ids,
+        department_ids=None if scope.organization else scope.department_ids,
     )
 
 
 @router.get("/records/{record_id}", response_model=AttendanceRecordRead)
 async def get_attendance_record(
     record_id: int,
-    _: User = Depends(fastapi_users.current_user(active=True)),
+    current_user: User = Depends(fastapi_users.current_user(active=True)),
     session: AsyncSession = Depends(get_async_session),
 ) -> AttendanceRecordRead:
     service = AttendanceService(session)
-    return await service.get_attendance_record(record_id)
+    record = await service.record_repo.get_by_id(record_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Attendance record not found")
+    await require_employee_access(
+        current_user,
+        record.employee,
+        ATTENDANCE_READ_PERMISSIONS,
+        session,
+        allow_self=True,
+    )
+    return AttendanceRecordRead.model_validate(record)
 
 
 @router.get("/employee/{emp_id}/calendar", response_model=list[AttendanceRecordRead])
@@ -102,11 +179,15 @@ async def get_employee_calendar(
     emp_id: int,
     year: int = Query(...),
     month: int = Query(...),
-    _: User = Depends(fastapi_users.current_user(active=True)),
+    current_user: User = Depends(fastapi_users.current_user(active=True)),
     session: AsyncSession = Depends(get_async_session),
 ) -> list[AttendanceRecordRead]:
     """Return all attendance records for an employee in a given month — for calendar view."""
     service = AttendanceService(session)
+    employee = await service.employee_repo.get_by_id(emp_id)
+    if employee is None:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    await require_employee_access(current_user, employee, ATTENDANCE_READ_PERMISSIONS, session, allow_self=True)
     return await service.get_employee_calendar(emp_id=emp_id, year=year, month=month)
 
 
@@ -115,10 +196,14 @@ async def get_attendance_summary(
     emp_id: int,
     year: int = Query(...),
     month: int = Query(...),
-    _: User = Depends(fastapi_users.current_user(active=True)),
+    current_user: User = Depends(fastapi_users.current_user(active=True)),
     session: AsyncSession = Depends(get_async_session),
 ) -> AttendanceSummaryRead:
     service = AttendanceService(session)
+    employee = await service.employee_repo.get_by_id(emp_id)
+    if employee is None:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    await require_employee_access(current_user, employee, ATTENDANCE_READ_PERMISSIONS, session, allow_self=True)
     return await service.get_attendance_summary(emp_id=emp_id, year=year, month=month)
 
 
@@ -127,11 +212,22 @@ async def get_attendance_summary(
 @router.post("/process", response_model=ProcessAttendanceResponse)
 async def process_attendance(
     req: ProcessAttendanceRequest,
-    _: User = Depends(require_permission("attendance.process")),
+    current_user: User = Depends(require_permission("attendance.process")),
     session: AsyncSession = Depends(get_async_session),
 ) -> ProcessAttendanceResponse:
     """Executes the daily automated attendance calculation engine."""
     service = AttendanceService(session)
+    scope = await get_permission_scope(current_user, "attendance.process", session)
+    if req.employee_id is not None:
+        employee = await service.employee_repo.get_by_id(req.employee_id)
+        if employee is None:
+            raise HTTPException(status_code=404, detail="Employee not found")
+        await require_employee_access(current_user, employee, "attendance.process", session)
+    elif req.unit_id is not None:
+        if not scope.organization and req.unit_id not in scope.unit_ids:
+            raise HTTPException(status_code=403, detail="You cannot process attendance for this unit")
+    elif not scope.organization:
+        raise HTTPException(status_code=403, detail="A scoped attendance run must specify an authorized unit or employee")
     return await service.process_attendance_batch(req)
 
 
@@ -140,22 +236,42 @@ async def process_attendance(
 @router.post("/corrections", response_model=AttendanceCorrectionRead, status_code=status.HTTP_201_CREATED)
 async def submit_correction(
     data: AttendanceCorrectionCreate,
-    _: User = Depends(fastapi_users.current_user(active=True)),
+    current_user: User = Depends(fastapi_users.current_user(active=True)),
     session: AsyncSession = Depends(get_async_session),
 ) -> AttendanceCorrectionRead:
     """Employee submits an attendance correction request."""
     service = AttendanceService(session)
+    record = await service.record_repo.get_by_id(data.attendance_record_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Attendance record not found")
+    await require_employee_access(
+        current_user,
+        record.employee,
+        "attendance.correct",
+        session,
+        allow_self=True,
+    )
     return await service.submit_correction(data)
 
 
 @router.get("/corrections", response_model=list[AttendanceCorrectionRead])
 async def list_corrections(
     status: str | None = Query(None),
-    _: User = Depends(fastapi_users.current_user(active=True)),
+    current_user: User = Depends(fastapi_users.current_user(active=True)),
     session: AsyncSession = Depends(get_async_session),
 ) -> list[AttendanceCorrectionRead]:
     service = AttendanceService(session)
-    return await service.list_corrections(status=status)
+    current_employee = await get_current_employee(current_user, session)
+    scope = await get_permission_scope(current_user, "attendance.approve_correction", session)
+    employee_id = None
+    if not scope.organization and not scope.unit_ids and not scope.department_ids:
+        employee_id = current_employee.id
+    return await service.list_corrections(
+        status=status,
+        employee_id=employee_id,
+        unit_ids=None if scope.organization else scope.unit_ids,
+        department_ids=None if scope.organization else scope.department_ids,
+    )
 
 
 @router.patch("/corrections/{correction_id}/approve", response_model=AttendanceCorrectionRead)
@@ -165,6 +281,11 @@ async def approve_correction(
     session: AsyncSession = Depends(get_async_session),
 ) -> AttendanceCorrectionRead:
     service = AttendanceService(session)
+    correction = await service.record_repo.get_correction_by_id(correction_id)
+    if correction is None:
+        raise HTTPException(status_code=404, detail="Correction request not found")
+    record = await service.record_repo.get_by_id(correction.attendance_record_id)
+    await require_employee_access(current_user, record.employee, "attendance.approve_correction", session)
     return await service.approve_correction(correction_id, current_user.id)
 
 
@@ -176,9 +297,13 @@ async def reject_correction(
     session: AsyncSession = Depends(get_async_session),
 ) -> AttendanceCorrectionRead:
     service = AttendanceService(session)
+    correction = await service.record_repo.get_correction_by_id(correction_id)
+    if correction is None:
+        raise HTTPException(status_code=404, detail="Correction request not found")
+    record = await service.record_repo.get_by_id(correction.attendance_record_id)
+    await require_employee_access(current_user, record.employee, "attendance.approve_correction", session)
     return await service.reject_correction(
         correction_id,
         current_user.id,
         action.rejection_reason if action else None,
     )
-

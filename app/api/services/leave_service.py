@@ -163,10 +163,14 @@ class LeaveService:
         self,
         employee_id: int | None = None,
         leave_period_id: int | None = None,
+        unit_ids: set[int] | None = None,
+        department_ids: set[int] | None = None,
     ) -> list[LeaveAllocationRead]:
         allocs = await self.repo.list_allocations(
             employee_id=employee_id,
             leave_period_id=leave_period_id,
+            unit_ids=unit_ids,
+            department_ids=department_ids,
         )
         reads = []
         for a in allocs:
@@ -563,12 +567,16 @@ class LeaveService:
         status: str | None = None,
         from_date: date | None = None,
         to_date: date | None = None,
+        unit_ids: set[int] | None = None,
+        department_ids: set[int] | None = None,
     ) -> list[LeaveApplicationRead]:
         apps = await self.repo.list_applications(
             employee_id=employee_id,
             status=status,
             from_date=from_date,
             to_date=to_date,
+            unit_ids=unit_ids,
+            department_ids=department_ids,
         )
         reads = []
         for a in apps:

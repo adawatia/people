@@ -1,9 +1,9 @@
 from datetime import datetime
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from db.models import AttendancePunch
+from db.models import AttendancePunch, Employee
 
 
 class AttendancePunchRepository:
@@ -44,6 +44,8 @@ class AttendancePunchRepository:
         from_time: datetime | None = None,
         to_time: datetime | None = None,
         is_processed: bool | None = None,
+        unit_ids: set[int] | None = None,
+        department_ids: set[int] | None = None,
     ) -> list[AttendancePunch]:
         stmt = (
             select(AttendancePunch)
@@ -52,6 +54,14 @@ class AttendancePunchRepository:
         )
         if employee_id is not None:
             stmt = stmt.where(AttendancePunch.employee_id == employee_id)
+        elif unit_ids or department_ids:
+            stmt = stmt.join(Employee, AttendancePunch.employee_id == Employee.id)
+            filters = []
+            if unit_ids:
+                filters.append(Employee.unit_id.in_(unit_ids))
+            if department_ids:
+                filters.append(Employee.department_id.in_(department_ids))
+            stmt = stmt.where(or_(*filters))
         if from_time is not None:
             stmt = stmt.where(AttendancePunch.punch_time >= from_time)
         if to_time is not None:

@@ -510,6 +510,16 @@ class WorkArrangementRequest(Base):
 
     employee: Mapped[Employee] = relationship()
 
+    @property
+    def employee_name(self) -> str | None:
+        if self.employee is None:
+            return None
+        return f"{self.employee.first_name} {self.employee.last_name or ''}".strip()
+
+    @property
+    def employee_code(self) -> str | None:
+        return self.employee.employee_code if self.employee is not None else None
+
 
 
 # -----------------------------------------------------------------------------
@@ -623,4 +633,3 @@ class OvertimeApproval(Base):
     actioned_by: Mapped[int] = mapped_column(ForeignKey("users.user_id"), nullable=False)
     actioned_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_ist)
     remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
-
