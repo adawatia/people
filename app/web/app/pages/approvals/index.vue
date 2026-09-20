@@ -196,12 +196,12 @@ async function rejectRequest() {
     <UAlert
       v-else-if="activeError"
       class="mt-6"
-      color="error"
+      color="warning"
       variant="soft"
-      icon="i-lucide-cloud-off"
-      title="Approval queue is unavailable"
-      description="The API could not load pending requests."
-      :actions="[{ label: 'Try again', onClick: () => activeTab === 'attendance' ? attendanceQueue.refresh() : activeTab === 'leave' ? leaveQueue.refresh() : workQueue.refresh() }]"
+      icon="i-lucide-coffee"
+      title="Your approval queue is taking a short break"
+      description="We couldn’t refresh pending requests right now. Please try again in a moment."
+      :actions="[{ label: 'Refresh approvals', onClick: () => activeTab === 'attendance' ? attendanceQueue.refresh() : activeTab === 'leave' ? leaveQueue.refresh() : workQueue.refresh() }]"
     />
 
     <div

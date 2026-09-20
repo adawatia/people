@@ -38,10 +38,12 @@ async function addHoliday() { if (!selected.value || !holiday.name.trim()) retur
     </div><UAlert
       v-if="error"
       class="mt-6"
-      color="error"
+      color="warning"
       variant="soft"
-      title="Holiday calendars are unavailable"
-      :actions="[{ label: 'Try again', onClick: () => refresh() }]"
+      icon="i-lucide-sun-medium"
+      title="Your holiday calendar is taking a short break"
+      description="We couldn’t refresh the holiday list right now. Please try again in a moment."
+      :actions="[{ label: 'Refresh calendar', onClick: () => refresh() }]"
     /><div
       v-else
       class="mt-7 grid gap-5 lg:grid-cols-[20rem_1fr]"

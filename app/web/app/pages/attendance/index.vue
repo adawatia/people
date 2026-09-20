@@ -199,12 +199,12 @@ function hasPendingCorrection(recordId: number) {
     <UAlert
       v-else-if="error"
       class="mt-6"
-      color="error"
+      color="warning"
       variant="soft"
-      icon="i-lucide-cloud-off"
-      title="Attendance is unavailable"
-      description="The HRMS API could not load your attendance. Check the backend database and try again."
-      :actions="[{ label: 'Try again', onClick: () => refresh() }]"
+      icon="i-lucide-coffee"
+      title="Your attendance is taking a short break"
+      description="We couldn’t refresh your attendance right now. Please try again in a moment."
+      :actions="[{ label: 'Refresh attendance', onClick: () => refresh() }]"
     />
 
     <template v-if="employeeId">

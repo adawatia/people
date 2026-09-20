@@ -27,12 +27,11 @@ class WorkArrangementService:
         if not emp:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Employee not found")
 
-        valid_types = {"WORK_FROM_HOME", "OUT_DUTY", "FIELD_WORK", "OFFICE"}
         arr_type = data.arrangement_type.upper()
-        if arr_type not in valid_types:
+        if arr_type != "WORK_FROM_HOME":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid arrangement type '{arr_type}'. Must be one of: {valid_types}",
+                detail="Only work-from-home requests are currently supported",
             )
 
         overlap = await self.repo.find_overlapping(data.employee_id, data.from_date, data.to_date)

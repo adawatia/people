@@ -107,10 +107,12 @@ async function deleteItem(item: Unit | Department | Designation) {
     <UAlert
       v-if="error"
       class="mt-5"
-      color="error"
+      color="warning"
       variant="soft"
-      title="Organization data is unavailable"
-      :actions="[{ label: 'Try again', onClick: () => refresh() }]"
+      icon="i-lucide-coffee"
+      title="Organization details are taking a short break"
+      description="We couldn’t refresh these details right now. Please try again in a moment."
+      :actions="[{ label: 'Refresh details', onClick: () => refresh() }]"
     />
     <div
       v-else-if="pending"

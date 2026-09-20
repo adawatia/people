@@ -63,10 +63,12 @@ async function markAll() {
     <UAlert
       v-if="error"
       class="mt-5"
-      color="error"
+      color="warning"
       variant="soft"
-      title="Notifications are unavailable"
-      :actions="[{ label: 'Try again', onClick: () => refresh() }]"
+      icon="i-lucide-bell-off"
+      title="Your notifications are taking a short break"
+      description="We couldn’t check for new updates right now. Please try again in a moment."
+      :actions="[{ label: 'Refresh notifications', onClick: () => refresh() }]"
     />
     <section
       v-else

@@ -120,10 +120,12 @@ async function deleteEmployee(item: Employee) {
     <UAlert
       v-if="error"
       class="mt-5"
-      color="error"
+      color="warning"
       variant="soft"
-      title="Employees are unavailable"
-      :actions="[{ label: 'Try again', onClick: () => refresh() }]"
+      icon="i-lucide-coffee"
+      title="The people list is taking a short break"
+      description="We couldn’t refresh employee details right now. Please try again in a moment."
+      :actions="[{ label: 'Refresh people', onClick: () => refresh() }]"
     />
     <section class="people-card mt-5 overflow-hidden">
       <div class="flex items-center justify-between border-b border-[var(--people-border)] px-5 py-4">

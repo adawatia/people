@@ -140,10 +140,10 @@ const stats = computed(() => isManager.value
         class="mt-6"
         color="warning"
         variant="soft"
-        icon="i-lucide-cloud-off"
-        title="Dashboard data is unavailable"
-        description="The application shell is ready, but the HRMS API could not return metrics."
-        :actions="[{ label: 'Try again', onClick: () => refresh() }]"
+        icon="i-lucide-coffee"
+        title="Your dashboard is taking a short break"
+        description="We couldn’t refresh your latest People updates right now. Please try again in a moment."
+        :actions="[{ label: 'Refresh dashboard', onClick: () => refresh() }]"
       />
 
       <div class="mt-7 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">

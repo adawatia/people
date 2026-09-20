@@ -15,7 +15,7 @@ const today = new Date().toISOString().slice(0, 10)
 const form = reactive({ arrangement_type: 'WORK_FROM_HOME' as WorkArrangementType, from_date: today, to_date: today, reason: '', destination_location: '', contact_phone: '' })
 
 const typeConfig: Record<WorkArrangementType, { label: string, description: string, icon: string, tone: string }> = {
-  WORK_FROM_HOME: { label: 'Work from home', description: 'Work remotely from your residence', icon: 'i-lucide-house-wifi', tone: 'var(--people-lavender)' },
+  WORK_FROM_HOME: { label: 'Work from home', description: 'Request to work remotely from your residence', icon: 'i-lucide-house-wifi', tone: 'var(--people-lavender)' },
   OUT_DUTY: { label: 'Out duty', description: 'Official work away from your workplace', icon: 'i-lucide-building-2', tone: 'var(--people-blue)' },
   FIELD_WORK: { label: 'Field work', description: 'Work at a client or field location', icon: 'i-lucide-map-pin', tone: 'var(--people-peach)' },
   OFFICE: { label: 'Office', description: 'Temporary office-based arrangement', icon: 'i-lucide-briefcase-business', tone: 'var(--people-mint)' }
@@ -31,8 +31,7 @@ const requestDays = computed(() => {
   const to = new Date(`${form.to_date}T00:00:00`)
   return to >= from ? Math.floor((to.getTime() - from.getTime()) / 86400000) + 1 : 0
 })
-const needsDestination = computed(() => ['OUT_DUTY', 'FIELD_WORK'].includes(form.arrangement_type))
-const formValid = computed(() => requestDays.value > 0 && form.reason.trim().length >= 5 && (!needsDestination.value || form.destination_location.trim().length >= 2))
+const formValid = computed(() => requestDays.value > 0 && form.reason.trim().length >= 5)
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(`${value}T00:00:00`))
@@ -91,7 +90,7 @@ async function cancelRequest(item: WorkArrangement) {
         </p><h2 class="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">
           Work arrangements
         </h2><p class="mt-2 max-w-2xl text-sm leading-6 text-muted">
-          Request remote work, field visits, or official duty away from your usual workplace.
+          Request to work from home and follow the status of your requests.
         </p>
       </div><UButton
         size="lg"
@@ -114,31 +113,36 @@ async function cancelRequest(item: WorkArrangement) {
     <UAlert
       v-else-if="error"
       class="mt-6"
-      color="error"
+      color="warning"
       variant="soft"
-      icon="i-lucide-cloud-off"
-      title="Requests are unavailable"
-      description="The API could not load your work arrangements."
-      :actions="[{ label: 'Try again', onClick: () => refresh() }]"
+      icon="i-lucide-coffee"
+      title="Your work plans are taking a short break"
+      description="We couldn’t refresh your work arrangement requests right now. Please try again in a moment."
+      :actions="[{ label: 'Refresh requests', onClick: () => refresh() }]"
+    />
+    <UAlert
+      v-else
+      class="mt-6"
+      color="info"
+      variant="soft"
+      icon="i-lucide-construction"
+      title="Work from home requests are in progress"
+      description="This feature is being built step by step. For now, you can submit and track work-from-home requests here."
     />
 
     <template v-if="employeeId">
-      <div class="mt-7 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <article
-          v-for="(config, key) in typeConfig"
-          :key="key"
-          class="people-card p-5"
-        >
+      <div class="mt-7 max-w-xl">
+        <article class="people-card p-5">
           <span
             class="grid size-11 place-items-center rounded-2xl"
-            :style="{ background: config.tone }"
+            :style="{ background: typeConfig.WORK_FROM_HOME.tone }"
           ><UIcon
-            :name="config.icon"
+            :name="typeConfig.WORK_FROM_HOME.icon"
             class="size-5"
           /></span><h3 class="mt-4 font-semibold">
-            {{ config.label }}
+            {{ typeConfig.WORK_FROM_HOME.label }}
           </h3><p class="mt-2 text-sm leading-6 text-muted">
-            {{ config.description }}
+            {{ typeConfig.WORK_FROM_HOME.description }}
           </p>
         </article>
       </div>
@@ -235,9 +239,9 @@ async function cancelRequest(item: WorkArrangement) {
             name="i-lucide-briefcase-business"
             class="mx-auto size-8 text-muted"
           /><p class="mt-3 text-sm font-semibold">
-            No requests here
+            No work arrangement requests yet
           </p><p class="mt-1 text-xs text-muted">
-            Create a request when you need a different work arrangement.
+            Your requests will appear here when you need to work from home.
           </p>
         </div>
       </section>
@@ -254,7 +258,7 @@ async function cancelRequest(item: WorkArrangement) {
             <p class="text-sm font-semibold text-primary">
               New request
             </p><h3 class="mt-1 text-2xl font-semibold">
-              Choose a work arrangement
+              Request work from home
             </h3>
           </div><UButton
             icon="i-lucide-x"
@@ -263,20 +267,6 @@ async function cancelRequest(item: WorkArrangement) {
             aria-label="Close"
             @click="requestOpen = false"
           />
-        </div><div class="mt-6 grid gap-3 sm:grid-cols-2">
-          <button
-            v-for="(config, key) in typeConfig"
-            :key="key"
-            type="button"
-            class="flex items-start gap-3 rounded-2xl border p-4 text-left transition-colors"
-            :class="form.arrangement_type === key ? 'border-primary bg-primary/5' : 'border-[var(--people-border)]'"
-            @click="form.arrangement_type = key"
-          >
-            <span
-              class="grid size-10 shrink-0 place-items-center rounded-xl"
-              :style="{ background: config.tone }"
-            ><UIcon :name="config.icon" /></span><span><span class="block text-sm font-semibold">{{ config.label }}</span><span class="mt-1 block text-xs leading-5 text-muted">{{ config.description }}</span></span>
-          </button>
         </div><div class="mt-6 grid gap-5 sm:grid-cols-2">
           <UFormField
             label="From"
@@ -299,19 +289,6 @@ async function cancelRequest(item: WorkArrangement) {
               type="date"
               size="xl"
               :min="form.from_date"
-            />
-          </UFormField><UFormField
-            v-if="needsDestination"
-            class="sm:col-span-2"
-            label="Destination or work location"
-            required
-          >
-            <UInput
-              v-model="form.destination_location"
-              class="w-full"
-              size="xl"
-              icon="i-lucide-map-pin"
-              placeholder="Client office, project site, city…"
             />
           </UFormField><UFormField
             class="sm:col-span-2"

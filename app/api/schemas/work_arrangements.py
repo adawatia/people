@@ -1,10 +1,11 @@
 from datetime import date, datetime
+from typing import Literal
 from pydantic import BaseModel, ConfigDict
 
 
 class WorkArrangementCreate(BaseModel):
     employee_id: int
-    arrangement_type: str  # "WORK_FROM_HOME" | "OUT_DUTY" | "FIELD_WORK" | "OFFICE"
+    arrangement_type: Literal["WORK_FROM_HOME"]
     from_date: date
     to_date: date
     reason: str

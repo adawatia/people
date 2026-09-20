@@ -52,11 +52,12 @@ const statusColor = (value: string) => ({ PENDING: 'warning', APPROVED: 'success
     <UAlert
       v-else-if="error"
       class="mt-6"
-      color="error"
+      color="warning"
       variant="soft"
-      icon="i-lucide-cloud-off"
-      title="Overtime information is unavailable"
-      :actions="[{ label: 'Try again', onClick: () => refresh() }]"
+      icon="i-lucide-coffee"
+      title="Your overtime details are taking a short break"
+      description="We couldn’t refresh your overtime details right now. Please try again in a moment."
+      :actions="[{ label: 'Refresh overtime', onClick: () => refresh() }]"
     />
     <template v-else-if="employeeId">
       <section class="mt-7 grid gap-4 sm:grid-cols-3">

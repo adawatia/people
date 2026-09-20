@@ -53,8 +53,10 @@ const details = computed(() => [
         Security settings
       </UButton>
     </div>
-    <UCard class="mt-7">
-      <div class="flex flex-col gap-5 sm:flex-row sm:items-center">
+    <UCard class="relative mt-7 overflow-hidden">
+      <img src="/branding/dat-labs-symbol-dark.svg" alt="" aria-hidden="true" class="pointer-events-none absolute -right-5 -top-8 size-36 opacity-[0.035] dark:hidden">
+      <img src="/branding/dat-labs-symbol-light.svg" alt="" aria-hidden="true" class="pointer-events-none absolute -right-5 -top-8 hidden size-36 opacity-[0.06] dark:block">
+      <div class="relative flex flex-col gap-5 sm:flex-row sm:items-center">
         <UAvatar
           :text="auth.initials.value"
           size="3xl"

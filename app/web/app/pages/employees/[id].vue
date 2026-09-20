@@ -27,10 +27,12 @@ const formatDate = (value?: string | null) => value ? new Intl.DateTimeFormat('e
     <UAlert
       v-if="error"
       class="mt-5"
-      color="error"
+      color="warning"
       variant="soft"
-      title="Employee profile is unavailable"
-      :actions="[{ label: 'Try again', onClick: () => refresh() }]"
+      icon="i-lucide-coffee"
+      title="This profile is taking a short break"
+      description="We couldn’t refresh the profile right now. Please try again in a moment."
+      :actions="[{ label: 'Refresh profile', onClick: () => refresh() }]"
     />
     <div
       v-else-if="pending"

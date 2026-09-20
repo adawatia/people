@@ -116,7 +116,7 @@ async function cancelApplication(application: LeaveApplication) {
       <UButton
         size="lg"
         icon="i-lucide-plus"
-        :disabled="!employeeId"
+        :disabled="!employeeId || !data?.types.length"
         @click="openApplication"
       >
         Request leave
@@ -135,12 +135,12 @@ async function cancelApplication(application: LeaveApplication) {
     <UAlert
       v-else-if="error"
       class="mt-6"
-      color="error"
+      color="warning"
       variant="soft"
-      icon="i-lucide-cloud-off"
-      title="Leave information is unavailable"
-      description="The API could not load your balances and applications."
-      :actions="[{ label: 'Try again', onClick: () => refresh() }]"
+      icon="i-lucide-coffee"
+      title="Your leave board is taking a short break"
+      description="We couldn’t refresh your leave details just now. Your requests are safe — please try again in a moment."
+      :actions="[{ label: 'Refresh leave board', onClick: () => refresh() }]"
     />
 
     <template v-if="employeeId">
@@ -198,6 +198,25 @@ async function cancelApplication(application: LeaveApplication) {
               <span>{{ balance.used }} used</span><span>{{ balance.pending }} pending</span><span>{{ balance.allocated }} allocated</span>
             </div>
           </article>
+        </div>
+        <div
+          v-if="!pending && data && !data.balances.length"
+          class="people-card mt-4 flex flex-col items-center p-8 text-center"
+        >
+          <span
+            class="grid size-12 place-items-center rounded-2xl bg-[var(--people-lavender)] text-primary"
+          >
+            <UIcon
+              name="i-lucide-sparkles"
+              class="size-6"
+            />
+          </span>
+          <h4 class="mt-4 font-semibold">
+            Your leave balance is on its way
+          </h4>
+          <p class="mt-1 max-w-md text-sm leading-6 text-muted">
+            We’re waiting for this year’s balance from your People system. Once it arrives, it will appear here automatically.
+          </p>
         </div>
       </section>
 
@@ -322,16 +341,36 @@ async function cancelApplication(application: LeaveApplication) {
         </div>
 
         <div
-          v-if="!pending && !filteredApplications.length"
+          v-if="!pending && !filteredApplications.length && !data?.applications.length"
           class="px-6 py-14 text-center"
         >
           <UIcon
-            name="i-lucide-calendar-search"
-            class="mx-auto size-8 text-muted"
+            name="i-lucide-sparkles"
+            class="mx-auto size-9 text-primary"
           /><p class="mt-3 text-sm font-semibold">
-            No leave requests here
+            No leave plans yet
+          </p><p class="mx-auto mt-1 max-w-sm text-xs leading-5 text-muted">
+            You haven’t applied for any leave. When you need a little time away, your request will show up here.
+          </p><UButton
+            class="mt-5"
+            icon="i-lucide-plus"
+            :disabled="!data?.types.length"
+            @click="openApplication"
+          >
+            Request your first leave
+          </UButton>
+        </div>
+        <div
+          v-else-if="!pending && !filteredApplications.length"
+          class="px-6 py-14 text-center"
+        >
+          <UIcon
+            name="i-lucide-filter-x"
+            class="mx-auto size-9 text-muted"
+          /><p class="mt-3 text-sm font-semibold">
+            Nothing in this filter
           </p><p class="mt-1 text-xs text-muted">
-            Your requests will appear as soon as you submit one.
+            Try another status to see more of your leave history.
           </p>
         </div>
       </section>

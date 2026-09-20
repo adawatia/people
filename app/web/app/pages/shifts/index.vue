@@ -62,10 +62,12 @@ async function createAssignment() {
     </div><UAlert
       v-if="error"
       class="mt-5"
-      color="error"
+      color="warning"
       variant="soft"
-      title="Shift data is unavailable"
-      :actions="[{ label: 'Try again', onClick: () => refresh() }]"
+      icon="i-lucide-coffee"
+      title="Your shifts are taking a short break"
+      description="We couldn’t refresh shift details right now. Please try again in a moment."
+      :actions="[{ label: 'Refresh shifts', onClick: () => refresh() }]"
     /><div
       v-else-if="pending"
       class="mt-5 grid gap-4 md:grid-cols-2"
