@@ -136,6 +136,7 @@ class ErpAttendanceRecordCreate(BaseModel):
     employee_code: str | None = None
     erp_record_id: str
     attendance_date: date
+    shift_id: int | None = None
     status: str
     punch_in: time | None = None
     punch_out: time | None = None
@@ -143,7 +144,14 @@ class ErpAttendanceRecordCreate(BaseModel):
     overtime_minutes: int = 0
     late_minutes: int = 0
     early_exit_minutes: int = 0
-    model_config = ConfigDict(json_schema_extra={"example": {"employee_code": "EMP001", "erp_record_id": "ERP-ATT-20260920-EMP001", "attendance_date": "2026-09-20", "status": "PRESENT", "punch_in": "09:15:00", "punch_out": "18:05:00", "worked_minutes": 530}})
+    model_config = ConfigDict(json_schema_extra={"example": {"employee_code": "EMP001", "erp_record_id": "ERP-ATT-20260920-EMP001", "attendance_date": "2026-09-20", "shift_id": 1, "status": "PRESENT", "punch_in": "09:15:00", "punch_out": "18:05:00", "worked_minutes": 530}})
+
+
+class ErpAttendanceRecordBulkCreate(BaseModel):
+    """Bulk daily records for any mix of past, current, or planned dates."""
+
+    records: list[ErpAttendanceRecordCreate] = Field(..., min_length=1, max_length=5000)
+    model_config = ConfigDict(json_schema_extra={"example": {"records": [{"employee_code": "EMP001", "erp_record_id": "ERP-ATT-20260920-EMP001", "attendance_date": "2026-09-20", "shift_id": 1, "status": "PRESENT", "punch_in": "09:15:00", "punch_out": "18:05:00", "worked_minutes": 530}]}})
 
 
 class ErpCorrectionCreate(BaseModel):

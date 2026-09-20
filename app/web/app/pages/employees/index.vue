@@ -17,7 +17,7 @@ const page = ref(1)
 const createOpen = ref(false)
 const saving = ref(false)
 const editingId = ref<number | null>(null)
-const form = reactive({ employee_code: '', first_name: '', last_name: '', official_email: '', phone_number: '', unit_id: undefined as number | undefined, department_id: undefined as number | undefined, designation_id: undefined as number | undefined, date_of_joining: '', employment_type: 'PERMANENT', create_user_account: true, username: '', send_invitation: false, initial_password: '' })
+const form = reactive({ employee_code: '', first_name: '', last_name: '', official_email: '', phone_number: '', unit_id: undefined as number | undefined, department_id: undefined as number | undefined, designation_id: undefined as number | undefined, date_of_joining: '', employment_type: 'PERMANENT', create_user_account: true, username: '', initial_password: '' })
 let searchTimer: ReturnType<typeof setTimeout> | undefined
 watch(search, (value) => {
   clearTimeout(searchTimer)
@@ -38,7 +38,7 @@ const departments = computed(() => (masters.value?.departments || []).filter(ite
 const initials = (item: Employee) => `${item.first_name[0] || ''}${item.last_name?.[0] || ''}`.toUpperCase()
 function resetForm() {
   editingId.value = null
-  Object.assign(form, { employee_code: '', first_name: '', last_name: '', official_email: '', phone_number: '', unit_id: undefined, department_id: undefined, designation_id: undefined, date_of_joining: '', employment_type: 'PERMANENT', create_user_account: true, username: '', send_invitation: false, initial_password: '' })
+  Object.assign(form, { employee_code: '', first_name: '', last_name: '', official_email: '', phone_number: '', unit_id: undefined, department_id: undefined, designation_id: undefined, date_of_joining: '', employment_type: 'PERMANENT', create_user_account: true, username: '', initial_password: '' })
   createOpen.value = true
 }
 function editEmployee(item: Employee) {
@@ -51,7 +51,7 @@ async function saveEmployee() {
   saving.value = true
   try {
     const body = { ...form, employee_code: form.employee_code.trim(), first_name: form.first_name.trim(), last_name: form.last_name.trim() || null, official_email: form.official_email.trim() || null, phone_number: form.phone_number.trim() || null, date_of_joining: form.date_of_joining || null }
-    await api.request(editingId.value ? `employees/${editingId.value}` : 'employees/onboard', { method: editingId.value ? 'PATCH' : 'POST', body: editingId.value ? Object.fromEntries(Object.entries(body).filter(([key]) => !['employee_code', 'create_user_account', 'username', 'send_invitation'].includes(key))) : body })
+    await api.request(editingId.value ? `employees/${editingId.value}` : 'employees/onboard', { method: editingId.value ? 'PATCH' : 'POST', body: editingId.value ? Object.fromEntries(Object.entries(body).filter(([key]) => !['employee_code', 'create_user_account', 'username'].includes(key))) : body })
     createOpen.value = false
     toast.add({ title: `Employee ${editingId.value ? 'updated' : 'created'}`, color: 'success', icon: 'i-lucide-user-round-check' })
     await refresh()
@@ -306,7 +306,7 @@ async function deleteEmployee(item: Employee) {
           </UFormField>
           <div v-if="!editingId" class="rounded-lg border border-[var(--people-border)] bg-muted/5 p-4 sm:col-span-2">
             <UCheckbox v-model="form.create_user_account" label="Create portal login account" />
-            <p class="mt-1 text-xs text-muted">The employee will receive an invitation and set their password securely.</p>
+            <p class="mt-1 text-xs text-muted">The employee will receive a temporary password and must change it after first login.</p>
             <div v-if="form.create_user_account" class="mt-4 grid gap-4 sm:grid-cols-2">
               <UFormField label="Username (optional)">
                 <UInput v-model="form.username" class="w-full" placeholder="Defaults to email prefix" />

@@ -2,7 +2,7 @@ from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.auth import fastapi_users, require_permission
+from core.auth import fastapi_users, require_permission, verify_erp_api_key
 from core.database import get_async_session
 from core.employee_access import (
     EmployeeAccessScope,
@@ -49,10 +49,9 @@ async def list_leave_periods(
     return await service.list_periods()
 
 
-@router.post("/periods", response_model=LeavePeriodRead, status_code=status.HTTP_201_CREATED)
+@router.post("/periods", response_model=LeavePeriodRead, status_code=status.HTTP_201_CREATED, include_in_schema=False, dependencies=[Depends(verify_erp_api_key)])
 async def create_leave_period(
     data: LeavePeriodCreate,
-    _: User = Depends(require_permission("leave.manage")),
     session: AsyncSession = Depends(get_async_session),
 ) -> LeavePeriodRead:
     service = LeaveService(session)
@@ -71,10 +70,9 @@ async def list_leave_types(
     return await service.list_types(is_active=is_active)
 
 
-@router.post("/types", response_model=LeaveTypeRead, status_code=status.HTTP_201_CREATED)
+@router.post("/types", response_model=LeaveTypeRead, status_code=status.HTTP_201_CREATED, include_in_schema=False, dependencies=[Depends(verify_erp_api_key)])
 async def create_leave_type(
     data: LeaveTypeCreate,
-    _: User = Depends(require_permission("leave.manage")),
     session: AsyncSession = Depends(get_async_session),
 ) -> LeaveTypeRead:
     service = LeaveService(session)
@@ -92,11 +90,10 @@ async def get_leave_type(
     return LeaveTypeRead.model_validate(lt)
 
 
-@router.patch("/types/{type_id}", response_model=LeaveTypeRead)
+@router.patch("/types/{type_id}", response_model=LeaveTypeRead, include_in_schema=False, dependencies=[Depends(verify_erp_api_key)])
 async def update_leave_type(
     type_id: int,
     data: LeaveTypeUpdate,
-    _: User = Depends(require_permission("leave.manage")),
     session: AsyncSession = Depends(get_async_session),
 ) -> LeaveTypeRead:
     service = LeaveService(session)

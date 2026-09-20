@@ -73,7 +73,6 @@ class EmployeeOnboardingCreate(EmployeeCreate):
     """Employee HR record plus its required portal-account provisioning."""
     create_user_account: bool = True
     username: str | None = None
-    send_invitation: bool = False
     initial_password: str | None = None
     model_config = ConfigDict(json_schema_extra={"example": {
         "employee_code": "EMP001", "role": "EMPLOYEE", "first_name": "Rahul", "last_name": "Sharma",
@@ -86,7 +85,7 @@ class EmployeeOnboardingCreate(EmployeeCreate):
         "designation": "Senior Engineer", "designation_id": 1, "date_of_joining": "2026-09-20", "employment_type": "PERMANENT",
         "status": "ACTIVE", "biometric_id": "BIO-EMP001", "overtime_eligible": True,
         "unit_id": 1, "department_id": 1, "shift_id": None, "reporting_manager_id": None, "monthly_salary": None,
-        "user_id": None, "create_user_account": True, "username": "rahul.sharma", "send_invitation": False,
+        "user_id": None, "create_user_account": True, "username": "rahul.sharma",
         "initial_password": "StrongPassword@123"
     }})
 

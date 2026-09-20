@@ -1,66 +1,33 @@
-from datetime import datetime
+"""ERP-owned processed attendance synchronization."""
 
-from fastapi import APIRouter, Depends, Header
+from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import verify_erp_api_key
 from core.database import get_async_session
-from db.models import AttendanceCorrectionRequest, AttendancePunch, AttendanceRecord, Employee, now_ist
-from schemas.attendance import (
-    AttendancePunchCreate,
-    ErpAttendanceRecordCreate,
-    ErpCorrectionCreate,
-    ErpSyncResult,
-)
-from services.attendance_service import AttendanceService
+from db.models import AttendanceRecord, Employee, Shift, now_ist
+from schemas.attendance import ErpAttendanceRecordBulkCreate, ErpAttendanceRecordCreate, ErpSyncResult
 
 router = APIRouter(prefix="/integrations/erp/attendance", tags=["erp-attendance"])
 
 
 async def _employee(session: AsyncSession, employee_id: int | None, employee_code: str | None) -> Employee:
-    if employee_id is not None:
-        employee = await session.get(Employee, employee_id)
-    elif employee_code:
+    employee = await session.get(Employee, employee_id) if employee_id is not None else None
+    if employee is None and employee_code:
         employee = await session.scalar(select(Employee).where(Employee.employee_code == employee_code))
-    else:
-        employee = None
     if employee is None:
         raise ValueError("Employee not found")
     return employee
 
 
-@router.post("/punches", response_model=ErpSyncResult, summary="ERP sync attendance punches", description="Idempotent bulk synchronization. Each item must include a unique erp_event_id.", dependencies=[Depends(verify_erp_api_key)])
-async def sync_punches(
-    punches: list[AttendancePunchCreate],
-    request_id: str | None = Header(default=None, alias="X-Request-ID"),
-    session: AsyncSession = Depends(get_async_session),
-) -> ErpSyncResult:
-    service = AttendanceService(session)
-    result = ErpSyncResult()
-    for item in punches:
-        try:
-            if not item.erp_event_id:
-                raise ValueError("erp_event_id is required")
-            existing = await session.scalar(select(AttendancePunch).where(AttendancePunch.erp_event_id == item.erp_event_id))
-            if existing:
-                result.duplicates.append({"erp_event_id": item.erp_event_id, "id": existing.id})
-                continue
-            employee = await _employee(session, item.employee_id, item.employee_code)
-            item.employee_id = employee.id
-            item.employee_code = None
-            item.source = "ERP"
-            created = await service.record_punch(item)
-            result.accepted.append({"erp_event_id": item.erp_event_id, "id": created.id, "request_id": request_id})
-            await session.commit()
-        except Exception as exc:
-            await session.rollback()
-            result.failed.append({"erp_event_id": item.erp_event_id, "error": str(exc)})
-    await session.commit()
-    return result
-
-
-@router.post("/records", response_model=ErpSyncResult, summary="ERP sync attendance records", description="Idempotent bulk synchronization keyed by erp_record_id and employee attendance date.", dependencies=[Depends(verify_erp_api_key)])
+@router.post(
+    "/records",
+    response_model=ErpSyncResult,
+    summary="Sync processed ERP attendance records",
+    description="Stores ERP-calculated daily attendance. Send one record per employee/date. Re-sending the same erp_record_id is idempotent.",
+    dependencies=[Depends(verify_erp_api_key)],
+)
 async def sync_records(
     records: list[ErpAttendanceRecordCreate],
     session: AsyncSession = Depends(get_async_session),
@@ -69,20 +36,25 @@ async def sync_records(
     for item in records:
         try:
             employee = await _employee(session, item.employee_id, item.employee_code)
-            existing = await session.scalar(select(AttendanceRecord).where(AttendanceRecord.erp_record_id == item.erp_record_id))
-            if existing:
-                result.duplicates.append({"erp_record_id": item.erp_record_id, "id": existing.id})
+            record = await session.scalar(select(AttendanceRecord).where(AttendanceRecord.erp_record_id == item.erp_record_id))
+            if record is not None:
+                result.duplicates.append({"erp_record_id": item.erp_record_id, "id": record.id})
                 continue
-            record = await session.scalar(
-                select(AttendanceRecord).where(
-                    AttendanceRecord.employee_id == employee.id,
-                    AttendanceRecord.attendance_date == item.attendance_date,
-                )
-            )
+            record = await session.scalar(select(AttendanceRecord).where(
+                AttendanceRecord.employee_id == employee.id,
+                AttendanceRecord.attendance_date == item.attendance_date,
+            ))
             if record is None:
                 record = AttendanceRecord(employee_id=employee.id, attendance_date=item.attendance_date)
                 session.add(record)
             record.status = item.status.upper()
+            if item.shift_id is not None:
+                shift = await session.get(Shift, item.shift_id)
+                if shift is None:
+                    raise ValueError(f"Shift {item.shift_id} not found")
+                record.shift_id = shift.id
+            else:
+                record.shift_id = None
             record.punch_in = item.punch_in
             record.punch_out = item.punch_out
             record.worked_minutes = item.worked_minutes
@@ -103,61 +75,19 @@ async def sync_records(
     return result
 
 
-@router.post("/corrections", response_model=ErpSyncResult, summary="ERP sync attendance corrections", description="Synchronizes authoritative corrections and preserves correction history.", dependencies=[Depends(verify_erp_api_key)])
-async def sync_corrections(
-    corrections: list[ErpCorrectionCreate],
+@router.post(
+    "/records/bulk",
+    response_model=ErpSyncResult,
+    summary="Bulk sync ERP attendance records",
+    description=(
+        "Synchronizes daily processed attendance for multiple employees and dates. "
+        "Records may represent past, current, or planned attendance. Each item is "
+        "resolved by employee_code or employee_id and erp_record_id makes retries idempotent."
+    ),
+    dependencies=[Depends(verify_erp_api_key)],
+)
+async def sync_records_bulk(
+    payload: ErpAttendanceRecordBulkCreate,
     session: AsyncSession = Depends(get_async_session),
 ) -> ErpSyncResult:
-    result = ErpSyncResult()
-    for item in corrections:
-        try:
-            existing = await session.scalar(
-                select(AttendanceCorrectionRequest).where(
-                    AttendanceCorrectionRequest.erp_correction_id == item.erp_correction_id
-                )
-            )
-            if existing:
-                result.duplicates.append({"erp_correction_id": item.erp_correction_id, "id": existing.id})
-                continue
-            employee = await _employee(session, item.employee_id, item.employee_code)
-            record = await session.scalar(
-                select(AttendanceRecord).where(
-                    AttendanceRecord.employee_id == employee.id,
-                    AttendanceRecord.attendance_date == item.attendance_date,
-                )
-            )
-            if record is None:
-                raise ValueError("Attendance record not found")
-            correction = AttendanceCorrectionRequest(
-                attendance_record_id=record.id,
-                requested_punch_in=item.requested_punch_in,
-                requested_punch_out=item.requested_punch_out,
-                reason=item.reason,
-                status="CONFIRMED",
-                erp_correction_id=item.erp_correction_id,
-                sync_status="ERP_CONFIRMED",
-                actioned_at=now_ist(),
-            )
-            session.add(correction)
-            if item.requested_punch_in is not None:
-                record.punch_in = item.requested_punch_in
-            if item.requested_punch_out is not None:
-                record.punch_out = item.requested_punch_out
-            record.sync_status = "ERP_CONFIRMED"
-            record.last_synced_at = now_ist()
-            await session.flush()
-            result.accepted.append({"erp_correction_id": item.erp_correction_id, "id": correction.id})
-            await session.commit()
-        except Exception as exc:
-            await session.rollback()
-            result.failed.append({"erp_correction_id": item.erp_correction_id, "error": str(exc)})
-    await session.commit()
-    return result
-
-
-@router.post("/reconcile", response_model=ErpSyncResult, dependencies=[Depends(verify_erp_api_key)])
-async def reconcile(
-    records: list[ErpAttendanceRecordCreate],
-    session: AsyncSession = Depends(get_async_session),
-) -> ErpSyncResult:
-    return await sync_records(records, session)
+    return await sync_records(payload.records, session)

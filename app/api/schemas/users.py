@@ -107,11 +107,7 @@ class UserCreate(BaseUserCreate):
 
 
 class UserCreateRequest(UserCreate):
-    """Request body for admin-created users. Extends UserCreate with invitation flow options."""
-    send_invitation: bool = Field(
-        default=True,
-        description="If True, sends invitation email so user sets their own password. If False with password provided, admin sets password directly and must_change_password is auto-set True."
-    )
+    """Legacy user payload; accounts use a supplied temporary password."""
 
 
 class UserUpdate(BaseUserUpdate):

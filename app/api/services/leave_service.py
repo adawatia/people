@@ -191,50 +191,20 @@ class LeaveService:
         for_date: date | None = None,
     ) -> list[LeaveBalanceRead]:
         target_date = for_date or date.today()
-        period = await self.repo.get_active_period_for_date(target_date)
-        period_id = period.id if period else None
-        p_from = period.from_date if period else date(target_date.year, 1, 1)
-        p_to = period.to_date if period else date(target_date.year, 12, 31)
-
-        types = await self.repo.list_types(is_active=True)
+        balances = await self.repo.list_balances(employee_id, target_date.year)
         results: list[LeaveBalanceRead] = []
-
-        for lt in types:
-            # Sum ledger balance
-            current_balance = await self.repo.get_ledger_balance(
-                employee_id=employee_id,
-                leave_type_id=lt.id,
-                from_date=p_from,
-                to_date=p_to,
-            )
-
-            # Get pending application days
-            apps = await self.repo.list_applications(
-                employee_id=employee_id,
-                status="PENDING",
-                from_date=p_from,
-                to_date=p_to,
-            )
-            pending_days = sum(float(a.days_count) for a in apps if a.leave_type_id == lt.id)
-
-            # Allocation total
-            alloc = await self.repo.find_allocation(employee_id, lt.id, period_id) if period_id else None
-            allocated_total = float(alloc.total_leaves_allocated) if alloc else float(lt.annual_allocation)
-
-            used_days = max(0.0, allocated_total - current_balance)
-            available = max(0.0, current_balance - pending_days)
-
+        for balance in balances:
+            lt = balance.leave_type
             results.append(
                 LeaveBalanceRead(
                     employee_id=employee_id,
                     leave_type_id=lt.id,
                     leave_type_name=lt.name,
                     leave_type_code=lt.code,
-                    leave_period_id=period_id,
-                    allocated=allocated_total,
-                    used=used_days,
-                    pending=pending_days,
-                    available=available,
+                    allocated=float(balance.allocated),
+                    used=float(balance.used),
+                    pending=float(balance.pending),
+                    available=max(0.0, float(balance.allocated) - float(balance.used) - float(balance.pending)),
                 )
             )
 
@@ -320,30 +290,6 @@ class LeaveService:
                 detail=f"Requested leave of {days_count} days exceeds maximum consecutive allowed ({leave_type.max_consecutive_days} days)",
             )
 
-        # Balance check
-        if period:
-            balance = await self.repo.get_ledger_balance(
-                employee_id=data.employee_id,
-                leave_type_id=leave_type.id,
-                from_date=period.from_date,
-                to_date=period.to_date,
-            )
-            # Factor in pending applications
-            pending_apps = await self.repo.list_applications(
-                employee_id=data.employee_id,
-                status="PENDING",
-                from_date=period.from_date,
-                to_date=period.to_date,
-            )
-            already_pending = sum(float(a.days_count) for a in pending_apps if a.leave_type_id == leave_type.id)
-            available = balance - already_pending
-
-            if days_count > available:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Insufficient leave balance. Requested: {days_count} days, Available: {available} days",
-                )
-
         app = LeaveApplication(
             employee_id=data.employee_id,
             leave_type_id=data.leave_type_id,
@@ -412,6 +358,8 @@ class LeaveService:
         app_id = app.id
 
         app.status = "APPROVED"
+        app.erp_event_id = f"LEAVE-{app.id}-APPROVED"
+        app.erp_sync_status = "PENDING"
         app.actioned_by = actioned_by_user_id
         app.actioned_at = datetime.now()
 
@@ -486,6 +434,8 @@ class LeaveService:
         app_id = app.id
 
         app.status = "REJECTED"
+        app.erp_event_id = f"LEAVE-{app.id}-REJECTED"
+        app.erp_sync_status = "PENDING"
         app.actioned_by = actioned_by_user_id
         app.actioned_at = datetime.now()
         app.rejection_reason = rejection_reason
@@ -522,6 +472,8 @@ class LeaveService:
 
         was_approved = app.status == "APPROVED"
         app.status = "CANCELLED"
+        app.erp_event_id = f"LEAVE-{app.id}-CANCELLED"
+        app.erp_sync_status = "PENDING"
         app.actioned_by = cancelled_by_user_id
         app.actioned_at = datetime.now()
 

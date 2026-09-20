@@ -54,6 +54,16 @@ class LeaveRepository:
             stmt = stmt.where(LeaveType.is_active == is_active)
         return list((await self.session.execute(stmt)).scalars().all())
 
+    async def list_balances(self, employee_id: int, year: int) -> list:
+        from db.models import LeaveBalance
+        stmt = (
+            select(LeaveBalance)
+            .options(selectinload(LeaveBalance.leave_type))
+            .where(LeaveBalance.employee_id == employee_id, LeaveBalance.year == year)
+            .order_by(LeaveBalance.leave_type_id)
+        )
+        return list((await self.session.execute(stmt)).scalars().all())
+
     async def create_type(self, leave_type: LeaveType) -> LeaveType:
         self.session.add(leave_type)
         await self.session.flush()

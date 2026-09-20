@@ -153,4 +153,7 @@ class LeaveApplicationRead(BaseModel):
     actioned_by: int | None
     actioned_at: datetime | None
     rejection_reason: str | None
+    erp_event_id: str | None = None
+    erp_sync_status: str = "PENDING"
+    erp_synced_at: datetime | None = None
     model_config = ConfigDict(from_attributes=True)

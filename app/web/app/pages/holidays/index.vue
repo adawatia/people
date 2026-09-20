@@ -4,9 +4,10 @@ import type { Unit } from '#shared/types/organization'
 import type { HolidayList } from '#shared/types/workforce'
 
 useSeoMeta({ title: 'Holidays' })
-const api = useHrmsApi(); const auth = useAuth(); const toast = useToast(); const selectedId = ref<number>(); const createOpen = ref(false); const holidayOpen = ref(false); const saving = ref(false)
+const api = useHrmsApi(); const toast = useToast(); const selectedId = ref<number>(); const createOpen = ref(false); const holidayOpen = ref(false); const saving = ref(false)
 const year = new Date().getFullYear(); const form = reactive({ name: `${year} Holiday Calendar`, from_date: `${year}-01-01`, to_date: `${year}-12-31`, weekly_off_day: 'Sunday', unit_id: undefined as number | undefined, is_default: false }); const holiday = reactive({ name: '', holiday_date: `${year}-01-01`, description: '' })
-const canManage = computed(() => auth.hasPermission('system.configure'))
+// Holiday calendars are ERP-owned; the UI is display-only.
+const canManage = computed(() => false)
 const { data, pending, error, refresh } = await useAsyncData('holiday-workspace', async () => { const [lists, units] = await Promise.all([api.request<HolidayList[]>('holidays/lists'), api.request<Unit[]>('org/units')]); return { lists, units } })
 watchEffect(() => { if (!selectedId.value && data.value?.lists[0]) selectedId.value = data.value.lists[0].id })
 const selected = computed(() => data.value?.lists.find(item => item.id === selectedId.value))
@@ -24,7 +25,7 @@ async function addHoliday() { if (!selected.value || !holiday.name.trim()) retur
         </p><h2 class="mt-1 text-2xl font-semibold sm:text-3xl">
           Holidays
         </h2><p class="mt-2 text-sm text-muted">
-          View holiday calendars and automatically generated weekly offs.
+          View the organization holiday calendar synchronized from ERP.
         </p>
       </div><UButton
         v-if="canManage"

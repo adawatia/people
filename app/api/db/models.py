@@ -335,6 +335,7 @@ class Holiday(Base):
     __tablename__ = "holidays"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    erp_holiday_id: Mapped[str | None] = mapped_column(String(120), unique=True, nullable=True, index=True)
     holiday_list_id: Mapped[int | None] = mapped_column(ForeignKey("holiday_lists.id", ondelete="CASCADE"), nullable=True, index=True)
     unit_id: Mapped[int | None] = mapped_column(ForeignKey("units.id"), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
@@ -425,6 +426,8 @@ class LeaveBalance(Base):
     used: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     pending: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
+    leave_type: Mapped[LeaveType] = relationship()
+
 
 class LeaveApplication(Base):
     __tablename__ = "leave_applications"
@@ -444,6 +447,9 @@ class LeaveApplication(Base):
     actioned_by: Mapped[int | None] = mapped_column(ForeignKey("users.user_id"), nullable=True)
     actioned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    erp_event_id: Mapped[str | None] = mapped_column(String(120), unique=True, nullable=True, index=True)
+    erp_sync_status: Mapped[str] = mapped_column(String(30), default="PENDING", nullable=False, index=True)
+    erp_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     employee: Mapped[Employee] = relationship()
     leave_type: Mapped[LeaveType] = relationship()

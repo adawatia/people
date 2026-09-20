@@ -105,7 +105,7 @@ async def onboard_employee(
         user_id = created_user.id
         created_user.is_verified = True
 
-        employee_data = EmployeeCreate(**data.model_dump(exclude={"create_user_account", "username", "send_invitation", "initial_password"}, exclude_unset=True))
+        employee_data = EmployeeCreate(**data.model_dump(exclude={"create_user_account", "username", "initial_password"}, exclude_unset=True))
         employee_data.user_id = user_id
         employee = await EmployeeService(session).create_employee(employee_data, commit=False)
         await session.commit()

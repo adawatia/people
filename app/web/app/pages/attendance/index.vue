@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /* eslint-disable better-tailwindcss/no-unknown-classes */
-import type { AttendanceCorrection, AttendancePunch, AttendanceRecord, AttendanceSummary } from '#shared/types/attendance'
+import type { AttendanceCorrection, AttendanceRecord, AttendanceSummary } from '#shared/types/attendance'
 
 useSeoMeta({ title: 'Attendance' })
 const auth = useAuth()
@@ -30,17 +30,12 @@ const { data: attendanceData, pending, error, refresh } = await useAsyncData(
     const month = monthCursor.value.getMonth() + 1
     const first = new Date(year, month - 1, 1)
     const last = new Date(year, month, 0)
-    const todayStart = new Date()
-    todayStart.setHours(0, 0, 0, 0)
-    const todayEnd = new Date()
-    todayEnd.setHours(23, 59, 59, 999)
-    const [records, summary, punches, corrections] = await Promise.all([
+    const [records, summary, corrections] = await Promise.all([
       api.request<AttendanceRecord[]>(`attendance/employee/${employeeId.value}/calendar`, { query: { year, month } }),
       api.request<AttendanceSummary>(`attendance/employee/${employeeId.value}/summary`, { query: { year, month } }),
-      api.request<AttendancePunch[]>('attendance/checkins', { query: { employee_id: employeeId.value, from_time: todayStart.toISOString(), to_time: todayEnd.toISOString() } }),
       api.request<AttendanceCorrection[]>('attendance/corrections')
     ])
-    return { records, summary, punches, corrections, first: dateKey(first), last: dateKey(last) }
+    return { records, summary, corrections, first: dateKey(first), last: dateKey(last) }
   },
   { watch: [monthKey, employeeId] }
 )
@@ -70,6 +65,30 @@ const summaryCards = computed(() => {
     { label: 'Late arrivals', value: summary?.total_late ?? 0, note: `${summary?.total_early_exit ?? 0} early exits`, icon: 'i-lucide-clock-alert', tone: 'var(--people-peach)' },
     { label: 'Overtime', value: formatDuration(summary?.total_overtime_minutes ?? 0), note: `${summary?.total_missed_punch ?? 0} missed punches`, icon: 'i-lucide-timer-reset', tone: 'var(--people-lavender)' }
   ]
+})
+
+const statusSegments = computed(() => {
+  const summary = attendanceData.value?.summary
+  return [
+    { label: 'Present', value: summary?.total_present ?? 0, color: '#10b981' },
+    { label: 'Half day', value: summary?.total_half_day ?? 0, color: '#8b5cf6' },
+    { label: 'Leave', value: summary?.total_leave ?? 0, color: '#6366f1' },
+    { label: 'Absent', value: summary?.total_absent ?? 0, color: '#f43f5e' },
+    { label: 'Other', value: (summary?.total_holiday ?? 0) + (summary?.total_weekly_off ?? 0), color: '#94a3b8' }
+  ]
+})
+
+const chartTotal = computed(() => statusSegments.value.reduce((total, segment) => total + segment.value, 0))
+const chartStyle = computed(() => {
+  if (!chartTotal.value) return { background: '#e2e8f0' }
+  let start = 0
+  const stops = statusSegments.value.filter(segment => segment.value > 0).map((segment) => {
+    const end = start + (segment.value / chartTotal.value) * 100
+    const stop = `${segment.color} ${start}% ${end}%`
+    start = end
+    return stop
+  })
+  return { background: `conic-gradient(${stops.join(', ')})` }
 })
 
 function formatDuration(minutes: number) {
@@ -137,7 +156,7 @@ function hasPendingCorrection(recordId: number) {
           Attendance
         </h2>
         <p class="mt-2 max-w-2xl text-sm leading-6 text-muted">
-          Check in, review your monthly record, and flag anything that needs correction.
+          Review ERP-synced attendance and flag anything that needs correction.
         </p>
       </div>
       <div class="flex items-center gap-2">
@@ -189,44 +208,84 @@ function hasPendingCorrection(recordId: number) {
     />
 
     <template v-if="employeeId">
-      <div class="mt-7 grid gap-6 xl:grid-cols-[0.72fr_1.28fr]">
-        <AttendancePunchPanel
-          :employee-id="employeeId"
-          :punches="attendanceData?.punches || []"
-          @punched="refresh"
-        />
-        <div class="grid gap-4 sm:grid-cols-2">
-          <div
-            v-for="card in summaryCards"
-            :key="card.label"
-            class="people-card p-5"
-          >
-            <div class="flex items-start justify-between gap-3">
-              <div>
-                <p class="text-sm font-medium text-muted">
-                  {{ card.label }}
-                </p><USkeleton
-                  v-if="pending"
-                  class="mt-3 h-8 w-20"
-                /><p
-                  v-else
-                  class="mt-2 text-2xl font-semibold tabular-nums"
-                >
-                  {{ card.value }}
-                </p><p class="mt-1 text-xs text-muted">
-                  {{ card.note }}
-                </p>
-              </div>
-              <span
-                class="grid size-10 place-items-center rounded-xl"
-                :style="{ background: card.tone }"
-              ><UIcon
-                :name="card.icon"
-                class="size-5"
-              /></span>
+      <div class="mt-7 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div
+          v-for="card in summaryCards"
+          :key="card.label"
+          class="people-card p-5"
+        >
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <p class="text-sm font-medium text-muted">
+                {{ card.label }}
+              </p><USkeleton
+                v-if="pending"
+                class="mt-3 h-8 w-20"
+              /><p
+                v-else
+                class="mt-2 text-2xl font-semibold tabular-nums"
+              >
+                {{ card.value }}
+              </p><p class="mt-1 text-xs text-muted">
+                {{ card.note }}
+              </p>
             </div>
+            <span
+              class="grid size-10 place-items-center rounded-xl"
+              :style="{ background: card.tone }"
+            ><UIcon
+              :name="card.icon"
+              class="size-5"
+            /></span>
           </div>
         </div>
+      </div>
+
+      <div class="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        <UCard>
+          <template #header>
+            <div>
+              <h3 class="font-semibold">
+                Attendance breakdown
+              </h3>
+              <p class="mt-1 text-sm text-muted">
+                Status distribution for {{ monthLabel }}
+              </p>
+            </div>
+          </template>
+          <div class="flex flex-col items-center gap-6 sm:flex-row sm:justify-center">
+            <div
+              class="relative size-44 shrink-0 rounded-full"
+              :style="chartStyle"
+              role="img"
+              :aria-label="`Attendance breakdown with ${chartTotal} recorded days`"
+            >
+              <div class="absolute inset-6 grid place-items-center rounded-full bg-default text-center shadow-sm">
+                <div>
+                  <p class="text-2xl font-semibold tabular-nums">
+                    {{ chartTotal }}
+                  </p>
+                  <p class="text-xs text-muted">
+                    recorded days
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div class="grid w-full gap-3 sm:max-w-xs">
+              <div
+                v-for="segment in statusSegments"
+                :key="segment.label"
+                class="flex items-center justify-between gap-4 text-sm"
+              >
+                <span class="flex items-center gap-2"><span
+                  class="size-2.5 rounded-full"
+                  :style="{ backgroundColor: segment.color }"
+                />{{ segment.label }}</span>
+                <span class="font-semibold tabular-nums">{{ segment.value }}</span>
+              </div>
+            </div>
+          </div>
+        </UCard>
       </div>
 
       <section class="people-card mt-6 overflow-hidden">

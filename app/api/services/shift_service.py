@@ -1,4 +1,5 @@
 from datetime import date, datetime, time, timedelta
+from zoneinfo import ZoneInfo
 from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,6 +24,14 @@ class ShiftService:
         self.session = session
         self.repo = ShiftRepository(session)
         self.employee_repo = EmployeeRepository(session)
+
+    @staticmethod
+    def _local_naive(value: datetime) -> datetime:
+        """Convert an incoming timestamp to the application's India wall-clock time."""
+        if value.tzinfo is not None:
+            value = value.astimezone(ZoneInfo("Asia/Kolkata"))
+            return value.replace(tzinfo=None)
+        return value
 
     @staticmethod
     def parse_time(val: str | time) -> time:
@@ -292,6 +301,10 @@ class ShiftService:
         Determines the shift to which a punch belongs, accurately handling night shifts
         crossing midnight and buffer windows.
         """
+        # Shift windows are deliberately represented as local wall-clock values
+        # because the company operates in India. Normalize aware API timestamps
+        # before comparing them with those windows.
+        timestamp = self._local_naive(timestamp)
         check_date = timestamp.date()
         # Look for active assignments covering yesterday, today, or tomorrow
         candidate_dates = [check_date - timedelta(days=1), check_date, check_date + timedelta(days=1)]
@@ -310,7 +323,7 @@ class ShiftService:
         emp = await self.employee_repo.get_by_id(employee_id)
         if emp and emp.shift_id:
             default_shift = await self.repo.get_by_id(emp.shift_id)
-            if default_shift:
+            if default_shift and default_shift.is_active:
                 for cand_date in candidate_dates:
                     window = self.get_shift_window(default_shift, cand_date)
                     if window.actual_start <= timestamp <= window.actual_end:

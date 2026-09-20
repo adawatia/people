@@ -66,7 +66,7 @@ async def create_employee_from_erp(
         session.add(user)
         await session.flush()
         employee_data = data.model_copy(update={"user_id": user.id})
-        employee_data = employee_data.model_dump(exclude={"create_user_account", "username", "send_invitation", "initial_password"}, exclude_unset=True)
+        employee_data = employee_data.model_dump(exclude={"create_user_account", "username", "initial_password"}, exclude_unset=True)
         employee = await EmployeeService(session).create_employee(EmployeeCreate(**employee_data), commit=False)
         await session.commit()
     except IntegrityError as exc:

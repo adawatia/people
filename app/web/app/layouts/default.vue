@@ -1,25 +1,29 @@
 <script setup lang="ts">
-interface NavItem { label: string, icon: string, to: string, permissions?: string[] }
+interface NavItem { label: string, icon: string, to: string, permissions?: string[], roles?: Array<'EMPLOYEE' | 'DEPARTMENT_MANAGER' | 'HR_ADMIN'> }
 const route = useRoute()
 const auth = useAuth()
 const mobileOpen = ref(false)
 const navItems: NavItem[] = [
   { label: 'Dashboard', icon: 'i-lucide-layout-dashboard', to: '/' },
-  { label: 'Employees', icon: 'i-lucide-users-round', to: '/employees', permissions: ['employee.view'] },
+  { label: 'Employees', icon: 'i-lucide-users-round', to: '/employees', roles: ['DEPARTMENT_MANAGER', 'HR_ADMIN'], permissions: ['employee.view'] },
   { label: 'Attendance', icon: 'i-lucide-calendar-check-2', to: '/attendance' },
   { label: 'Leave', icon: 'i-lucide-calendar-days', to: '/leaves' },
   { label: 'Work arrangements', icon: 'i-lucide-briefcase-business', to: '/work-arrangements' },
   { label: 'Overtime', icon: 'i-lucide-timer', to: '/overtime' },
-  { label: 'Approvals', icon: 'i-lucide-clipboard-check', to: '/approvals', permissions: ['leave.approve', 'attendance.approve_correction', 'overtime.approve', 'work_arrangement.approve'] },
+  { label: 'Approvals', icon: 'i-lucide-clipboard-check', to: '/approvals', roles: ['DEPARTMENT_MANAGER', 'HR_ADMIN'], permissions: ['leave.approve', 'attendance.approve_correction', 'overtime.approve', 'work_arrangement.approve'] },
   { label: 'Shifts', icon: 'i-lucide-clock-3', to: '/shifts', permissions: ['shift.view_self', 'shift.assign', 'shift.update'] },
   { label: 'Holidays', icon: 'i-lucide-calendar-heart', to: '/holidays' },
-  { label: 'Organization', icon: 'i-lucide-building-2', to: '/organization', permissions: ['system.configure', 'designation.view', 'employee.view'] },
-  { label: 'Reports', icon: 'i-lucide-chart-no-axes-combined', to: '/reports', permissions: ['reports.attendance', 'reports.leave'] }
+  { label: 'Organization', icon: 'i-lucide-building-2', to: '/organization', roles: ['HR_ADMIN'], permissions: ['system.configure', 'designation.view', 'employee.view'] },
+  { label: 'Reports', icon: 'i-lucide-chart-no-axes-combined', to: '/reports', roles: ['DEPARTMENT_MANAGER', 'HR_ADMIN'], permissions: ['reports.attendance', 'reports.leave'] }
 ]
 const isTechnicalAdmin = computed(() => Boolean(auth.user.value?.is_superuser))
+const businessRole = computed(() => auth.user.value?.role)
 const visibleItems = computed(() => isTechnicalAdmin.value
   ? [{ label: 'Dashboard', icon: 'i-lucide-layout-dashboard', to: '/' }]
-  : navItems.filter(item => !item.permissions || item.permissions.some(auth.hasPermission)))
+  : navItems.filter((item) => {
+      if (item.roles && (!businessRole.value || !item.roles.includes(businessRole.value))) return false
+      return !item.permissions || item.permissions.some(auth.hasPermission)
+    }))
 const pageTitle = computed(() => route.path === '/settings' ? 'System administration' : navItems.find(item => item.to === route.path)?.label || 'People')
 watch(() => route.fullPath, () => {
   mobileOpen.value = false
@@ -54,7 +58,7 @@ watch(() => route.fullPath, () => {
         class="mt-9 flex-1 space-y-1"
         aria-label="Primary navigation"
       >
-          <NuxtLink
+        <NuxtLink
           v-for="item in visibleItems"
           :key="item.to"
           :to="item.to"
@@ -72,7 +76,10 @@ watch(() => route.fullPath, () => {
           class="flex min-h-11 items-center gap-3 rounded-xl px-3 text-sm font-medium transition-colors"
           :class="route.path === '/settings' ? 'bg-[var(--people-lavender)] text-primary-700 dark:text-primary-300' : 'text-muted hover:bg-muted/10 hover:text-highlighted'"
         >
-          <UIcon name="i-lucide-shield-check" class="size-[18px] shrink-0" />System administration
+          <UIcon
+            name="i-lucide-shield-check"
+            class="size-[18px] shrink-0"
+          />System administration
         </NuxtLink>
       </nav>
       <div class="border-t border-[var(--people-border)] pt-4">

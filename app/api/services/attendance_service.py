@@ -22,6 +22,7 @@ from schemas.attendance import (
     AttendancePunchCreate,
     AttendancePunchRead,
     AttendanceRecordRead,
+    AttendanceSummaryRead,
     BulkPunchCreate,
     ProcessAttendanceRequest,
     ProcessAttendanceResponse,
