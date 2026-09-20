@@ -47,7 +47,15 @@ async def list_leave_periods(
     return await service.list_periods()
 
 
-@router.post("/periods", response_model=LeavePeriodRead, status_code=status.HTTP_201_CREATED, include_in_schema=False, dependencies=[Depends(verify_erp_api_key)])
+@router.post(
+    "/periods",
+    response_model=LeavePeriodRead,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(verify_erp_api_key)],
+    tags=["erp-leaves"],
+    summary="ERP create leave period",
+    description="ERP-only leave-period master-data sync. Requires the X-API-Key header.",
+)
 async def create_leave_period(
     data: LeavePeriodCreate,
     session: AsyncSession = Depends(get_async_session),
@@ -68,7 +76,15 @@ async def list_leave_types(
     return await service.list_types(is_active=is_active)
 
 
-@router.post("/types", response_model=LeaveTypeRead, status_code=status.HTTP_201_CREATED, include_in_schema=False, dependencies=[Depends(verify_erp_api_key)])
+@router.post(
+    "/types",
+    response_model=LeaveTypeRead,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(verify_erp_api_key)],
+    tags=["erp-leaves"],
+    summary="ERP create leave type",
+    description="ERP-only leave-type master-data sync. Requires the X-API-Key header.",
+)
 async def create_leave_type(
     data: LeaveTypeCreate,
     session: AsyncSession = Depends(get_async_session),
@@ -88,7 +104,14 @@ async def get_leave_type(
     return LeaveTypeRead.model_validate(lt)
 
 
-@router.patch("/types/{type_id}", response_model=LeaveTypeRead, include_in_schema=False, dependencies=[Depends(verify_erp_api_key)])
+@router.patch(
+    "/types/{type_id}",
+    response_model=LeaveTypeRead,
+    dependencies=[Depends(verify_erp_api_key)],
+    tags=["erp-leaves"],
+    summary="ERP update leave type",
+    description="ERP-only leave-type master-data update. Requires the X-API-Key header.",
+)
 async def update_leave_type(
     type_id: int,
     data: LeaveTypeUpdate,
@@ -111,7 +134,9 @@ async def get_leave_balance(
     employee = await service.employee_repo.get_by_id(emp_id)
     if employee is None:
         raise HTTPException(status_code=404, detail="Employee not found")
-    await require_employee_access(current_user, employee, "leave.manage", session, allow_self=True)
+    # Employees may read their own ERP-synchronized balance with leave.apply;
+    # leave.manage remains reserved for HR-level management access.
+    await require_employee_access(current_user, employee, "leave.apply", session, allow_self=True)
     return await service.get_employee_leave_balances(emp_id, for_date=for_date)
 
 
@@ -182,7 +207,8 @@ async def apply_leave(
     employee = await service.employee_repo.get_by_id(data.employee_id)
     if employee is None:
         raise HTTPException(status_code=404, detail="Employee not found")
-    await require_employee_access(current_user, employee, "leave.manage", session, allow_self=True)
+    # Applying leave is a self-service employee capability.
+    await require_employee_access(current_user, employee, "leave.apply", session, allow_self=True)
     return await service.apply_leave(data)
 
 

@@ -44,7 +44,13 @@ async def list_employees(
     )
 
 
-@router.post("/onboard", response_model=EmployeeRead, status_code=status.HTTP_201_CREATED, include_in_schema=False)
+@router.post(
+    "/onboard",
+    response_model=EmployeeRead,
+    status_code=status.HTTP_201_CREATED,
+    summary="Legacy employee onboarding (ERP-only replacement)",
+    description="Visible for development testing. Returns 410 because employee provisioning is handled by the ERP integration.",
+)
 async def onboard_employee(
     data: EmployeeOnboardingCreate,
     _: User = Depends(require_permission("employee.create")),
