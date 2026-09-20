@@ -25,6 +25,24 @@ const { data, pending, error, refresh } = await useAsyncData('my-leave', async (
 }, { watch: [employeeId] })
 
 const filteredApplications = computed(() => (data.value?.applications || []).filter(item => filter.value === 'ALL' || item.status === filter.value))
+const pendingDaysByType = computed(() => {
+  const totals = new Map<number, number>()
+  for (const application of data.value?.applications || []) {
+    if (application.status === 'PENDING') {
+      totals.set(application.leave_type_id, (totals.get(application.leave_type_id) || 0) + application.days_count)
+    }
+  }
+  return totals
+})
+function displayPending(balance: LeaveBalance) {
+  return pendingDaysByType.value.get(balance.leave_type_id) ?? balance.pending
+}
+function displayAvailable(balance: LeaveBalance) {
+  return Math.max(0, balance.allocated - balance.used - displayPending(balance))
+}
+function balanceIsSyncing(balance: LeaveBalance) {
+  return displayPending(balance) !== balance.pending
+}
 const selectedBalance = computed(() => data.value?.balances.find(item => item.leave_type_id === form.leave_type_id))
 const estimatedDays = computed(() => {
   const from = new Date(`${form.from_date}T00:00:00`)
@@ -186,17 +204,27 @@ async function cancelApplication(application: LeaveApplication) {
               /></span>
             </div>
             <div class="mt-5 flex items-end gap-2">
-              <span class="text-3xl font-semibold tabular-nums">{{ balance.available }}</span><span class="pb-1 text-sm text-muted">days available</span>
+              <span class="text-3xl font-semibold tabular-nums">{{ displayAvailable(balance) }}</span><span class="pb-1 text-sm text-muted">days available</span>
             </div>
             <div class="mt-4 h-2 overflow-hidden rounded-full bg-muted/10">
               <div
                 class="h-full rounded-full bg-primary transition-all"
-                :style="{ width: `${Math.min(100, balance.allocated ? (balance.available / balance.allocated) * 100 : 0)}%` }"
+                :style="{ width: `${Math.min(100, balance.allocated ? (displayAvailable(balance) / balance.allocated) * 100 : 0)}%` }"
               />
             </div>
             <div class="mt-3 flex justify-between text-xs text-muted">
-              <span>{{ balance.used }} used</span><span>{{ balance.pending }} pending</span><span>{{ balance.allocated }} allocated</span>
+              <span>{{ balance.used }} used</span><span>{{ displayPending(balance) }} pending</span><span>{{ balance.allocated }} allocated</span>
             </div>
+            <p
+              v-if="balanceIsSyncing(balance)"
+              class="mt-3 flex items-center gap-1.5 text-xs text-primary"
+            >
+              <UIcon
+                name="i-lucide-refresh-cw"
+                class="size-3.5"
+              />
+              Official balance is syncing with ERP
+            </p>
           </article>
         </div>
         <div

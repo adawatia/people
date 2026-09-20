@@ -24,6 +24,21 @@ class ErpLeaveBalance(BaseModel):
     used: float = Field(default=0, ge=0)
     pending: float = Field(default=0, ge=0)
 
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "employee_code": "EMP001",
+                    "leave_code": "CL",
+                    "year": 2026,
+                    "allocated": 12,
+                    "used": 2,
+                    "pending": 0,
+                }
+            ]
+        }
+    }
+
 
 @router.get("/changes", dependencies=[Depends(verify_erp_api_key)])
 async def get_leave_changes(
