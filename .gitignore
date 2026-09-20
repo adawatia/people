@@ -150,6 +150,9 @@ Thumbs.db
 .fleet/
 .vscode/
 
+# Freebuff client local state
+.freebuff/
+
 *.swp
 *.swo
 
