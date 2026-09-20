@@ -1,5 +1,5 @@
 import type { CurrentUser, LoginPayload } from '#shared/types/auth'
-import { apiUrl, SESSION_COOKIE, upstreamError } from '../../utils/hrms'
+import { apiUrl, REFRESH_COOKIE, SESSION_COOKIE, upstreamError } from '../../utils/hrms'
 
 export default defineEventHandler(async (event) => {
   const payload = await readBody<LoginPayload>(event)
@@ -21,8 +21,14 @@ export default defineEventHandler(async (event) => {
       path: '/',
       maxAge: 60 * 60 * 8
     })
-    return await $fetch<CurrentUser>(apiUrl(event, 'users/me'), {
+    const session = await $fetch<{ access_token: string, refresh_token: string }>(apiUrl(event, 'auth/session'), {
+      method: 'POST',
       headers: { Authorization: `Bearer ${auth.access_token}` }
+    })
+    setCookie(event, SESSION_COOKIE, session.access_token, { httpOnly: true, secure: !import.meta.dev, sameSite: 'lax', path: '/', maxAge: 60 * 15 })
+    setCookie(event, REFRESH_COOKIE, session.refresh_token, { httpOnly: true, secure: !import.meta.dev, sameSite: 'lax', path: '/', maxAge: 60 * 60 * 24 * 30 })
+    return await $fetch<CurrentUser>(apiUrl(event, 'users/me'), {
+      headers: { Authorization: `Bearer ${session.access_token}` }
     })
   } catch (error) {
     throw upstreamError(error)

@@ -3,7 +3,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import Employee, Shift, ShiftAssignment
+from db.models import Employee, Shift, ShiftAssignment, now_ist
 from repositories.employee_repo import EmployeeRepository
 from repositories.shift_repo import ShiftRepository
 from schemas.shifts import (
@@ -252,7 +252,7 @@ class ShiftService:
                 detail=f"Shift assignment with ID {assignment_id} not found",
             )
         assignment.status = "CANCELLED"
-        assignment.effective_to = date.today()
+        assignment.effective_to = now_ist().date()
         await self.session.commit()
         refreshed = await self.repo.get_assignment_by_id(assignment_id)
         return self.to_assignment_read(refreshed)
@@ -323,7 +323,7 @@ class ShiftService:
         employee_id: int,
         for_timestamp: datetime | None = None,
     ) -> EmployeeShiftScheduleRead:
-        ts = for_timestamp or datetime.now()
+        ts = for_timestamp or now_ist()
         curr_window = await self.resolve_shift_for_timestamp(employee_id, ts)
 
         prev_window = None

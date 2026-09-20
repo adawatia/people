@@ -29,7 +29,7 @@ from schemas.leaves import (
     LeavePeriodCreate,
     LeaveTypeCreate,
 )
-from schemas.org import DepartmentCreate, UnitCreate
+from schemas.org import DepartmentCreate, OrganizationUpdate, UnitCreate
 from schemas.overtime import OvertimeApprovalCreate, OvertimeRejectionCreate
 from schemas.work_arrangements import WorkArrangementCreate
 from services.attendance_service import AttendanceService
@@ -481,22 +481,32 @@ def test_wfh_awareness_in_attendance_processor(unique_suffix):
 def test_org_service_crud_and_validation(unique_suffix):
     async def _test():
         async with async_session_maker() as session:
-            org, _, _, _, _, _ = await _setup_audit_env(session, unique_suffix)
+            org, fixture_unit, fixture_dept, _, _, _ = await _setup_audit_env(session, unique_suffix)
             org_service = OrgService(session)
 
-            # List orgs
-            orgs = await org_service.list_organizations()
-            assert any(o.id == org.id for o in orgs)
+            # Retrieve the single organization.
+            organization = await org_service.get_organization()
+            assert organization.id is not None
+            updated_org = await org_service.update_organization(
+                OrganizationUpdate(
+                    address_line1=f"Address {unique_suffix}",
+                    city="Mumbai",
+                    phone="+911234567890",
+                )
+            )
+            assert updated_org.address_line1 == f"Address {unique_suffix}"
+            assert updated_org.city == "Mumbai"
+            assert updated_org.phone == "+911234567890"
 
-            # Create Unit
+            # Create Unit under the single organization.
             unit = await org_service.create_unit(
                 UnitCreate(
-                    organization_id=org.id,
                     name=f"New Unit {unique_suffix}",
                     code=f"NU_{unique_suffix}",
                 )
             )
             assert unit.id is not None
+            assert unit.organization_id == organization.id
 
             # Create Department under new unit
             dept = await org_service.create_department(
@@ -508,6 +518,49 @@ def test_org_service_crud_and_validation(unique_suffix):
             )
             assert dept.id is not None
             assert dept.unit_id == unit.id
+
+            # Delete unused Department.
+            unused_dept = await org_service.create_department(
+                DepartmentCreate(
+                    unit_id=unit.id,
+                    name=f"Unused Dept {unique_suffix}",
+                    code=f"UD_{unique_suffix}",
+                )
+            )
+            await org_service.delete_department(unused_dept.id)
+            with pytest.raises(HTTPException) as exc_info:
+                await org_service.get_department(unused_dept.id)
+            assert exc_info.value.status_code == 404
+
+            # Cannot delete a Department with employee references.
+            with pytest.raises(HTTPException) as exc_info:
+                await org_service.delete_department(999999)
+            assert exc_info.value.status_code == 404
+
+            with pytest.raises(HTTPException) as exc_info:
+                await org_service.delete_department(fixture_dept.id)
+            assert exc_info.value.status_code == 409
+
+            # Delete unused Unit.
+            unused_unit = await org_service.create_unit(
+                UnitCreate(
+                    name=f"Unused Unit {unique_suffix}",
+                    code=f"UU_{unique_suffix}",
+                )
+            )
+            await org_service.delete_unit(unused_unit.id)
+            with pytest.raises(HTTPException) as exc_info:
+                await org_service.get_unit(unused_unit.id)
+            assert exc_info.value.status_code == 404
+
+            # Cannot delete a Unit with employee or holiday references.
+            with pytest.raises(HTTPException) as exc_info:
+                await org_service.delete_unit(999999)
+            assert exc_info.value.status_code == 404
+
+            with pytest.raises(HTTPException) as exc_info:
+                await org_service.delete_unit(fixture_unit.id)
+            assert exc_info.value.status_code == 409
 
             # Validation: cannot create department under nonexistent unit
             with pytest.raises(HTTPException) as exc_info:
@@ -735,4 +788,3 @@ def test_notification_and_manager_dashboard_workflow(unique_suffix):
             assert found is True
 
     run_async(_test())
-

@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from db.models import AttendanceRecord, Department, Designation, Employee
+from db.models import AttendanceRecord, Employee
 from repositories.attendance_record_repo import AttendanceRecordRepository
 from repositories.employee_repo import EmployeeRepository
 from schemas.reports import (

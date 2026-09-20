@@ -1,5 +1,6 @@
 <script setup lang="ts">
 /* eslint-disable better-tailwindcss/no-unknown-classes */
+/* eslint-disable @stylistic/max-statements-per-line, vue/multiline-html-element-content-newline, vue/singleline-html-element-content-newline */
 import type { Employee, EmployeePage } from '#shared/types/employee'
 import type { Department, Designation, Unit } from '#shared/types/organization'
 
@@ -9,13 +10,14 @@ const auth = useAuth()
 const toast = useToast()
 const search = ref('')
 const debouncedSearch = ref('')
-const unitId = ref<number | undefined>()
-const departmentId = ref<number | undefined>()
+const unitId = ref<number>(0)
+const departmentId = ref<number>(0)
 const status = ref('ACTIVE')
 const page = ref(1)
 const createOpen = ref(false)
 const saving = ref(false)
-const form = reactive({ employee_code: '', first_name: '', last_name: '', official_email: '', phone_number: '', unit_id: undefined as number | undefined, department_id: undefined as number | undefined, designation_id: undefined as number | undefined, date_of_joining: '', employment_type: 'PERMANENT' })
+const editingId = ref<number | null>(null)
+const form = reactive({ employee_code: '', first_name: '', last_name: '', official_email: '', phone_number: '', unit_id: undefined as number | undefined, department_id: undefined as number | undefined, designation_id: undefined as number | undefined, date_of_joining: '', employment_type: 'PERMANENT', create_user_account: true, username: '', send_invitation: true, initial_password: '' })
 let searchTimer: ReturnType<typeof setTimeout> | undefined
 watch(search, (value) => {
   clearTimeout(searchTimer)
@@ -31,26 +33,44 @@ const { data: masters } = await useAsyncData('employee-masters', async () => {
   const [units, departments, designations] = await Promise.all([api.request<Unit[]>('org/units'), api.request<Department[]>('org/departments'), api.request<Designation[]>('designations/', { query: { is_active: true } })])
   return { units, departments, designations }
 })
-const { data, pending, error, refresh } = await useAsyncData('employees', () => api.request<EmployeePage>('employees/', { query: { page: page.value, page_size: 20, q: debouncedSearch.value || undefined, unit_id: unitId.value, department_id: departmentId.value, status: status.value || undefined } }), { watch: [page, debouncedSearch, unitId, departmentId, status] })
+const { data, pending, error, refresh } = await useAsyncData('employees', () => api.request<EmployeePage>('employees/', { query: { page: page.value, page_size: 20, q: debouncedSearch.value || undefined, unit_id: unitId.value || undefined, department_id: departmentId.value || undefined, status: status.value === 'ALL' ? undefined : status.value } }), { watch: [page, debouncedSearch, unitId, departmentId, status] })
 const departments = computed(() => (masters.value?.departments || []).filter(item => !unitId.value || item.unit_id === unitId.value))
 const canCreate = computed(() => auth.hasPermission('employee.create'))
 const initials = (item: Employee) => `${item.first_name[0] || ''}${item.last_name?.[0] || ''}`.toUpperCase()
 function resetForm() {
-  Object.assign(form, { employee_code: '', first_name: '', last_name: '', official_email: '', phone_number: '', unit_id: undefined, department_id: undefined, designation_id: undefined, date_of_joining: '', employment_type: 'PERMANENT' })
+  editingId.value = null
+  Object.assign(form, { employee_code: '', first_name: '', last_name: '', official_email: '', phone_number: '', unit_id: undefined, department_id: undefined, designation_id: undefined, date_of_joining: '', employment_type: 'PERMANENT', create_user_account: true, username: '', send_invitation: true, initial_password: '' })
   createOpen.value = true
 }
-async function createEmployee() {
+function editEmployee(item: Employee) {
+  editingId.value = item.id
+  Object.assign(form, { employee_code: item.employee_code, first_name: item.first_name, last_name: item.last_name || '', official_email: item.official_email || '', phone_number: item.phone_number || '', unit_id: item.unit_id || undefined, department_id: item.department_id || undefined, designation_id: item.designation_id || undefined, date_of_joining: item.date_of_joining || '', employment_type: item.employment_type })
+  createOpen.value = true
+}
+async function saveEmployee() {
   if (!form.employee_code.trim() || !form.first_name.trim()) return
   saving.value = true
   try {
-    await api.request('employees/', { method: 'POST', body: { ...form, employee_code: form.employee_code.trim(), first_name: form.first_name.trim(), last_name: form.last_name.trim() || null, official_email: form.official_email.trim() || null, phone_number: form.phone_number.trim() || null, date_of_joining: form.date_of_joining || null } })
+    const body = { ...form, employee_code: form.employee_code.trim(), first_name: form.first_name.trim(), last_name: form.last_name.trim() || null, official_email: form.official_email.trim() || null, phone_number: form.phone_number.trim() || null, date_of_joining: form.date_of_joining || null }
+    await api.request(editingId.value ? `employees/${editingId.value}` : 'employees/onboard', { method: editingId.value ? 'PATCH' : 'POST', body: editingId.value ? Object.fromEntries(Object.entries(body).filter(([key]) => !['employee_code', 'create_user_account', 'username', 'send_invitation'].includes(key))) : body })
     createOpen.value = false
-    toast.add({ title: 'Employee created', color: 'success', icon: 'i-lucide-user-round-check' })
+    toast.add({ title: `Employee ${editingId.value ? 'updated' : 'created'}`, color: 'success', icon: 'i-lucide-user-round-check' })
     await refresh()
-  } catch (createError) {
-    const candidate = createError as { data?: { statusMessage?: string } }
-    toast.add({ title: 'Could not create employee', description: candidate.data?.statusMessage, color: 'error' })
+  } catch (saveError) {
+    const candidate = saveError as { data?: { detail?: string, statusMessage?: string } }
+    toast.add({ title: 'Could not save employee', description: candidate.data?.detail || candidate.data?.statusMessage, color: 'error' })
   } finally { saving.value = false }
+}
+async function toggleEmployee(item: Employee) {
+  try {
+    await api.request(`employees/${item.id}/${item.status === 'ACTIVE' ? 'deactivate' : 'activate'}`, { method: 'PATCH' })
+    toast.add({ title: `${item.full_name || item.employee_code} ${item.status === 'ACTIVE' ? 'deactivated' : 'activated'}`, color: 'success' })
+    await refresh()
+  } catch (toggleError) { const candidate = toggleError as { data?: { detail?: string, statusMessage?: string } }; toast.add({ title: 'Could not change employee status', description: candidate.data?.detail || candidate.data?.statusMessage, color: 'error' }) }
+}
+async function deleteEmployee(item: Employee) {
+  if (!confirm(`Delete ${item.full_name || item.employee_code}? This cannot be undone.`)) return
+  try { await api.request(`employees/${item.id}`, { method: 'DELETE' }); toast.add({ title: 'Employee deleted', color: 'success' }); await refresh() } catch (deleteError) { const candidate = deleteError as { data?: { detail?: string, statusMessage?: string } }; toast.add({ title: 'Could not delete employee', description: candidate.data?.detail || candidate.data?.statusMessage, color: 'error' }) }
 }
 </script>
 
@@ -83,16 +103,16 @@ async function createEmployee() {
           class="md:col-span-2"
         /><USelect
           v-model="unitId"
-          :items="[{ label: 'All units', value: undefined }, ...(masters?.units || []).map(item => ({ label: item.name, value: item.id }))]"
+          :items="[{ label: 'All units', value: 0 }, ...(masters?.units || []).map(item => ({ label: item.name, value: item.id }))]"
           placeholder="All units"
         /><USelect
           v-model="status"
-          :items="[{ label: 'Active', value: 'ACTIVE' }, { label: 'Inactive', value: 'INACTIVE' }, { label: 'All statuses', value: '' }]"
+          :items="[{ label: 'Active', value: 'ACTIVE' }, { label: 'Inactive', value: 'INACTIVE' }, { label: 'All statuses', value: 'ALL' }]"
         />
       </div><div class="mt-3">
         <USelect
           v-model="departmentId"
-          :items="[{ label: 'All departments', value: undefined }, ...departments.map(item => ({ label: item.name, value: item.id }))]"
+          :items="[{ label: 'All departments', value: 0 }, ...departments.map(item => ({ label: item.name, value: item.id }))]"
           placeholder="All departments"
           class="w-full md:w-64"
         />
@@ -148,7 +168,7 @@ async function createEmployee() {
             :color="item.status === 'ACTIVE' ? 'success' : 'neutral'"
             variant="soft"
             size="sm"
-          >{{ item.status }}</UBadge></div><p class="mt-1 truncate text-sm text-muted">{{ item.designation_name || 'No designation' }} · {{ item.employee_code }}</p><p class="mt-1 truncate text-xs text-muted">{{ item.department_name || 'No department' }} · {{ item.unit_name || 'No unit' }}</p></div></NuxtLink>
+          >{{ item.status }}</UBadge></div><p class="mt-1 truncate text-sm text-muted">{{ item.designation_name || 'No designation' }} · {{ item.employee_code }}</p><p class="mt-1 truncate text-xs text-muted">{{ item.department_name || 'No department' }} · {{ item.unit_name || 'No unit' }}</p></div><div class="flex shrink-0 gap-1" @click.stop><UButton icon="i-lucide-pencil" color="neutral" variant="ghost" aria-label="Edit employee" title="Edit employee" @click.prevent="editEmployee(item)" /><USwitch size="sm" class="shrink-0" :model-value="item.status === 'ACTIVE'" :aria-label="item.status === 'ACTIVE' ? 'Deactivate employee' : 'Activate employee'" @update:model-value="toggleEmployee(item)" /><UButton icon="i-lucide-trash-2" color="error" variant="ghost" aria-label="Delete employee" title="Delete employee" @click.prevent="deleteEmployee(item)" /></div></NuxtLink>
         </div>
         <div class="hidden overflow-x-auto md:block">
           <table class="w-full min-w-[780px] text-left text-sm">
@@ -183,6 +203,7 @@ async function createEmployee() {
                   <span class="block">{{ item.department_name || '—' }}</span><span class="text-xs text-muted">{{ item.unit_name }}</span>
                 </td><td class="px-4 py-4">
                   {{ item.employment_type }}
+                </td><td class="px-4 py-4 text-right"><div class="flex justify-end gap-1"><UButton icon="i-lucide-pencil" color="neutral" variant="ghost" aria-label="Edit employee" title="Edit employee" @click="editEmployee(item)" /><USwitch size="sm" class="shrink-0" :model-value="item.status === 'ACTIVE'" :aria-label="item.status === 'ACTIVE' ? 'Deactivate employee' : 'Activate employee'" @update:model-value="toggleEmployee(item)" /><UButton icon="i-lucide-trash-2" color="error" variant="ghost" aria-label="Delete employee" title="Delete employee" @click="deleteEmployee(item)" /></div>
                 </td><td class="px-6 py-4 text-right">
                   <UBadge
                     :color="item.status === 'ACTIVE' ? 'success' : 'neutral'"
@@ -209,14 +230,14 @@ async function createEmployee() {
     </section>
     <USlideover
       v-model:open="createOpen"
-      title="Add employee"
+      :title="`${editingId ? 'Edit' : 'Add'} employee`"
       description="Create the core employment record."
     >
       <template #body>
         <form
           id="employee-create"
           class="space-y-5"
-          @submit.prevent="createEmployee"
+          @submit.prevent="saveEmployee"
         >
           <div class="grid gap-4 sm:grid-cols-2">
             <UFormField
@@ -226,6 +247,7 @@ async function createEmployee() {
               <UInput
                 v-model="form.employee_code"
                 class="w-full"
+                :disabled="!!editingId"
               />
             </UFormField><UFormField label="Employment type">
               <USelect
@@ -283,6 +305,28 @@ async function createEmployee() {
               type="date"
             />
           </UFormField>
+          <div v-if="!editingId" class="rounded-lg border border-[var(--people-border)] bg-muted/5 p-4 sm:col-span-2">
+            <UCheckbox v-model="form.create_user_account" label="Create portal login account" />
+            <p class="mt-1 text-xs text-muted">The employee will receive an invitation and set their password securely.</p>
+            <div v-if="form.create_user_account" class="mt-4 grid gap-4 sm:grid-cols-2">
+              <UFormField label="Username (optional)">
+                <UInput v-model="form.username" class="w-full" placeholder="Defaults to email prefix" />
+              </UFormField>
+              <UCheckbox v-model="form.send_invitation" class="self-end" label="Send invitation email" />
+              <UFormField v-if="!form.send_invitation" label="Initial password" required>
+                <UInput
+                  v-model="form.initial_password"
+                  class="w-full"
+                  type="password"
+                  autocomplete="new-password"
+                  placeholder="Temporary password"
+                />
+                <template #help>
+                  The employee must change this password after first login.
+                </template>
+              </UFormField>
+            </div>
+          </div>
         </form>
       </template><template #footer>
         <div class="flex w-full justify-end gap-2">
@@ -297,7 +341,7 @@ async function createEmployee() {
             form="employee-create"
             :loading="saving"
           >
-            Create employee
+            {{ editingId ? 'Save changes' : 'Create employee' }}
           </UButton>
         </div>
       </template>

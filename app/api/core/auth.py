@@ -41,16 +41,16 @@ class UserManager(IntegerIDMixin, BaseUserManager[User, int]):
 
         if len(password) < 12:
             raise InvalidPasswordException(reason="Password must be at least 12 characters long")
-        
+
         if not re.search(r"[A-Z]", password):
             raise InvalidPasswordException(reason="Password must contain at least one uppercase letter")
-            
+
         if not re.search(r"[a-z]", password):
             raise InvalidPasswordException(reason="Password must contain at least one lowercase letter")
-            
+
         if not re.search(r"\d", password):
             raise InvalidPasswordException(reason="Password must contain at least one number")
-            
+
         if not re.search(r"[^A-Za-z0-9]", password):
             raise InvalidPasswordException(reason="Password must contain at least one special character")
 
@@ -63,7 +63,7 @@ class UserManager(IntegerIDMixin, BaseUserManager[User, int]):
             forbidden_parts.append(str(user.first_name).lower())
         if getattr(user, "last_name", None):
             forbidden_parts.append(str(user.last_name).lower())
-            
+
         password_lower = password.lower()
         for part in forbidden_parts:
             if part and len(part) >= 3 and part in password_lower:
@@ -76,10 +76,7 @@ class UserManager(IntegerIDMixin, BaseUserManager[User, int]):
 
         await super().validate_password(password, user)
 
-
-    async def on_after_register(
-        self, user: User, request: Request | None = None
-    ) -> None:
+    async def on_after_register(self, user: User, request: Request | None = None) -> None:
         return None
 
     async def authenticate(self, credentials):
@@ -105,10 +102,9 @@ class UserManager(IntegerIDMixin, BaseUserManager[User, int]):
             # Try username or mobile_number lookup
             from sqlalchemy import select as sa_select
             from core.database import get_async_session as _get_session  # noqa: PLC0415
+
             async for session in _get_session():
-                stmt = sa_select(User).where(
-                    (User.username == login_value) | (User.mobile_number == login_value)
-                )
+                stmt = sa_select(User).where((User.username == login_value) | (User.mobile_number == login_value))
                 result = await session.execute(stmt)
                 user = result.scalar_one_or_none()
                 break
@@ -122,9 +118,7 @@ class UserManager(IntegerIDMixin, BaseUserManager[User, int]):
             return None
 
         try:
-            verified, updated_hash = self.password_helper.verify_and_update(
-                credentials.password, user.hashed_password
-            )
+            verified, updated_hash = self.password_helper.verify_and_update(credentials.password, user.hashed_password)
         except Exception:
             return None
 
@@ -138,10 +132,9 @@ class UserManager(IntegerIDMixin, BaseUserManager[User, int]):
                 pass
         return user
 
-    async def on_after_request_verify(
-        self, user: User, token: str, request: Request | None = None
-    ) -> None:
+    async def on_after_request_verify(self, user: User, token: str, request: Request | None = None) -> None:
         from core.email import get_email_service
+
         email_svc = get_email_service()
 
         frontend_url = settings.frontend_url.rstrip("/")
@@ -164,19 +157,20 @@ class UserManager(IntegerIDMixin, BaseUserManager[User, int]):
         request: Request | None = None,
     ) -> User:
         original_email = user.email
-        
+
         # Prevent manual 'is_verified=True' from overriding the unverify logic when email changes
         if getattr(user_update, "email", None) and str(user_update.email) != str(original_email):
             if hasattr(user_update, "is_verified"):
                 user_update.is_verified = False
-                
+
         updated_user = await super().update(user_update, user, safe, request)
-        
+
         if original_email != updated_user.email:
             # Email has actually changed
-            
+
             # 1. Send Security Alert to Old Email
             from core.email import get_email_service
+
             email_svc = get_email_service()
             asyncio.create_task(
                 email_svc.send_email_changed_alert(
@@ -187,18 +181,18 @@ class UserManager(IntegerIDMixin, BaseUserManager[User, int]):
 
             # 2. Trigger Verification Email to New Email
             from fastapi_users.exceptions import UserAlreadyVerified
+
             try:
                 await self.request_verify(updated_user, request)
             except UserAlreadyVerified:
                 # Fallback if somehow it's marked verified (e.g. superadmin bypass)
                 pass
-                
+
         return updated_user
 
-    async def on_after_forgot_password(
-        self, user: User, token: str, request: Request | None = None
-    ) -> None:
+    async def on_after_forgot_password(self, user: User, token: str, request: Request | None = None) -> None:
         from core.email import get_email_service
+
         email_svc = get_email_service()
 
         frontend_url = settings.frontend_url.rstrip("/")
@@ -214,9 +208,7 @@ class UserManager(IntegerIDMixin, BaseUserManager[User, int]):
             )
         )
 
-    async def on_after_reset_password(
-        self, user: User, request: Request | None = None
-    ) -> None:
+    async def on_after_reset_password(self, user: User, request: Request | None = None) -> None:
         return None
 
 
@@ -228,7 +220,7 @@ async def get_user_manager(
 
 from fastapi_users.authentication import AuthenticationBackend, BearerTransport, CookieTransport
 
-bearer_transport = BearerTransport(tokenUrl="auth/jwt/login")
+bearer_transport = BearerTransport(tokenUrl="/api/v1/auth/jwt/login")
 
 cookie_transport = CookieTransport(
     cookie_name="hrms_auth",
@@ -311,12 +303,7 @@ def require_permission(permission_code: str):
     return dependency
 
 
-
-
-
-limiter = Limiter(
-    key_func=get_remote_address, default_limits=["200/minute"], storage_uri="memory://"
-)
+limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"], storage_uri="memory://")
 
 
 def setup_rate_limits(app: FastAPI) -> None:
@@ -337,9 +324,8 @@ def check_database_connection() -> None:
 
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
+
 async def verify_api_key(api_key_header: str = Security(api_key_header)):
     if api_key_header == settings.api_key:
         return True
-    raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN, detail="Could not validate API KEY"
-    )
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Could not validate API KEY")

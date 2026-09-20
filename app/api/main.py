@@ -22,6 +22,7 @@ from core.auth import (
     setup_rate_limits,
 )
 from schemas import UserRead, UserUpdate
+from routers import auth_sessions
 from core.database import check_database_connection
 from core.logging import setup_logging
 from core.settings import get_settings
@@ -162,6 +163,7 @@ api_router.include_router(users.router)
 api_router.include_router(notifications.router)
 api_router.include_router(roles.router)
 api_router.include_router(auth_invitation.router)
+api_router.include_router(auth_sessions.router)
 api_router.include_router(dashboard.router)
 api_router.include_router(org.router)
 api_router.include_router(designations.router)

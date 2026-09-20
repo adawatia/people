@@ -1,9 +1,9 @@
 import calendar
-from datetime import date, datetime
+from datetime import date
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import Employee, OvertimeApproval, OvertimeRecord
+from db.models import Employee, OvertimeApproval, OvertimeRecord, now_ist
 from repositories.employee_repo import EmployeeRepository
 from repositories.overtime_repo import OvertimeRepository
 from schemas.overtime import (
@@ -57,7 +57,7 @@ class OvertimeService:
         ot.approved_minutes = data.approved_minutes
         ot.status = "APPROVED"
         ot.actioned_by = actioned_by_user_id
-        ot.actioned_at = datetime.now()
+        ot.actioned_at = now_ist()
 
         approval = OvertimeApproval(
             overtime_record_id=ot_id,
@@ -92,7 +92,7 @@ class OvertimeService:
 
         ot.status = "REJECTED"
         ot.actioned_by = actioned_by_user_id
-        ot.actioned_at = datetime.now()
+        ot.actioned_at = now_ist()
         ot.rejection_reason = data.remarks
         await self.session.commit()
         await self.session.refresh(ot)

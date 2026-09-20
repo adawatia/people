@@ -14,7 +14,7 @@ export default defineNuxtConfig({
   css: ['~/assets/css/main.css'],
 
   runtimeConfig: {
-    hrmsApiBase: process.env.NUXT_HRMS_API_BASE || 'http://127.0.0.1:8000'
+    hrmsApiBase: import.meta.env.NUXT_HRMS_API_BASE || 'http://127.0.0.1:8000'
   },
 
   compatibilityDate: '2026-06-30',

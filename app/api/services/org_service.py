@@ -8,7 +8,9 @@ from schemas.org import (
     DepartmentCreate,
     DepartmentRead,
     DepartmentUpdate,
+    OrganizationCreate,
     OrganizationRead,
+    OrganizationUpdate,
     UnitCreate,
     UnitRead,
     UnitUpdate,
@@ -22,10 +24,39 @@ class OrgService:
 
     # Organizations
 
-    async def list_organizations(self) -> list[OrganizationRead]:
-        orgs = await self.repo.list_organizations()
-        return [OrganizationRead.model_validate(o) for o in orgs]
+    async def get_organization(self) -> OrganizationRead:
+        org = await self.repo.get_organization()
+        if not org:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Organization not found",
+            )
+        return OrganizationRead.model_validate(org)
 
+    async def create_organization(self, data: OrganizationCreate) -> OrganizationRead:
+        existing = await self.repo.get_organization()
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Organization already exists",
+            )
+        org = Organization(**data.model_dump())
+        created = await self.repo.create_organization(org)
+        await self.session.commit()
+        return OrganizationRead.model_validate(created)
+
+    async def update_organization(self, data: OrganizationUpdate) -> OrganizationRead:
+        org = await self.repo.get_organization()
+        if not org:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Organization not found",
+            )
+        update_data = data.model_dump(exclude_unset=True)
+        for key, value in update_data.items():
+            setattr(org, key, value)
+        await self.session.commit()
+        return OrganizationRead.model_validate(org)
 
     # Units
 
@@ -43,13 +74,13 @@ class OrgService:
         return unit
 
     async def create_unit(self, data: UnitCreate) -> UnitRead:
-        org = await self.repo.get_organization_by_id(data.organization_id)
+        org = await self.repo.get_organization()
         if not org:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f'Organization with ID {data.organization_id} not found',
+                detail="Organization not found",
             )
-        unit = Unit(**data.model_dump())
+        unit = Unit(**data.model_dump(), organization_id=org.id)
         created = await self.repo.create_unit(unit)
         await self.session.commit()
         return UnitRead.model_validate(created)
@@ -62,6 +93,17 @@ class OrgService:
         await self.session.commit()
         refreshed = await self.repo.get_unit_by_id(unit_id)
         return UnitRead.model_validate(refreshed)
+
+    async def delete_unit(self, unit_id: int) -> None:
+        unit = await self.get_unit(unit_id)
+        blocking_dependencies = await self.repo.count_unit_blocking_dependencies(unit_id)
+        if blocking_dependencies:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Unit cannot be deleted while employees or holidays reference it",
+            )
+        await self.repo.delete_unit(unit)
+        await self.session.commit()
 
     # Departments
 
@@ -92,3 +134,14 @@ class OrgService:
             setattr(dept, key, value)
         await self.session.commit()
         return DepartmentRead.model_validate(dept)
+
+    async def delete_department(self, dept_id: int) -> None:
+        dept = await self.get_department(dept_id)
+        blocking_dependencies = await self.repo.count_department_blocking_dependencies(dept_id)
+        if blocking_dependencies:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Department cannot be deleted while employees reference it",
+            )
+        await self.repo.delete_department(dept)
+        await self.session.commit()

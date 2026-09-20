@@ -4,7 +4,8 @@ from fastapi_users.password import PasswordHelper
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import UserManager, get_user_manager
-from db.models import Role
+from db.models import AuthSession, Role
+from sqlalchemy import update
 from core.database import get_async_session
 from core.invitation import find_user_by_invitation_token
 from db.models import now_ist
@@ -82,6 +83,10 @@ async def set_password_from_invitation(
     user.is_active = True
     user.is_verified = True
     user.must_change_password = False
+    await session.execute(update(AuthSession).where(
+        AuthSession.user_id == user.id,
+        AuthSession.revoked_at.is_(None),
+    ).values(revoked_at=now_ist()))
 
     await session.commit()
     return {"message": "Password successfully created. You can now log in."}

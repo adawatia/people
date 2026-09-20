@@ -2,15 +2,11 @@ from datetime import date, datetime, timedelta
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import AttendanceRecord, WorkArrangementRequest
+from db.models import AttendanceRecord, WorkArrangementRequest, now_ist
 from repositories.attendance_record_repo import AttendanceRecordRepository
 from repositories.employee_repo import EmployeeRepository
 from repositories.work_arrangement_repo import WorkArrangementRepository
-from schemas.work_arrangements import (
-    WorkArrangementAction,
-    WorkArrangementCreate,
-    WorkArrangementRead,
-)
+from schemas.work_arrangements import WorkArrangementCreate, WorkArrangementRead
 
 
 class WorkArrangementService:
@@ -47,8 +43,8 @@ class WorkArrangementService:
             )
 
         # Check for overlapping pending or approved leave applications
-        from db.models import LeaveApplication
         from sqlalchemy import select
+        from db.models import LeaveApplication
         leave_stmt = select(LeaveApplication).where(
             LeaveApplication.employee_id == data.employee_id,
             LeaveApplication.status.in_(["PENDING", "APPROVED"]),
@@ -98,7 +94,7 @@ class WorkArrangementService:
 
         req.status = "APPROVED"
         req.actioned_by = actioned_by_user_id
-        req.actioned_at = datetime.now()
+        req.actioned_at = now_ist()
 
         # Update attendance records accordingly
         status_to_set = "WORK_FROM_HOME" if req.arrangement_type == "WORK_FROM_HOME" else "PRESENT"
@@ -147,7 +143,7 @@ class WorkArrangementService:
 
         req.status = "REJECTED"
         req.actioned_by = actioned_by_user_id
-        req.actioned_at = datetime.now()
+        req.actioned_at = now_ist()
         req.rejection_reason = rejection_reason
         await self.session.commit()
         await self.session.refresh(req)

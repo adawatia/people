@@ -1,0 +1,217 @@
+# Monorepo ignore rules for:
+# - apps/api: FastAPI + uv
+# - apps/web: Nuxt
+
+# ============================================
+# Environment variables and secrets
+# ============================================
+
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Local developer overrides
+.envrc
+.direnv/
+
+*.pem
+*.key
+
+
+# ============================================
+# Python / FastAPI / uv
+# ============================================
+
+# Python bytecode / cache
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Python version managers
+.python-version
+
+# Packaging / build output
+*.egg-info/
+.eggs/
+build/
+dist/
+wheels/
+
+# Testing / linting / type checking
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pyre/
+
+# Coverage
+.coverage
+.coverage.*
+htmlcov/
+
+# uv cache
+.uv-cache/
+
+
+# ============================================
+# Node.js / Nuxt
+# ============================================
+
+# Dependencies
+node_modules/
+
+# Nuxt generated directories
+.nuxt/
+.nitro/
+.output/
+.data/
+
+# Build / tooling caches
+.cache/
+coverage/
+
+# TypeScript incremental build info
+*.tsbuildinfo
+*.map
+
+
+# ============================================
+# Package manager caches
+# ============================================
+
+.pnpm-store/
+.npm/
+
+.yarn/*
+!.yarn/patches/
+!.yarn/plugins/
+!.yarn/releases/
+!.yarn/sdks/
+!.yarn/versions/
+
+
+# ============================================
+# Logs and runtime files
+# ============================================
+
+logs/
+*.log
+
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+*.pid
+*.pid.lock
+
+
+# ============================================
+# Local databases / generated data
+# ============================================
+
+*.sqlite
+*.sqlite3
+*.sqlite3-journal
+
+db.sqlite3
+db.sqlite3-journal
+
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Local database exports
+*.dump
+*.sql.gz
+
+
+# ============================================
+# OS files
+# ============================================
+
+.DS_Store
+Thumbs.db
+
+
+# ============================================
+# Editors / IDEs
+# ============================================
+
+.idea/
+.fleet/
+.vscode/
+
+*.swp
+*.swo
+
+tempCodeRunnerFile.py
+
+
+# ============================================
+# Generated archives / reports
+# ============================================
+
+*.tar
+*.tgz
+*.zip
+*.7z
+*.rar
+
+reports/
+
+# Additional Python tooling and local service state
+*.so
+.Python
+develop-eggs/
+downloads/
+eggs/
+lib/
+lib64/
+parts/
+sdist/
+share/python-wheels/
+.installed.cfg
+*.egg
+MANIFEST
+*.manifest
+*.spec
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.nox/
+nosetests.xml
+coverage.xml
+*.cover
+*.py.cover
+*.lcov
+.hypothesis/
+.pdm-python
+.pdm-build/
+.pixi/
+__pypackages__/
+.ipynb_checkpoints/
+profile_default/
+ipython_config.py
+.pypirc
+.pytype/
+cython_debug/
+.abstra/
+.streamlit/secrets.toml
+.scrapy/
+.webassets-cache/
+instance/
+local_settings.py
+celerybeat-schedule*
+mnesia/
+rabbitmq/
+rabbitmq-data/
+activemq-data/

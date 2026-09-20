@@ -1,6 +1,7 @@
 import type { H3Event } from 'h3'
 
 export const SESSION_COOKIE = 'people_session'
+export const REFRESH_COOKIE = 'people_refresh'
 
 export function apiUrl(event: H3Event, path: string) {
   const base = useRuntimeConfig(event).hrmsApiBase.replace(/\/$/, '')

@@ -65,6 +65,14 @@ class EmployeeCreate(EmployeeBase):
     monthly_salary: float | None = None
 
 
+class EmployeeOnboardingCreate(EmployeeCreate):
+    """Employee HR record plus optional portal-account provisioning."""
+    create_user_account: bool = True
+    username: str | None = None
+    send_invitation: bool = True
+    initial_password: str | None = None
+
+
 class EmployeeUpdate(BaseModel):
     first_name: str | None = None
     last_name: str | None = None

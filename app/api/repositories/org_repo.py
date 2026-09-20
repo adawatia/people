@@ -1,8 +1,8 @@
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from db.models import Department, Organization, Unit
+from db.models import Department, Employee, Holiday, Organization, Unit
 
 
 class OrgRepository:
@@ -11,12 +11,14 @@ class OrgRepository:
 
     # ── Organizations ──────────────────────────────────────────────────────────
 
-    async def list_organizations(self) -> list[Organization]:
-        stmt = select(Organization).order_by(Organization.name)
-        return list((await self.session.execute(stmt)).scalars().all())
+    async def get_organization(self) -> Organization | None:
+        stmt = select(Organization).order_by(Organization.id).limit(1)
+        return (await self.session.execute(stmt)).scalar_one_or_none()
 
-    async def get_organization_by_id(self, org_id: int) -> Organization | None:
-        return await self.session.get(Organization, org_id)
+    async def create_organization(self, organization: Organization) -> Organization:
+        self.session.add(organization)
+        await self.session.flush()
+        return organization
 
     # ── Units ──────────────────────────────────────────────────────────────────
 
@@ -35,6 +37,20 @@ class OrgRepository:
         await self.session.flush()
         return await self.get_unit_by_id(unit.id)  # type: ignore[return-value]
 
+    async def count_unit_blocking_dependencies(self, unit_id: int) -> int:
+        dept_ids = select(Department.id).where(Department.unit_id == unit_id)
+        employee_stmt = select(func.count(Employee.id)).where(
+            (Employee.unit_id == unit_id) | (Employee.department_id.in_(dept_ids))
+        )
+        holiday_stmt = select(func.count(Holiday.id)).where(Holiday.unit_id == unit_id)
+        employee_count = await self.session.scalar(employee_stmt)
+        holiday_count = await self.session.scalar(holiday_stmt)
+        return int(employee_count or 0) + int(holiday_count or 0)
+
+    async def delete_unit(self, unit: Unit) -> None:
+        await self.session.delete(unit)
+        await self.session.flush()
+
     # ── Departments ────────────────────────────────────────────────────────────
 
     async def list_departments(self, unit_id: int | None = None) -> list[Department]:
@@ -50,3 +66,12 @@ class OrgRepository:
         self.session.add(department)
         await self.session.flush()
         return department
+
+    async def count_department_blocking_dependencies(self, dept_id: int) -> int:
+        employee_stmt = select(func.count(Employee.id)).where(Employee.department_id == dept_id)
+        employee_count = await self.session.scalar(employee_stmt)
+        return int(employee_count or 0)
+
+    async def delete_department(self, department: Department) -> None:
+        await self.session.delete(department)
+        await self.session.flush()

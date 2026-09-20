@@ -6,6 +6,36 @@ class OrganizationBase(BaseModel):
     name: str
     short_name: str | None = None
     industry: str | None = None
+    address_line1: str | None = None
+    address_line2: str | None = None
+    city: str | None = None
+    state: str | None = None
+    country: str | None = None
+    postal_code: str | None = None
+    phone: str | None = None
+    email: str | None = None
+    website: str | None = None
+    tax_id: str | None = None
+
+
+class OrganizationCreate(OrganizationBase):
+    pass
+
+
+class OrganizationUpdate(BaseModel):
+    name: str | None = None
+    short_name: str | None = None
+    industry: str | None = None
+    address_line1: str | None = None
+    address_line2: str | None = None
+    city: str | None = None
+    state: str | None = None
+    country: str | None = None
+    postal_code: str | None = None
+    phone: str | None = None
+    email: str | None = None
+    website: str | None = None
+    tax_id: str | None = None
 
 
 class OrganizationRead(OrganizationBase):
@@ -45,7 +75,7 @@ class UnitBase(BaseModel):
 
 
 class UnitCreate(UnitBase):
-    organization_id: int
+    pass
 
 
 class UnitUpdate(BaseModel):

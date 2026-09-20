@@ -117,6 +117,10 @@ class EmployeeRepository:
         await self.session.flush()
         return employee
 
+    async def delete(self, employee: Employee) -> None:
+        await self.session.delete(employee)
+        await self.session.flush()
+
     async def add_work_history(self, history: EmployeeWorkHistory) -> EmployeeWorkHistory:
         self.session.add(history)
         await self.session.flush()

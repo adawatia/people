@@ -1,9 +1,9 @@
 from datetime import date
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import Department, Designation, Employee, EmployeeWorkHistory, Shift, Unit, User
+from db.models import AuthSession, Department, Designation, Employee, EmployeeWorkHistory, Shift, Unit, User, now_ist
 from repositories.employee_repo import EmployeeRepository
 from schemas.employees import (
     EmployeeCreate,
@@ -84,7 +84,7 @@ class EmployeeService:
             )
         return emp
 
-    async def create_employee(self, data: EmployeeCreate) -> EmployeeRead:
+    async def create_employee(self, data: EmployeeCreate, *, commit: bool = True) -> EmployeeRead:
         # 1. Validate employee code uniqueness
         existing_code = await self.repo.get_by_code(data.employee_code)
         if existing_code:
@@ -186,7 +186,10 @@ class EmployeeService:
         )
         await self.repo.add_work_history(initial_history)
 
-        await self.session.commit()
+        if commit:
+            await self.session.commit()
+        else:
+            await self.session.flush()
         refreshed = await self.get_employee(emp.id)
         return self.enrich(refreshed)
 
@@ -299,6 +302,12 @@ class EmployeeService:
         emp.status = "INACTIVE"
         emp.exit_date = exit_date or date.today()
         emp.exit_reason = exit_reason or "Deactivated by Administrator"
+        if emp.user_id:
+            await self.session.execute(
+                update(AuthSession)
+                .where(AuthSession.user_id == emp.user_id, AuthSession.revoked_at.is_(None))
+                .values(revoked_at=now_ist())
+            )
         await self.session.commit()
         self.session.expire_all()
         refreshed = await self.get_employee(employee_id)
@@ -313,6 +322,16 @@ class EmployeeService:
         self.session.expire_all()
         refreshed = await self.get_employee(employee_id)
         return self.enrich(refreshed)
+
+    async def delete_employee(self, employee_id: int) -> None:
+        emp = await self.get_employee(employee_id)
+        await self.session.execute(
+            update(Employee)
+            .where(Employee.reporting_manager_id == employee_id)
+            .values(reporting_manager_id=None)
+        )
+        await self.repo.delete(emp)
+        await self.session.commit()
 
     async def get_work_history(self, employee_id: int) -> list[EmployeeWorkHistoryRead]:
         await self.get_employee(employee_id)

@@ -121,6 +121,24 @@ class User(SQLAlchemyBaseUserTable[int], Base):
         return bool(self.is_superuser)
 
 
+class AuthSession(Base):
+    """Server-side refresh session; raw refresh tokens are never stored."""
+
+    __tablename__ = "auth_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_ist, nullable=False)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    replaced_by_id: Mapped[int | None] = mapped_column(ForeignKey("auth_sessions.id", ondelete="SET NULL"), nullable=True)
+
+    user: Mapped[User] = relationship("User")
+    replaced_by: Mapped[AuthSession | None] = relationship("AuthSession", remote_side=[id], uselist=False)
+
+
 class Notification(Base):
     """HRMS in-app notification."""
 
@@ -153,8 +171,18 @@ class Organization(Base):
     name: Mapped[str] = mapped_column(String(200), unique=True, nullable=False)
     short_name: Mapped[str | None] = mapped_column(String(50), nullable=True)
     industry: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    address_line1: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    address_line2: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    city: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    state: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    country: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    postal_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    website: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    tax_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_ist)
-    
+
     units: Mapped[list[Unit]] = relationship(back_populates="organization", cascade="all, delete-orphan")
 
 
@@ -224,7 +252,7 @@ class Employee(Base):
     __tablename__ = "employees"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True, index=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True, unique=True, index=True)
     employee_code: Mapped[str] = mapped_column(String(30), unique=True, nullable=False, index=True)
 
     # Basic Profile
