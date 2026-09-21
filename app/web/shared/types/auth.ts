@@ -18,7 +18,7 @@ export interface CurrentUser {
   is_superuser: boolean
   is_verified: boolean
   must_change_password: boolean
-  role: 'EMPLOYEE' | 'DEPARTMENT_MANAGER' | 'HR_ADMIN' | 'SUPER_ADMIN'
+  role: 'EMPLOYEE' | 'DEPARTMENT_MANAGER' | 'HR_ADMIN' | 'ORGANIZATION_OWNER' | 'SUPER_ADMIN'
   assignments?: RoleAssignment[]
   permissions?: string[]
   employee_id?: number | null

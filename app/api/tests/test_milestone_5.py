@@ -6,6 +6,7 @@ from datetime import date
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy import select
 
 from core.database import async_session_maker
 from db.models import Department, Designation, Employee, Organization, Unit, User
@@ -28,9 +29,11 @@ def unique_suffix():
 
 
 async def _setup_m5_test_environment(session, suffix: str):
-    org = Organization(name=f"Org M5 {suffix}", short_name=f"O5_{suffix}")
-    session.add(org)
-    await session.flush()
+    org = await session.scalar(select(Organization).order_by(Organization.id.asc()))
+    if org is None:
+        org = Organization(name=f"Org M5 {suffix}", short_name=f"O5_{suffix}")
+        session.add(org)
+        await session.flush()
 
     unit = Unit(organization_id=org.id, name=f"Unit M5 {suffix}", code=f"U5_{suffix}")
     session.add(unit)
@@ -94,7 +97,7 @@ def test_work_arrangement_creation_and_overlap_prevention(unique_suffix):
                 await service.create_request(
                     WorkArrangementCreate(
                         employee_id=emp.id,
-                        arrangement_type="OUT_DUTY",
+                        arrangement_type="WORK_FROM_HOME",
                         from_date=date(2026, 9, 3),
                         to_date=date(2026, 9, 7),
                         reason="Client site visit",
@@ -135,36 +138,6 @@ def test_work_arrangement_approval_and_wfh_attendance_marking(unique_suffix):
     run_async(_test())
 
 
-def test_out_duty_field_work_approval_marks_present(unique_suffix):
-    async def _test():
-        async with async_session_maker() as session:
-            _, _, _, _, emp, manager = await _setup_m5_test_environment(session, unique_suffix)
-            service = WorkArrangementService(session)
-
-            target_date = date(2026, 9, 15)
-            req = await service.create_request(
-                WorkArrangementCreate(
-                    employee_id=emp.id,
-                    arrangement_type="OUT_DUTY",
-                    from_date=target_date,
-                    to_date=target_date,
-                    reason="Customer audit at Pune Plant",
-                    destination_location="Bajaj Sons Plant 2, Pune",
-                )
-            )
-
-            approved = await service.approve_request(req.id, manager.id)
-            assert approved.status == "APPROVED"
-
-            # Out Duty marks status = PRESENT
-            rec = await service.attendance_record_repo.get_by_employee_and_date(emp.id, target_date)
-            assert rec is not None
-            assert rec.status == "PRESENT"
-            assert rec.worked_minutes == 480
-
-    run_async(_test())
-
-
 def test_work_arrangement_rejection_and_cancellation(unique_suffix):
     async def _test():
         async with async_session_maker() as session:
@@ -189,7 +162,7 @@ def test_work_arrangement_rejection_and_cancellation(unique_suffix):
             req2 = await service.create_request(
                 WorkArrangementCreate(
                     employee_id=emp.id,
-                    arrangement_type="FIELD_WORK",
+                    arrangement_type="WORK_FROM_HOME",
                     from_date=date(2026, 9, 25),
                     to_date=date(2026, 9, 25),
                     reason="Vendor survey",

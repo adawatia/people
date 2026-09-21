@@ -1,7 +1,7 @@
 """routers/dashboard.py — Dynamic permission-based dashboard widget API."""
 import asyncio
 from datetime import date
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -9,14 +9,80 @@ from sqlalchemy.orm import selectinload
 from core.auth import fastapi_users
 from core.database import get_async_session
 from core.auth import get_user_permissions
+from core.audit import record_audit_event
 from core.rbac import get_visible_widgets
 from db.models import (
     User, Employee, AttendanceRecord, LeaveApplication, LeaveBalance, LeaveType,
     AttendanceCorrectionRequest, OvertimeRecord, Shift, WorkArrangementRequest
 )
-from schemas.dashboard import DashboardMetricsResponse, DashboardWidgetsResponse, TechnicalAdminMetrics
+from schemas.dashboard import (
+    DashboardMetricsResponse,
+    DashboardWidgetsResponse,
+    OwnerDashboardResponse,
+    OwnerExceptionResponse,
+    TechnicalAdminMetrics,
+)
+from services.owner_dashboard_service import OwnerDashboardService
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
+
+
+def _audit_request_values(request: Request) -> tuple[str | None, str | None]:
+    return request.headers.get("x-request-id"), request.client.host if request.client else None
+
+
+@router.get("/owner", response_model=OwnerDashboardResponse, summary="Organization owner analytics dashboard")
+async def get_owner_dashboard(
+    request: Request,
+    from_date: date | None = Query(None),
+    to_date: date | None = Query(None),
+    unit_id: int | None = Query(None),
+    user: User = Depends(fastapi_users.current_user(active=True)),
+    session: AsyncSession = Depends(get_async_session),
+) -> OwnerDashboardResponse:
+    if "dashboard.view_organization" not in await get_user_permissions(user, session):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=403, detail="Organization owner analytics access required")
+    payload = await OwnerDashboardService(session).dashboard(from_date, to_date, unit_id)
+    request_id, ip_address = _audit_request_values(request)
+    await record_audit_event(
+        session,
+        actor=user,
+        action="ORGANIZATION_DASHBOARD_VIEWED",
+        entity_type="organization_dashboard",
+        filters={"from_date": payload.from_date, "to_date": payload.to_date, "unit_id": unit_id},
+        request_id=request_id,
+        ip_address=ip_address,
+    )
+    return payload
+
+
+@router.get("/owner/exceptions", response_model=OwnerExceptionResponse, summary="Organization owner exception drill-down")
+async def get_owner_exceptions(
+    request: Request,
+    kind: str = Query(...),
+    target_date: date = Query(default_factory=date.today),
+    unit_id: int | None = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100),
+    user: User = Depends(fastapi_users.current_user(active=True)),
+    session: AsyncSession = Depends(get_async_session),
+) -> OwnerExceptionResponse:
+    if "dashboard.view_organization" not in await get_user_permissions(user, session):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=403, detail="Organization owner analytics access required")
+    payload = await OwnerDashboardService(session).exceptions(kind, unit_id, target_date, page, page_size)
+    request_id, ip_address = _audit_request_values(request)
+    await record_audit_event(
+        session,
+        actor=user,
+        action="ORGANIZATION_EXCEPTION_DRILLDOWN_VIEWED",
+        entity_type="employee_directory",
+        filters={"kind": kind, "target_date": target_date, "unit_id": unit_id, "page": page},
+        request_id=request_id,
+        ip_address=ip_address,
+    )
+    return payload
 
 
 @router.get("/technical-metrics", response_model=TechnicalAdminMetrics, summary="Get technical administration counts")

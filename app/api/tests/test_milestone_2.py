@@ -7,6 +7,7 @@ from decimal import Decimal
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy import select
 
 from core.database import async_session_maker
 from db.models import Department, Designation, Employee, Organization, Shift, Unit
@@ -33,9 +34,11 @@ def unique_suffix():
 
 
 async def _get_or_create_org_structure(session, suffix: str):
-    org = Organization(name=f"Org M2 {suffix}", short_name=f"O_{suffix}")
-    session.add(org)
-    await session.flush()
+    org = await session.scalar(select(Organization).order_by(Organization.id.asc()))
+    if org is None:
+        org = Organization(name=f"Org M2 {suffix}", short_name=f"O_{suffix}")
+        session.add(org)
+        await session.flush()
 
     unit = Unit(organization_id=org.id, name=f"Unit M2 {suffix}", code=f"UM2_{suffix}")
     session.add(unit)

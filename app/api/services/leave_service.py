@@ -1,11 +1,13 @@
 from datetime import date, datetime, timedelta
 from fastapi import HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import (
     AttendanceRecord,
     LeaveAllocation,
     LeaveApplication,
+    LeaveBalance,
     LeaveLedgerEntry,
     LeavePeriod,
     LeaveType,
@@ -146,6 +148,28 @@ class LeaveService:
         )
         await self.repo.create_ledger_entry(credit_entry)
 
+        # The ledger is the immutable audit trail, while ``leave_balances`` is
+        # the current-year read model used by employee pages and reports. Keep
+        # both projections in one transaction so the new allocation is visible.
+        balance = await self.session.scalar(
+            select(LeaveBalance).where(
+                LeaveBalance.employee_id == data.employee_id,
+                LeaveBalance.leave_type_id == data.leave_type_id,
+                LeaveBalance.year == period.from_date.year,
+            )
+        )
+        if balance is None:
+            self.session.add(
+                LeaveBalance(
+                    employee_id=data.employee_id,
+                    leave_type_id=data.leave_type_id,
+                    year=period.from_date.year,
+                    allocated=int(total),
+                )
+            )
+        else:
+            balance.allocated += int(total)
+
         await self.session.commit()
         refreshed = await self.repo.get_allocation(created_alloc.id)
         read_obj = LeaveAllocationRead.model_validate(refreshed)
@@ -209,6 +233,17 @@ class LeaveService:
             )
 
         return results
+
+    async def _get_leave_balance(
+        self, employee_id: int, leave_type_id: int, year: int
+    ) -> LeaveBalance | None:
+        return await self.session.scalar(
+            select(LeaveBalance).where(
+                LeaveBalance.employee_id == employee_id,
+                LeaveBalance.leave_type_id == leave_type_id,
+                LeaveBalance.year == year,
+            )
+        )
 
     # ── Leave Application Workflow ─────────────────────────────────────────────
 
@@ -290,6 +325,13 @@ class LeaveService:
                 detail=f"Requested leave of {days_count} days exceeds maximum consecutive allowed ({leave_type.max_consecutive_days} days)",
             )
 
+        balance = None
+        if leave_type.is_paid:
+            balance = await self._get_leave_balance(data.employee_id, data.leave_type_id, data.from_date.year)
+            available = float(balance.allocated - balance.used - balance.pending) if balance else 0.0
+            if days_count > available:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Insufficient leave balance")
+
         app = LeaveApplication(
             employee_id=data.employee_id,
             leave_type_id=data.leave_type_id,
@@ -303,6 +345,8 @@ class LeaveService:
             status="PENDING",
         )
         created = await self.repo.create_application(app)
+        if balance is not None:
+            balance.pending += int(days_count)
         await self.session.commit()
         refreshed = await self.repo.get_application_by_id(created.id)
         read_obj = LeaveApplicationRead.model_validate(refreshed)
@@ -362,6 +406,13 @@ class LeaveService:
         app.erp_sync_status = "PENDING"
         app.actioned_by = actioned_by_user_id
         app.actioned_at = datetime.now()
+
+        if app.leave_type and app.leave_type.is_paid:
+            balance = await self._get_leave_balance(app_employee_id, app_leave_type_id, app_from_date.year)
+            if balance is None or balance.pending < int(app_days_count):
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Leave balance is no longer available")
+            balance.pending -= int(app_days_count)
+            balance.used += int(app_days_count)
 
         # Debit double-entry ledger
         debit_entry = LeaveLedgerEntry(
@@ -432,6 +483,11 @@ class LeaveService:
         leave_type_name = app.leave_type.name if app.leave_type else ""
         leave_type_code = app.leave_type.code if app.leave_type else ""
         app_id = app.id
+        app_employee_id = app.employee_id
+        app_leave_type_id = app.leave_type_id
+        app_from_date = app.from_date
+        app_days_count = float(app.days_count)
+        is_paid = bool(app.leave_type and app.leave_type.is_paid)
 
         app.status = "REJECTED"
         app.erp_event_id = f"LEAVE-{app.id}-REJECTED"
@@ -439,6 +495,10 @@ class LeaveService:
         app.actioned_by = actioned_by_user_id
         app.actioned_at = datetime.now()
         app.rejection_reason = rejection_reason
+        if is_paid:
+            balance = await self._get_leave_balance(app_employee_id, app_leave_type_id, app_from_date.year)
+            if balance is not None:
+                balance.pending = max(0, balance.pending - int(app_days_count))
         await self.session.commit()
         refreshed = await self.repo.get_application_by_id(app_id)
         read_obj = LeaveApplicationRead.model_validate(refreshed)
@@ -476,6 +536,14 @@ class LeaveService:
         app.erp_sync_status = "PENDING"
         app.actioned_by = cancelled_by_user_id
         app.actioned_at = datetime.now()
+
+        if app.leave_type and app.leave_type.is_paid:
+            balance = await self._get_leave_balance(app_employee_id, app_leave_type_id, app_from_date.year)
+            if balance is not None:
+                if was_approved:
+                    balance.used = max(0, balance.used - int(app_days_count))
+                else:
+                    balance.pending = max(0, balance.pending - int(app_days_count))
 
         # Reversal ledger entry and attendance cleanup if it was previously approved
         if was_approved:

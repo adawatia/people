@@ -29,6 +29,7 @@ from core.settings import get_settings
 APP_START_TIME = time.monotonic()
 
 settings = get_settings()
+settings.validate_runtime_secrets()
 logger = setup_logging(settings)
 
 
@@ -38,8 +39,15 @@ async def lifespan(_: FastAPI):
     from utils.notifications_cleanup import notification_cleanup_loop
 
     logger.info("Starting HRMS API")
-    await create_db_and_tables()
-    await ensure_seed_data()
+    # Schema changes are applied by Alembic in the release process.  ``create_all``
+    # remains a development convenience only; it cannot safely evolve a live DB.
+    is_development = settings.environment.lower() in {"development", "dev", "test"}
+    if is_development:
+        await create_db_and_tables()
+    # A production release must run Alembic first. Seeding is opt-in there so
+    # an API worker cannot unexpectedly create a privileged account.
+    if is_development or settings.bootstrap_seed_data:
+        await ensure_seed_data()
     
     # Start the background task for cleaning up notifications
     cleanup_task = asyncio.create_task(notification_cleanup_loop())

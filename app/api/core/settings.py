@@ -53,6 +53,28 @@ class Settings(BaseSettings):
     # API Keys for M2M Integration
     api_key: str = Field(default="hrms_api_key_dev_only", alias="API_KEY")
     erp_api_key: str = Field(default="", alias="ERP_API_KEY")
+    bootstrap_seed_data: bool = Field(default=False, alias="BOOTSTRAP_SEED_DATA")
+
+    def validate_runtime_secrets(self) -> None:
+        """Reject development defaults when the API is started outside development.
+
+        Keeping convenient local defaults is useful for contributors, but silently
+        accepting them in a deployed HR system is not.  This guard is called at
+        application startup rather than at import time so Alembic and local tools
+        can still load configuration deliberately.
+        """
+        if self.environment.lower() in {"development", "dev", "test"}:
+            return
+
+        insecure = {
+            "JWT_SECRET": self.jwt_secret == "hrms-jwt-secret-key-32chars-min-2026-auth",
+            "DATABASE_URL": self.database_url == "postgresql+psycopg://dev:SuperAdmin@localhost:5432/hrms",
+            "SUPER_ADMIN_PASSWORD": self.super_admin_password == "SuperAdmin@123",
+            "ERP_API_KEY": not self.erp_api_key,
+        }
+        missing = [name for name, is_insecure in insecure.items() if is_insecure]
+        if missing:
+            raise RuntimeError(f"Production configuration requires secure values for: {', '.join(missing)}")
 
     def resolved_database_url(self) -> str:
         configured_database_url = self.database_url.strip()

@@ -63,6 +63,9 @@ class EmployeeRepository:
         designation_id: int | None = None,
         status: str | None = None,
         reporting_manager_id: int | None = None,
+        allowed_employee_ids: set[int] | None = None,
+        allowed_unit_ids: set[int] | None = None,
+        allowed_department_ids: set[int] | None = None,
     ) -> tuple[list[Employee], int]:
         base_query = select(Employee).options(*self._eager_options())
 
@@ -87,6 +90,15 @@ class EmployeeRepository:
             base_query = base_query.where(Employee.status == status.upper())
         if reporting_manager_id is not None:
             base_query = base_query.where(Employee.reporting_manager_id == reporting_manager_id)
+        if allowed_employee_ids is not None:
+            base_query = base_query.where(Employee.id.in_(allowed_employee_ids))
+        elif allowed_unit_ids or allowed_department_ids:
+            scope_filters = []
+            if allowed_unit_ids:
+                scope_filters.append(Employee.unit_id.in_(allowed_unit_ids))
+            if allowed_department_ids:
+                scope_filters.append(Employee.department_id.in_(allowed_department_ids))
+            base_query = base_query.where(or_(*scope_filters))
 
         count_stmt = select(func.count()).select_from(base_query.subquery())
         total = (await self.session.execute(count_stmt)).scalar_one()

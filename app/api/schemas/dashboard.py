@@ -1,4 +1,8 @@
-from pydantic import BaseModel, ConfigDict
+from datetime import date, datetime
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from schemas.employees import EmployeeDirectoryRead
 
 
 class DashboardWidgetsResponse(BaseModel):
@@ -64,3 +68,54 @@ class TechnicalAdminMetrics(BaseModel):
     units: int = 0
     departments: int = 0
     designations: int = 0
+
+
+class OwnerSummary(BaseModel):
+    active_headcount: int = 0
+    present: int = 0
+    absent: int = 0
+    on_leave: int = 0
+    weekly_off_or_holiday: int = 0
+    attendance_rate: float = 0.0
+    late_or_missed_punches: int = 0
+    pending_requests: int = 0
+    approved_overtime_minutes: int = 0
+
+
+class OwnerTrendPoint(BaseModel):
+    date: date
+    present: int = 0
+    absent: int = 0
+    on_leave: int = 0
+    weekly_off_or_holiday: int = 0
+
+
+class OwnerOrgRow(BaseModel):
+    id: int
+    name: str
+    headcount: int = 0
+    present: int = 0
+    absent: int = 0
+    on_leave: int = 0
+    exceptions: int = 0
+    attendance_rate: float = 0.0
+    approved_overtime_minutes: int = 0
+
+
+class OwnerDashboardResponse(BaseModel):
+    from_date: date
+    to_date: date
+    generated_at: datetime
+    attendance_last_synced_at: datetime | None = None
+    summary: OwnerSummary
+    trend: list[OwnerTrendPoint] = Field(default_factory=list)
+    units: list[OwnerOrgRow] = Field(default_factory=list)
+    departments: list[OwnerOrgRow] = Field(default_factory=list)
+
+
+class OwnerExceptionResponse(BaseModel):
+    items: list[EmployeeDirectoryRead]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int

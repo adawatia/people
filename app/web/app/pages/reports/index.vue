@@ -7,6 +7,29 @@ const api = useHrmsApi(); const auth = useAuth(); const tab = ref<'attendance' |
 const { data, pending, error, refresh } = await useAsyncData('reports', async () => { if (tab.value === 'attendance') { const [y, m] = month.value.split('-').map(Number); return { attendance: await api.request<AttendanceMatrix>('reports/attendance-matrix', { query: { year: y, month: m } }), leave: null } } return { attendance: null, leave: await api.request<LeaveSummary>('reports/leave-summary', { query: { year: year.value } }) } }, { watch: [tab, month, year] })
 const days = computed(() => Array.from({ length: data.value?.attendance?.total_days_in_month || 0 }, (_, index) => index + 1))
 const statusClass = (value?: string) => ({ P: 'bg-emerald-100 text-emerald-800', A: 'bg-rose-100 text-rose-800', L: 'bg-violet-100 text-violet-800', HD: 'bg-amber-100 text-amber-800', WFH: 'bg-sky-100 text-sky-800', WO: 'bg-slate-100 text-slate-600', H: 'bg-orange-100 text-orange-800' }[value || ''] || 'text-muted')
+const leaveChartOption = computed<ECOption>(() => {
+  const totals = new Map<string, { allocated: number, used: number, pending: number }>()
+  for (const row of data.value?.leave?.rows || []) {
+    const current = totals.get(row.leave_type_name) || { allocated: 0, used: 0, pending: 0 }
+    current.allocated += row.allocated
+    current.used += row.used
+    current.pending += row.pending
+    totals.set(row.leave_type_name, current)
+  }
+  const types = [...totals.keys()]
+  return {
+    tooltip: { trigger: 'axis' },
+    legend: { bottom: 0 },
+    grid: { top: 28, right: 20, bottom: 48, left: 42 },
+    xAxis: { type: 'category', data: types, axisLabel: { interval: 0, rotate: types.length > 4 ? 25 : 0 } },
+    yAxis: { type: 'value', name: 'Days' },
+    series: [
+      { name: 'Allocated', type: 'bar', data: types.map(type => totals.get(type)?.allocated || 0), itemStyle: { color: '#6366f1' } },
+      { name: 'Used', type: 'bar', data: types.map(type => totals.get(type)?.used || 0), itemStyle: { color: '#10b981' } },
+      { name: 'Pending', type: 'bar', data: types.map(type => totals.get(type)?.pending || 0), itemStyle: { color: '#f59e0b' } }
+    ]
+  }
+})
 </script>
 
 <template>
@@ -120,6 +143,25 @@ const statusClass = (value?: string) => ({ P: 'bg-emerald-100 text-emerald-800',
       v-else
       class="people-card mt-5 overflow-hidden"
     >
+      <div class="border-b border-[var(--people-border)] p-5 sm:px-6">
+        <h3 class="font-semibold">
+          Leave allocation and usage
+        </h3>
+        <p class="mt-1 text-sm text-muted">
+          Totals by leave type for {{ year }}. The detailed balances remain available below.
+        </p>
+        <ClientOnly>
+          <VChart
+            class="mt-4 h-72 w-full"
+            :option="leaveChartOption"
+            autoresize
+            aria-label="Leave allocation, usage, and pending requests by leave type"
+          />
+          <template #fallback>
+            <USkeleton class="mt-4 h-72 w-full" />
+          </template>
+        </ClientOnly>
+      </div>
       <div class="hidden overflow-x-auto sm:block">
         <table class="w-full min-w-[720px] text-left text-sm">
           <thead class="bg-muted/5 text-xs uppercase text-muted">

@@ -85,6 +85,24 @@ class Notification(Base):
     user: Mapped[User | None] = relationship("User", foreign_keys=[user_id])
 
 
+class AuditLog(Base):
+    """Append-only security audit events for privileged analytics access."""
+
+    __tablename__ = "audit_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    actor_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.user_id", ondelete="SET NULL"), index=True)
+    action: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    entity_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    entity_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    filters_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    request_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    ip_address: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_ist, nullable=False, index=True)
+
+    actor: Mapped[User | None] = relationship("User")
+
+
 # -----------------------------------------------------------------------------
 # Org Structure
 # -----------------------------------------------------------------------------

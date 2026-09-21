@@ -8,34 +8,7 @@ from core.pagination import PaginatedResponse
 from core.mobile import normalize_indian_mobile
 
 
-# ---------------------------------------------------------------------------
-# Role Assignment schemas (Dynamic RBAC — sole mechanism, no legacy role_id)
-# ---------------------------------------------------------------------------
-
-class RoleAssignmentRead(BaseModel):
-    id: int
-    role_id: int
-    role_name: str | None = None
-    scope_type: str = "organization"  # organization | unit | department
-    scope_id: int | None = None
-    assigned_at: datetime | None = None
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-class RoleAssignmentCreate(BaseModel):
-    role_id: int = Field(..., description="ID of the role to assign")
-    scope_type: Literal["organization", "unit", "department"] = Field(
-        default="organization", description="Scope level for the assignment"
-    )
-    scope_id: int | None = Field(
-        default=None, description="Unit or Department ID; null for org-wide assignments"
-    )
-
-
-# ---------------------------------------------------------------------------
-# User schemas — clean, no legacy role_id fields
-# ---------------------------------------------------------------------------
+# User schemas. Business role and scope are ERP-owned fields on Employee.
 
 class UserPermissionsResponse(BaseModel):
     permissions: list[str] = Field(default_factory=list, description="List of granted permission codes")
@@ -48,15 +21,13 @@ class UserRead(BaseUser[int]):
     last_name: str | None = None
     mobile_number: str | None = None
     must_change_password: bool = False
-    # Scoped RBAC assignments (the only role mechanism)
-    assignments: list[RoleAssignmentRead] = Field(default_factory=list, description="Scoped role assignments")
     permissions: list[str] = Field(default_factory=list, description="Aggregated permissions for the user")
     created_by: int | None = None
     invitation_sent_at: datetime | None = None
     invitation_used_at: datetime | None = None
     employee_id: int | None = Field(default=None, description="Linked Employee ID if profile exists")
     employee_code: str | None = Field(default=None, description="Linked Employee Code if profile exists")
-    role: Literal["EMPLOYEE", "DEPARTMENT_MANAGER", "HR_ADMIN", "SUPER_ADMIN"] = "EMPLOYEE"
+    role: Literal["EMPLOYEE", "DEPARTMENT_MANAGER", "HR_ADMIN", "ORGANIZATION_OWNER", "SUPER_ADMIN"] = "EMPLOYEE"
 
     @property
     def is_invitation_pending(self) -> bool:
@@ -73,12 +44,8 @@ class UserCreate(BaseUserCreate):
     last_name: str | None = Field(default=None, max_length=100, examples=["Doe"], description="User last name")
     mobile_number: str | None = Field(default=None, max_length=20, examples=["+919876543210"], description="E.164 mobile number (optional, usable for login)")
     must_change_password: bool = Field(default=False, description="Force password change on first login")
-    role: Literal["EMPLOYEE", "DEPARTMENT_MANAGER", "HR_ADMIN"] = Field(
+    role: Literal["EMPLOYEE", "DEPARTMENT_MANAGER", "HR_ADMIN", "ORGANIZATION_OWNER"] = Field(
         default="EMPLOYEE", description="Fixed business role"
-    )
-    # Scoped role assignments at creation time
-    role_assignments: list[RoleAssignmentCreate] = Field(
-        default_factory=list, description="Scoped role+scope assignments for this user"
     )
     created_by: int | None = None
 
@@ -93,9 +60,6 @@ class UserCreate(BaseUserCreate):
                 "last_name": "Doe",
                 "mobile_number": "+919876543210",
                 "is_active": True,
-                "role_assignments": [
-                    {"role_id": 1, "scope_type": "organization"}
-                ],
             }
         },
     )

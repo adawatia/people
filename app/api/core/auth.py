@@ -303,6 +303,11 @@ FIXED_ROLE_PERMISSIONS: dict[str, set[str]] = {
         "reports.view", "reports.attendance", "reports.leave", "reports.overtime", "reports.salary_cost",
         "system.configure", "audit.view", "salary_cost.view_unit", "salary_cost.view_department",
     },
+    "ORGANIZATION_OWNER": {
+        "employee.view", "attendance.view", "attendance.view_unit", "attendance.view_department",
+        "overtime.view", "overtime.view_department", "reports.view", "reports.attendance",
+        "reports.leave", "reports.overtime", "dashboard.view_organization",
+    },
 }
 
 
@@ -340,8 +345,10 @@ async def verify_api_key(api_key_header: str = Security(api_key_header)):
     compare_digest runs in constant time so key length/content cannot be
     probed via timing differences.
     """
-    expected = settings.erp_api_key or settings.api_key
-    if api_key_header and secrets.compare_digest(api_key_header, expected):
+    # ERP endpoints carry authoritative workforce data.  They must never fall
+    # back to the generic/development key when ERP_API_KEY is absent.
+    expected = settings.erp_api_key
+    if expected and api_key_header and secrets.compare_digest(api_key_header, expected):
         return True
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Could not validate API KEY")
 

@@ -70,7 +70,7 @@ async def get_permission_scope(
 ) -> EmployeeAccessScope:
     """Translate a user's role into a concrete visibility scope.
 
-    - Super Admin → whole organization.
+    - Super Admin and ORGANIZATION_OWNER → whole organization.
     - HR_ADMIN → their own unit.
     - DEPARTMENT_MANAGER → their own department.
     - Anyone lacking the permission entirely → an empty scope.
@@ -86,6 +86,8 @@ async def get_permission_scope(
     if not permissions.intersection(requested):
         return EmployeeAccessScope()
     role = employee.role
+    if role == "ORGANIZATION_OWNER":
+        return EmployeeAccessScope(organization=True)
     if role == "HR_ADMIN":
         return EmployeeAccessScope(unit_ids={employee.unit_id} if employee.unit_id else set())
     if role == "DEPARTMENT_MANAGER":

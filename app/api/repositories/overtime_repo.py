@@ -1,8 +1,8 @@
 from datetime import date
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import AttendanceRecord, OvertimeApproval, OvertimeRecord
+from db.models import AttendanceRecord, Employee, OvertimeApproval, OvertimeRecord
 
 
 class OvertimeRepository:
@@ -13,12 +13,22 @@ class OvertimeRepository:
         self,
         employee_id: int | None = None,
         status: str | None = None,
+        unit_ids: set[int] | None = None,
+        department_ids: set[int] | None = None,
     ) -> list[OvertimeRecord]:
         stmt = select(OvertimeRecord)
         if employee_id is not None:
             stmt = stmt.where(OvertimeRecord.employee_id == employee_id)
         if status is not None:
             stmt = stmt.where(OvertimeRecord.status == status.upper())
+        if unit_ids or department_ids:
+            stmt = stmt.join(Employee, OvertimeRecord.employee_id == Employee.id)
+            filters = []
+            if unit_ids:
+                filters.append(Employee.unit_id.in_(unit_ids))
+            if department_ids:
+                filters.append(Employee.department_id.in_(department_ids))
+            stmt = stmt.where(or_(*filters))
         return list((await self.session.execute(stmt)).scalars().all())
 
     async def get_by_id(self, ot_id: int) -> OvertimeRecord | None:

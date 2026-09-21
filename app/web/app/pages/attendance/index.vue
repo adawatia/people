@@ -79,17 +79,23 @@ const statusSegments = computed(() => {
 })
 
 const chartTotal = computed(() => statusSegments.value.reduce((total, segment) => total + segment.value, 0))
-const chartStyle = computed(() => {
-  if (!chartTotal.value) return { background: '#e2e8f0' }
-  let start = 0
-  const stops = statusSegments.value.filter(segment => segment.value > 0).map((segment) => {
-    const end = start + (segment.value / chartTotal.value) * 100
-    const stop = `${segment.color} ${start}% ${end}%`
-    start = end
-    return stop
-  })
-  return { background: `conic-gradient(${stops.join(', ')})` }
-})
+const attendanceChartOption = computed<ECOption>(() => ({
+  tooltip: {
+    trigger: 'item',
+    valueFormatter: value => `${value} days`
+  },
+  series: [{
+    name: 'Attendance status',
+    type: 'pie',
+    radius: ['55%', '78%'],
+    label: { show: false },
+    data: statusSegments.value.map(segment => ({
+      name: segment.label,
+      value: segment.value,
+      itemStyle: { color: segment.color }
+    }))
+  }]
+}))
 
 function formatDuration(minutes: number) {
   if (!minutes) return '0h'
@@ -254,24 +260,21 @@ function hasPendingCorrection(recordId: number) {
             </div>
           </template>
           <div class="flex flex-col items-center gap-6 sm:flex-row sm:justify-center">
-            <div
-              class="relative size-44 shrink-0 rounded-full"
-              :style="chartStyle"
-              role="img"
-              :aria-label="`Attendance breakdown with ${chartTotal} recorded days`"
-            >
-              <div class="absolute inset-6 grid place-items-center rounded-full bg-default text-center shadow-sm">
-                <div>
-                  <p class="text-2xl font-semibold tabular-nums">
-                    {{ chartTotal }}
-                  </p>
-                  <p class="text-xs text-muted">
-                    recorded days
-                  </p>
-                </div>
-              </div>
-            </div>
+            <ClientOnly>
+              <VChart
+                class="h-52 w-full shrink-0 sm:w-56"
+                :option="attendanceChartOption"
+                autoresize
+                aria-label="Attendance status distribution chart"
+              />
+              <template #fallback>
+                <USkeleton class="h-52 w-full sm:w-56" />
+              </template>
+            </ClientOnly>
             <div class="grid w-full gap-3 sm:max-w-xs">
+              <p class="text-sm text-muted">
+                <span class="font-semibold tabular-nums text-default">{{ chartTotal }}</span> recorded days
+              </p>
               <div
                 v-for="segment in statusSegments"
                 :key="segment.label"

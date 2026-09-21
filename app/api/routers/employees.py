@@ -4,11 +4,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import UserManager, fastapi_users, get_user_manager, require_permission
+from core.employee_access import get_current_employee, require_employee_access
 from fastapi_users import exceptions as fu_exceptions
 from core.database import get_async_session
 from db.models import User
 from schemas.employees import (
     EmployeeOnboardingCreate,
+    EmployeeDirectoryRead,
     EmployeeRead,
     EmployeeWorkHistoryRead,
     PaginatedEmployeesResponse,
@@ -31,6 +33,22 @@ async def list_employees(
     _: User = Depends(fastapi_users.current_user(active=True)),
     session: AsyncSession = Depends(get_async_session),
 ) -> PaginatedEmployeesResponse:
+    current_user = _
+    allowed_employee_ids: set[int] | None = None
+    allowed_unit_ids: set[int] | None = None
+    allowed_department_ids: set[int] | None = None
+    if not current_user.is_superuser:
+        current_employee = await get_current_employee(current_user, session)
+        if current_employee.role == "ORGANIZATION_OWNER":
+            pass
+        elif current_employee.role == "HR_ADMIN":
+            allowed_employee_ids = set() if current_employee.unit_id is None else None
+            allowed_unit_ids = {current_employee.unit_id} if current_employee.unit_id else None
+        elif current_employee.role == "DEPARTMENT_MANAGER":
+            allowed_employee_ids = set() if current_employee.department_id is None else None
+            allowed_department_ids = {current_employee.department_id} if current_employee.department_id else None
+        else:
+            allowed_employee_ids = {current_employee.id}
     service = EmployeeService(session)
     return await service.list_employees(
         page=page,
@@ -41,6 +59,9 @@ async def list_employees(
         designation_id=designation_id,
         status_filter=status,
         reporting_manager_id=reporting_manager_id,
+        allowed_employee_ids=allowed_employee_ids,
+        allowed_unit_ids=allowed_unit_ids,
+        allowed_department_ids=allowed_department_ids,
     )
 
 
@@ -56,7 +77,7 @@ async def onboard_employee(
     _: User = Depends(require_permission("employee.create")),
     user_manager: UserManager = Depends(get_user_manager),
     session: AsyncSession = Depends(get_async_session),
-) -> EmployeeRead:
+) -> EmployeeDirectoryRead:
     """Disabled: employee and account provisioning is ERP-owned."""
     raise HTTPException(status_code=410, detail="Employee provisioning is ERP-only; use /integrations/erp/employees")
     # Kept below temporarily for source compatibility while clients migrate.
@@ -122,22 +143,25 @@ async def onboard_employee(
         raise
 
 
-@router.get("/{emp_id}", response_model=EmployeeRead)
+@router.get("/{emp_id}", response_model=EmployeeDirectoryRead)
 async def get_employee(
     emp_id: int,
-    _: User = Depends(fastapi_users.current_user(active=True)),
+    current_user: User = Depends(fastapi_users.current_user(active=True)),
     session: AsyncSession = Depends(get_async_session),
 ) -> EmployeeRead:
     service = EmployeeService(session)
     emp = await service.get_employee(emp_id)
-    return service.enrich(emp)
+    await require_employee_access(current_user, emp, "employee.view", session, allow_self=True)
+    return service.enrich_directory(emp)
 
 
 @router.get("/{emp_id}/work-history", response_model=list[EmployeeWorkHistoryRead])
 async def get_employee_work_history(
     emp_id: int,
-    _: User = Depends(fastapi_users.current_user(active=True)),
+    current_user: User = Depends(fastapi_users.current_user(active=True)),
     session: AsyncSession = Depends(get_async_session),
 ) -> list[EmployeeWorkHistoryRead]:
     service = EmployeeService(session)
+    employee = await service.get_employee(emp_id)
+    await require_employee_access(current_user, employee, "employee.view", session, allow_self=True)
     return await service.get_work_history(emp_id)

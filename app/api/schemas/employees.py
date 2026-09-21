@@ -3,7 +3,7 @@ from decimal import Decimal
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, EmailStr
 
-BusinessRole = Literal["EMPLOYEE", "DEPARTMENT_MANAGER", "HR_ADMIN"]
+BusinessRole = Literal["EMPLOYEE", "DEPARTMENT_MANAGER", "HR_ADMIN", "ORGANIZATION_OWNER"]
 
 
 class ShiftRead(BaseModel):
@@ -162,6 +162,39 @@ class EmployeeWorkHistoryRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class EmployeeDirectoryRead(BaseModel):
+    """Safe directory projection for normal authenticated users.
+
+    Statutory IDs, bank data, private contact details and compensation are
+    intentionally absent.  Those fields stay available only to ERP-facing
+    administration flows and must not leak through the people directory.
+    """
+
+    id: int
+    employee_code: str
+    role: BusinessRole
+    first_name: str
+    last_name: str | None = None
+    official_email: str | None = None
+    designation: str | None = None
+    designation_id: int | None = None
+    date_of_joining: date | None = None
+    employment_type: str
+    status: str
+    department_id: int | None = None
+    unit_id: int | None = None
+    shift_id: int | None = None
+    reporting_manager_id: int | None = None
+    overtime_eligible: bool
+    full_name: str | None = None
+    department_name: str | None = None
+    unit_name: str | None = None
+    shift_name: str | None = None
+    designation_name: str | None = None
+    reporting_manager_name: str | None = None
+    model_config = ConfigDict(from_attributes=True)
+
+
 class EmployeeRead(EmployeeBase):
     id: int
     user_id: int | None = None
@@ -200,7 +233,7 @@ class EmployeeRead(EmployeeBase):
 
 
 class PaginatedEmployeesResponse(BaseModel):
-    items: list[EmployeeRead]
+    items: list[EmployeeDirectoryRead]
     total: int
     page: int
     page_size: int

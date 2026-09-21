@@ -75,9 +75,11 @@ def test_employee_profile_and_hierarchy(unique_suffix):
             desig_service = DesignationService(session)
 
             # Create test org, unit, department
-            org = Organization(name=f"Test Org {unique_suffix}", short_name="TO")
-            session.add(org)
-            await session.flush()
+            org = await session.scalar(select(Organization).order_by(Organization.id.asc()))
+            if org is None:
+                org = Organization(name=f"Test Org {unique_suffix}", short_name="TO")
+                session.add(org)
+                await session.flush()
 
             unit = Unit(organization_id=org.id, name=f"Unit 1 {unique_suffix}", code=f"U1_{unique_suffix}")
             session.add(unit)

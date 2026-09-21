@@ -54,9 +54,11 @@ def unique_suffix():
 
 
 async def _setup_audit_env(session, suffix: str):
-    org = Organization(name=f"Audit Org {suffix}", short_name=f"AO_{suffix}")
-    session.add(org)
-    await session.flush()
+    org = await session.scalar(select(Organization).order_by(Organization.id.asc()))
+    if org is None:
+        org = Organization(name=f"Audit Org {suffix}", short_name=f"AO_{suffix}")
+        session.add(org)
+        await session.flush()
 
     unit = Unit(organization_id=org.id, name=f"Audit Unit {suffix}", code=f"AU_{suffix}")
     session.add(unit)
@@ -104,6 +106,22 @@ async def _setup_audit_env(session, suffix: str):
         last_name="User",
     )
     session.add(mgr_user)
+    await session.flush()
+    session.add(
+        Employee(
+            first_name="Audit",
+            last_name="Manager",
+            employee_code=f"MGR_AUD_{suffix}",
+            official_email=f"mgr_{suffix}@example.com",
+            role="DEPARTMENT_MANAGER",
+            unit_id=unit.id,
+            department_id=dept.id,
+            designation_id=desig.id,
+            user_id=mgr_user.id,
+            employment_type="FULL_TIME",
+            status="ACTIVE",
+        )
+    )
     await session.flush()
 
     return org, unit, dept, emp, emp_user, mgr_user
@@ -698,7 +716,7 @@ def test_notification_and_manager_dashboard_workflow(unique_suffix):
     async def _test():
         async with async_session_maker() as session:
             org, unit, dept, emp, emp_user, mgr_user = await _setup_audit_env(session, unique_suffix)
-            from db.models import Notification, Role, UserRoleAssignment
+            from db.models import Notification
             from routers.dashboard import get_dashboard_metrics
             from routers.notifications import mark_notification_read
             from schemas.leaves import LeaveAllocationCreate, LeaveApplicationCreate, LeavePeriodCreate, LeaveTypeCreate
@@ -725,25 +743,9 @@ def test_notification_and_manager_dashboard_workflow(unique_suffix):
             marked = await mark_notification_read(id=notif.notification_id, current_user=emp_user, session=session)
             assert marked.is_read is True
 
-            # 2. Manager Dashboard Metrics & Scoped Pending Approvals
-            # Give mgr_user the HR_MANAGER role scoped to this unit
-            role_hr = Role(role_name=f"HR_MGR_{unique_suffix}", is_system_role=False)
-            session.add(role_hr)
-            await session.flush()
-            from db.models import Permission, RolePermission
-            perm_leave = await session.scalar(select(Permission).where(Permission.permission_code == "leave.approve"))
-            if not perm_leave:
-                perm_leave = Permission(permission_code="leave.approve", module_name="leaves")
-                session.add(perm_leave)
-                await session.flush()
-            session.add(RolePermission(role_id=role_hr.role_id, permission_id=perm_leave.permission_id))
-            session.add(UserRoleAssignment(
-                user_id=mgr_user.id,
-                role_id=role_hr.role_id,
-                scope_type="unit",
-                scope_id=unit.id,
-            ))
-            await session.commit()
+            # 2. Manager Dashboard Metrics & Scoped Pending Approvals.  The
+            # fixture provisions a fixed DEPARTMENT_MANAGER role on its
+            # employee record; no dynamic role assignment is required.
 
             # Create pending leave application by employee
             leave_service = LeaveService(session)

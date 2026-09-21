@@ -18,9 +18,12 @@
     "@nuxt/image": "2.1.0",
     "@nuxt/ui": "^4.11.1",
     "@nuxtjs/svg-sprite": "1.0.2",
+    "echarts": "^6.1.0",
     "nuxt": "^4.5.2",
     "nuxt-auth-utils": "0.5.30",
-    "tailwindcss": "^4.3.3"
+    "nuxt-echarts": "1.1.0",
+    "tailwindcss": "^4.3.3",
+    "vue-echarts": "^8.3.0"
   },
   "devDependencies": {
     "@nuxt/eslint": "^1.17.0",

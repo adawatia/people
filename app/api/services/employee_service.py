@@ -7,6 +7,7 @@ from db.models import AuthSession, Department, Designation, Employee, EmployeeWo
 from repositories.employee_repo import EmployeeRepository
 from schemas.employees import (
     EmployeeCreate,
+    EmployeeDirectoryRead,
     EmployeeRead,
     EmployeeUpdate,
     EmployeeWorkHistoryRead,
@@ -43,6 +44,39 @@ class EmployeeService:
 
         return data
 
+    def enrich_directory(self, emp: Employee) -> EmployeeDirectoryRead:
+        """Return the non-sensitive projection used by the people directory."""
+        full_name_parts = [part for part in (emp.first_name, emp.last_name) if part]
+        manager_name = None
+        if emp.reporting_manager:
+            manager_name = " ".join(
+                part for part in (emp.reporting_manager.first_name, emp.reporting_manager.last_name) if part
+            ) or emp.reporting_manager.employee_code
+        return EmployeeDirectoryRead(
+            id=emp.id,
+            employee_code=emp.employee_code,
+            role=emp.role,
+            first_name=emp.first_name,
+            last_name=emp.last_name,
+            official_email=emp.official_email,
+            designation=emp.designation,
+            designation_id=emp.designation_id,
+            date_of_joining=emp.date_of_joining,
+            employment_type=emp.employment_type,
+            status=emp.status,
+            department_id=emp.department_id,
+            unit_id=emp.unit_id,
+            shift_id=emp.shift_id,
+            reporting_manager_id=emp.reporting_manager_id,
+            overtime_eligible=emp.overtime_eligible,
+            full_name=" ".join(full_name_parts) if full_name_parts else emp.employee_code,
+            department_name=emp.department.name if emp.department else None,
+            unit_name=emp.unit.name if emp.unit else None,
+            shift_name=emp.shift.name if emp.shift else None,
+            designation_name=emp.designation_rel.name if emp.designation_rel else emp.designation,
+            reporting_manager_name=manager_name,
+        )
+
     async def list_employees(
         self,
         page: int = 1,
@@ -53,6 +87,9 @@ class EmployeeService:
         designation_id: int | None = None,
         status_filter: str | None = None,
         reporting_manager_id: int | None = None,
+        allowed_employee_ids: set[int] | None = None,
+        allowed_unit_ids: set[int] | None = None,
+        allowed_department_ids: set[int] | None = None,
     ) -> PaginatedEmployeesResponse:
         employees, total = await self.repo.list_paginated(
             page=page,
@@ -63,8 +100,11 @@ class EmployeeService:
             designation_id=designation_id,
             status=status_filter,
             reporting_manager_id=reporting_manager_id,
+            allowed_employee_ids=allowed_employee_ids,
+            allowed_unit_ids=allowed_unit_ids,
+            allowed_department_ids=allowed_department_ids,
         )
-        items = [self.enrich(e) for e in employees]
+        items = [self.enrich_directory(e) for e in employees]
         import math
         total_pages = math.ceil(total / page_size) if total else 1
         return PaginatedEmployeesResponse(

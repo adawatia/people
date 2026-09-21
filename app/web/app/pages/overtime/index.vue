@@ -20,6 +20,21 @@ const { data, pending, error, refresh } = await useAsyncData('my-overtime', asyn
 const filtered = computed(() => (data.value?.records || []).filter(item => statusFilter.value === 'ALL' || item.status === statusFilter.value))
 const hours = (minutes: number) => `${Math.floor(minutes / 60)}h ${minutes % 60}m`
 const statusColor = (value: string) => ({ PENDING: 'warning', APPROVED: 'success', REJECTED: 'error' }[value] || 'neutral') as 'warning' | 'success' | 'error' | 'neutral'
+const overtimeChartOption = computed<ECOption>(() => ({
+  tooltip: { trigger: 'axis', valueFormatter: value => `${value} hours` },
+  grid: { top: 20, right: 16, bottom: 28, left: 42 },
+  xAxis: { type: 'category', data: ['Calculated', 'Approved'] },
+  yAxis: { type: 'value', name: 'Hours' },
+  series: [{
+    name: 'Overtime',
+    type: 'bar',
+    barMaxWidth: 64,
+    data: [
+      { value: Number(((data.value?.summary.total_calculated_minutes || 0) / 60).toFixed(1)), itemStyle: { color: '#6366f1' } },
+      { value: Number(((data.value?.summary.total_approved_minutes || 0) / 60).toFixed(1)), itemStyle: { color: '#10b981' } }
+    ]
+  }]
+}))
 </script>
 
 <template>
@@ -80,6 +95,25 @@ const statusColor = (value: string) => ({ PENDING: 'warning', APPROVED: 'success
             {{ pending ? '—' : metric.value }}
           </p>
         </article>
+      </section>
+      <section class="people-card mt-7 p-5 sm:px-6">
+        <h3 class="font-semibold">
+          Overtime hours
+        </h3>
+        <p class="mt-1 text-sm text-muted">
+          Calculated hours compared with approved hours for the selected month.
+        </p>
+        <ClientOnly>
+          <VChart
+            class="mt-4 h-56 w-full"
+            :option="overtimeChartOption"
+            autoresize
+            aria-label="Calculated and approved overtime hours comparison"
+          />
+          <template #fallback>
+            <USkeleton class="mt-4 h-56 w-full" />
+          </template>
+        </ClientOnly>
       </section>
       <section class="people-card mt-7 overflow-hidden">
         <div class="flex flex-col gap-4 border-b border-[var(--people-border)] p-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">

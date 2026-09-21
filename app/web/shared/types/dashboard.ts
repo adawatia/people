@@ -36,3 +36,54 @@ export interface DashboardMetrics {
   employeeMetrics: EmployeeMetrics
   pendingApprovals: PendingApproval[]
 }
+
+export interface OwnerSummary {
+  active_headcount: number
+  present: number
+  absent: number
+  on_leave: number
+  weekly_off_or_holiday: number
+  attendance_rate: number
+  late_or_missed_punches: number
+  pending_requests: number
+  approved_overtime_minutes: number
+}
+
+export interface OwnerTrendPoint {
+  date: string
+  present: number
+  absent: number
+  on_leave: number
+  weekly_off_or_holiday: number
+}
+
+export interface OwnerOrgRow {
+  id: number
+  name: string
+  headcount: number
+  present: number
+  absent: number
+  on_leave: number
+  exceptions: number
+  attendance_rate: number
+  approved_overtime_minutes: number
+}
+
+export interface OwnerDashboard {
+  from_date: string
+  to_date: string
+  generated_at: string
+  attendance_last_synced_at?: string | null
+  summary: OwnerSummary
+  trend: OwnerTrendPoint[]
+  units: OwnerOrgRow[]
+  departments: OwnerOrgRow[]
+}
+
+export interface OwnerExceptionResponse {
+  items: import('./employee').Employee[]
+  total: number
+  page: number
+  page_size: number
+  total_pages: number
+}

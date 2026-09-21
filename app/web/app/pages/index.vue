@@ -6,9 +6,10 @@ const auth = useAuth()
 const api = useHrmsApi()
 const isTechnicalAdmin = computed(() => Boolean(auth.user.value?.is_superuser))
 const role = computed(() => auth.user.value?.role || 'EMPLOYEE')
+const isOrganizationOwner = computed(() => role.value === 'ORGANIZATION_OWNER')
 const isManager = computed(() => role.value === 'DEPARTMENT_MANAGER' || role.value === 'HR_ADMIN')
-const dashboardTitle = computed(() => role.value === 'HR_ADMIN' ? 'Unit operations at a glance.' : role.value === 'DEPARTMENT_MANAGER' ? 'Your department at a glance.' : 'Here’s your workday at a glance.')
-const dashboardSubtitle = computed(() => role.value === 'HR_ADMIN' ? 'Monitor unit attendance and handle requests that need HR attention.' : role.value === 'DEPARTMENT_MANAGER' ? 'Review your department attendance, leave and approval workload.' : 'Review your attendance, leave balance and work schedule.')
+const dashboardTitle = computed(() => role.value === 'ORGANIZATION_OWNER' ? 'Organization operations at a glance.' : role.value === 'HR_ADMIN' ? 'Unit operations at a glance.' : role.value === 'DEPARTMENT_MANAGER' ? 'Your department at a glance.' : 'Here’s your workday at a glance.')
+const dashboardSubtitle = computed(() => role.value === 'ORGANIZATION_OWNER' ? 'Monitor company-wide attendance, workforce exceptions, leave and overtime.' : role.value === 'HR_ADMIN' ? 'Monitor unit attendance and handle requests that need HR attention.' : role.value === 'DEPARTMENT_MANAGER' ? 'Review your department attendance, leave and approval workload.' : 'Review your attendance, leave balance and work schedule.')
 const greeting = computed(() => {
   const hour = new Date().getHours()
   return hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
@@ -132,6 +133,10 @@ const stats = computed(() => isManager.value
           </UButton>
         </section>
       </div>
+    </template>
+
+    <template v-else-if="isOrganizationOwner">
+      <DashboardOwnerDashboard />
     </template>
 
     <template v-else>

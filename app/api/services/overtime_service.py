@@ -24,8 +24,12 @@ class OvertimeService:
         self,
         employee_id: int | None = None,
         status: str | None = None,
+        unit_ids: set[int] | None = None,
+        department_ids: set[int] | None = None,
     ) -> list[OvertimeRecordRead]:
-        records = await self.repo.list_records(employee_id=employee_id, status=status)
+        records = await self.repo.list_records(
+            employee_id=employee_id, status=status, unit_ids=unit_ids, department_ids=department_ids
+        )
         return [OvertimeRecordRead.model_validate(r) for r in records]
 
     async def get_overtime(self, ot_id: int) -> OvertimeRecordRead:

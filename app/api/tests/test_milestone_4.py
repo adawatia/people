@@ -6,6 +6,7 @@ from datetime import date, datetime, time, timedelta
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy import select
 
 from core.database import async_session_maker
 from db.models import Department, Designation, Employee, Organization, Unit, User
@@ -35,9 +36,11 @@ def unique_suffix():
 
 
 async def _setup_m4_test_environment(session, suffix: str):
-    org = Organization(name=f"Org M4 {suffix}", short_name=f"O4_{suffix}")
-    session.add(org)
-    await session.flush()
+    org = await session.scalar(select(Organization).order_by(Organization.id.asc()))
+    if org is None:
+        org = Organization(name=f"Org M4 {suffix}", short_name=f"O4_{suffix}")
+        session.add(org)
+        await session.flush()
 
     unit = Unit(organization_id=org.id, name=f"Unit M4 {suffix}", code=f"U4_{suffix}")
     session.add(unit)

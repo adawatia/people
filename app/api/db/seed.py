@@ -14,7 +14,6 @@ async def create_db_and_tables() -> None:
 
 
 async def ensure_seed_data() -> None:
-    await create_db_and_tables()
     async with async_session_maker() as session:
         organization = await session.scalar(select(Organization).order_by(Organization.id.asc()))
         if organization is None:

@@ -8,13 +8,13 @@
  * Technical admins (superuser) skip the business nav entirely and get a
  * dedicated "System administration" link instead.
  */
-interface NavItem { label: string, icon: string, to: string, permissions?: string[], roles?: Array<'EMPLOYEE' | 'DEPARTMENT_MANAGER' | 'HR_ADMIN'> }
+interface NavItem { label: string, icon: string, to: string, permissions?: string[], roles?: Array<'EMPLOYEE' | 'DEPARTMENT_MANAGER' | 'HR_ADMIN' | 'ORGANIZATION_OWNER'> }
 const route = useRoute()
 const auth = useAuth()
 const mobileOpen = ref(false)
 const navItems: NavItem[] = [
   { label: 'Dashboard', icon: 'i-lucide-layout-dashboard', to: '/' },
-  { label: 'Employees', icon: 'i-lucide-users-round', to: '/employees', roles: ['DEPARTMENT_MANAGER', 'HR_ADMIN'], permissions: ['employee.view'] },
+  { label: 'Employees', icon: 'i-lucide-users-round', to: '/employees', roles: ['DEPARTMENT_MANAGER', 'HR_ADMIN', 'ORGANIZATION_OWNER'], permissions: ['employee.view'] },
   { label: 'Attendance', icon: 'i-lucide-calendar-check-2', to: '/attendance' },
   { label: 'Leave', icon: 'i-lucide-calendar-days', to: '/leaves' },
   { label: 'Work arrangements', icon: 'i-lucide-briefcase-business', to: '/work-arrangements' },
@@ -23,17 +23,21 @@ const navItems: NavItem[] = [
   { label: 'Shifts', icon: 'i-lucide-clock-3', to: '/shifts', permissions: ['shift.view_self', 'shift.assign', 'shift.update'] },
   { label: 'Holidays', icon: 'i-lucide-calendar-heart', to: '/holidays' },
   { label: 'Organization', icon: 'i-lucide-building-2', to: '/organization', roles: ['HR_ADMIN'], permissions: ['system.configure', 'designation.view', 'employee.view'] },
-  { label: 'Reports', icon: 'i-lucide-chart-no-axes-combined', to: '/reports', roles: ['DEPARTMENT_MANAGER', 'HR_ADMIN'], permissions: ['reports.attendance', 'reports.leave'] }
+  { label: 'Reports', icon: 'i-lucide-chart-no-axes-combined', to: '/reports', roles: ['DEPARTMENT_MANAGER', 'HR_ADMIN', 'ORGANIZATION_OWNER'], permissions: ['reports.attendance', 'reports.leave'] }
 ]
 const isTechnicalAdmin = computed(() => Boolean(auth.user.value?.is_superuser))
 const businessRole = computed(() => auth.user.value?.role)
+function isBusinessRole(role: typeof businessRole.value): role is 'EMPLOYEE' | 'DEPARTMENT_MANAGER' | 'HR_ADMIN' | 'ORGANIZATION_OWNER' {
+  return role === 'EMPLOYEE' || role === 'DEPARTMENT_MANAGER' || role === 'HR_ADMIN' || role === 'ORGANIZATION_OWNER'
+}
 // Technical admins manage master data in ERP, not here — so they only see
 // the dashboard plus system administration. Everyone else passes both the
 // role gate and any-permission gate for each item.
 const visibleItems = computed(() => isTechnicalAdmin.value
   ? [{ label: 'Dashboard', icon: 'i-lucide-layout-dashboard', to: '/' }]
   : navItems.filter((item) => {
-      if (item.roles && (!businessRole.value || !item.roles.includes(businessRole.value))) return false
+      const currentRole = businessRole.value
+      if (item.roles && (!isBusinessRole(currentRole) || !item.roles.includes(currentRole))) return false
       return !item.permissions || item.permissions.some(auth.hasPermission)
     }))
 const pageTitle = computed(() => route.path === '/settings' ? 'System administration' : navItems.find(item => item.to === route.path)?.label || 'People')
