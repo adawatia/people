@@ -41,4 +41,7 @@ export interface LeaveApplication {
   status: string
   applied_at: string
   rejection_reason?: string | null
+  cancellation_effective_date?: string | null
+  cancellation_reason?: string | null
+  cancellation_rejection_reason?: string | null
 }

@@ -34,7 +34,11 @@ const attendanceQueue = useAsyncData('attendance-approval-queue', async () => {
 
 const leaveQueue = useAsyncData('leave-approval-queue', async () => {
   if (!canLeave.value) return []
-  return await api.request<LeaveApplication[]>('leaves/', { query: { status: 'PENDING' } })
+  const [applications, cancellations] = await Promise.all([
+    api.request<LeaveApplication[]>('leaves/', { query: { status: 'PENDING' } }),
+    api.request<LeaveApplication[]>('leaves/', { query: { status: 'CANCELLATION_PENDING' } })
+  ])
+  return [...applications, ...cancellations]
 })
 
 const workQueue = useAsyncData('work-arrangement-approval-queue', async () => {
@@ -51,7 +55,7 @@ function formatTime(value?: string | null) {
   const [hours, minutes] = value.split(':')
   return new Intl.DateTimeFormat('en-IN', { hour: '2-digit', minute: '2-digit' }).format(new Date(2000, 0, 1, Number(hours), Number(minutes)))
 }
-function formatDate(value?: string) {
+function formatDate(value?: string | null) {
   if (!value) return 'Unknown date'
   return new Intl.DateTimeFormat('en-IN', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(`${value}T00:00:00`))
 }
@@ -79,8 +83,16 @@ async function approveAttendance(item: CorrectionReview) {
 async function approveLeave(item: LeaveApplication) {
   actionKey.value = `leave-${item.id}`
   try {
-    await api.request(`leaves/${item.id}/approve`, { method: 'PATCH' })
-    toast.add({ title: 'Leave approved', description: `${item.employee_name || 'The employee'} has been notified.`, color: 'success', icon: 'i-lucide-circle-check' })
+    const isCancellation = item.status === 'CANCELLATION_PENDING'
+    await api.request(`leaves/${item.id}${isCancellation ? '/cancellation/approve' : '/approve'}`, { method: 'PATCH' })
+    toast.add({
+      title: isCancellation ? 'Early return approved' : 'Leave approved',
+      description: isCancellation
+        ? `Only unused leave from ${formatDate(item.cancellation_effective_date)} has been restored.`
+        : `${item.employee_name || 'The employee'} has been notified.`,
+      color: 'success',
+      icon: 'i-lucide-circle-check'
+    })
     await leaveQueue.refresh()
   } catch (error) {
     toast.add({ title: 'Approval failed', description: requestError(error, 'Please try again.'), color: 'error' })
@@ -121,7 +133,11 @@ async function rejectRequest() {
   if (!item) return
   actionKey.value = `${type}-${item.id}`
   try {
-    const path = type === 'attendance' ? `attendance/corrections/${item.id}/reject` : type === 'leave' ? `leaves/${item.id}/reject` : `work-arrangements/${item.id}/reject`
+    const path = type === 'attendance'
+      ? `attendance/corrections/${item.id}/reject`
+      : type === 'leave'
+        ? `leaves/${item.id}${(item as LeaveApplication).status === 'CANCELLATION_PENDING' ? '/cancellation/reject' : '/reject'}`
+        : `work-arrangements/${item.id}/reject`
     await api.request(path, { method: 'PATCH', body: { rejection_reason: rejectionReason.value.trim() } })
     toast.add({ title: type === 'attendance' ? 'Correction rejected' : 'Leave rejected', color: 'neutral', icon: 'i-lucide-circle-x' })
     closeReject()
@@ -335,9 +351,15 @@ async function rejectRequest() {
             </div>
           </div><div class="mt-4">
             <p class="text-xs font-semibold uppercase tracking-wide text-muted">
-              Employee’s reason
+              {{ item.status === 'CANCELLATION_PENDING' ? 'Early-return reason' : 'Employee’s reason' }}
             </p><p class="mt-2 text-sm leading-6">
-              {{ item.reason || 'No reason provided.' }}
+              {{ item.status === 'CANCELLATION_PENDING' ? item.cancellation_reason : (item.reason || 'No reason provided.') }}
+            </p>
+            <p
+              v-if="item.status === 'CANCELLATION_PENDING'"
+              class="mt-2 text-sm text-muted"
+            >
+              Requested early return from {{ formatDate(item.cancellation_effective_date) }}. Leave already taken remains recorded.
             </p>
           </div><div class="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
             <UButton
@@ -353,7 +375,7 @@ async function rejectRequest() {
               :loading="actionKey === `leave-${item.id}`"
               @click="approveLeave(item)"
             >
-              Approve leave
+              {{ item.status === 'CANCELLATION_PENDING' ? 'Approve early return' : 'Approve leave' }}
             </UButton>
           </div>
         </div>

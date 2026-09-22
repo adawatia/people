@@ -87,8 +87,15 @@ const attendanceChartOption = computed<ECOption>(() => ({
   series: [{
     name: 'Attendance status',
     type: 'pie',
-    radius: ['55%', '78%'],
-    label: { show: false },
+    radius: ['45%', '64%'],
+    label: {
+      show: true,
+      formatter: '{b}: {c}',
+      fontSize: 11,
+      minMargin: 4
+    },
+    labelLine: { length: 8, length2: 6 },
+    labelLayout: { hideOverlap: true },
     data: statusSegments.value.map(segment => ({
       name: segment.label,
       value: segment.value,
@@ -260,18 +267,22 @@ function hasPendingCorrection(recordId: number) {
             </div>
           </template>
           <div class="flex flex-col items-center gap-6 sm:flex-row sm:justify-center">
-            <ClientOnly>
-              <VChart
-                class="h-52 w-full shrink-0 sm:w-56"
-                :option="attendanceChartOption"
-                autoresize
-                aria-label="Attendance status distribution chart"
-              />
-              <template #fallback>
-                <USkeleton class="h-52 w-full sm:w-56" />
-              </template>
-            </ClientOnly>
-            <div class="grid w-full gap-3 sm:max-w-xs">
+            <div class="w-full shrink-0 sm:w-56">
+              <ClientOnly>
+                <VChart
+                  class="block"
+                  style="width: 100%; height: 13rem"
+                  :option="attendanceChartOption"
+                  :init-options="{ renderer: 'svg' }"
+                  autoresize
+                  aria-label="Attendance status distribution chart"
+                />
+                <template #fallback>
+                  <USkeleton class="h-52 w-full" />
+                </template>
+              </ClientOnly>
+            </div>
+            <div class="grid w-full min-w-0 gap-3 sm:max-w-xs">
               <p class="text-sm text-muted">
                 <span class="font-semibold tabular-nums text-default">{{ chartTotal }}</span> recorded days
               </p>

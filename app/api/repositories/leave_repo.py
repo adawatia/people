@@ -1,15 +1,16 @@
 from datetime import date
+
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from db.models import (
+    Employee,
     LeaveAllocation,
     LeaveApplication,
     LeaveLedgerEntry,
     LeavePeriod,
     LeaveType,
-    Employee,
 )
 
 
@@ -197,7 +198,10 @@ class LeaveRepository:
     ) -> LeaveApplication | None:
         stmt = select(LeaveApplication).where(
             LeaveApplication.employee_id == employee_id,
-            LeaveApplication.status.in_(["PENDING", "APPROVED"]),
+            # An early-return request is still an approved leave until its
+            # approver decides otherwise, so it must continue to reserve the
+            # original dates and prevent overlapping applications.
+            LeaveApplication.status.in_(["PENDING", "APPROVED", "CANCELLATION_PENDING"]),
             LeaveApplication.from_date <= to_date,
             LeaveApplication.to_date >= from_date,
         )

@@ -1,7 +1,6 @@
 from datetime import date, datetime
-from decimal import Decimal
-from pydantic import BaseModel, ConfigDict
 
+from pydantic import BaseModel, ConfigDict, Field
 
 # ── Leave Periods ─────────────────────────────────────────────────────────────
 
@@ -133,6 +132,17 @@ class LeaveApplicationAction(BaseModel):
     rejection_reason: str | None = None
 
 
+class LeaveCancellationRequest(BaseModel):
+    """Request early return from leave that has already started."""
+
+    effective_date: date | None = None
+    reason: str = Field(min_length=3, max_length=500)
+
+
+class LeaveCancellationAction(BaseModel):
+    rejection_reason: str = Field(min_length=3, max_length=500)
+
+
 class LeaveApplicationRead(BaseModel):
     id: int
     employee_id: int
@@ -153,6 +163,13 @@ class LeaveApplicationRead(BaseModel):
     actioned_by: int | None
     actioned_at: datetime | None
     rejection_reason: str | None
+    cancellation_requested_by: int | None = None
+    cancellation_requested_at: datetime | None = None
+    cancellation_effective_date: date | None = None
+    cancellation_reason: str | None = None
+    cancellation_actioned_by: int | None = None
+    cancellation_actioned_at: datetime | None = None
+    cancellation_rejection_reason: str | None = None
     erp_event_id: str | None = None
     erp_sync_status: str = "PENDING"
     erp_synced_at: datetime | None = None

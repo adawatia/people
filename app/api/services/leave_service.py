@@ -1,4 +1,5 @@
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
+
 from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +12,7 @@ from db.models import (
     LeaveLedgerEntry,
     LeavePeriod,
     LeaveType,
+    now_ist,
 )
 from repositories.attendance_record_repo import AttendanceRecordRepository
 from repositories.employee_repo import EmployeeRepository
@@ -18,7 +20,6 @@ from repositories.leave_repo import LeaveRepository
 from schemas.leaves import (
     LeaveAllocationCreate,
     LeaveAllocationRead,
-    LeaveApplicationAction,
     LeaveApplicationCreate,
     LeaveApplicationRead,
     LeaveBalanceRead,
@@ -89,7 +90,7 @@ class LeaveService:
     async def update_type(self, type_id: int, data: LeaveTypeUpdate) -> LeaveTypeRead:
         lt = await self.get_type(type_id)
         update_data = data.model_dump(exclude_unset=True)
-        if "code" in update_data and update_data["code"]:
+        if update_data.get("code"):
             update_data["code"] = update_data["code"].strip().upper()
             existing = await self.repo.get_type_by_code(update_data["code"])
             if existing and existing.id != type_id:
@@ -214,7 +215,7 @@ class LeaveService:
         employee_id: int,
         for_date: date | None = None,
     ) -> list[LeaveBalanceRead]:
-        target_date = for_date or date.today()
+        target_date = for_date or now_ist().date()
         balances = await self.repo.list_balances(employee_id, target_date.year)
         results: list[LeaveBalanceRead] = []
         for balance in balances:
@@ -405,7 +406,7 @@ class LeaveService:
         app.erp_event_id = f"LEAVE-{app.id}-APPROVED"
         app.erp_sync_status = "PENDING"
         app.actioned_by = actioned_by_user_id
-        app.actioned_at = datetime.now()
+        app.actioned_at = now_ist()
 
         if app.leave_type and app.leave_type.is_paid:
             balance = await self._get_leave_balance(app_employee_id, app_leave_type_id, app_from_date.year)
@@ -493,7 +494,7 @@ class LeaveService:
         app.erp_event_id = f"LEAVE-{app.id}-REJECTED"
         app.erp_sync_status = "PENDING"
         app.actioned_by = actioned_by_user_id
-        app.actioned_at = datetime.now()
+        app.actioned_at = now_ist()
         app.rejection_reason = rejection_reason
         if is_paid:
             balance = await self._get_leave_balance(app_employee_id, app_leave_type_id, app_from_date.year)
@@ -519,6 +520,11 @@ class LeaveService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Leave application not found")
         if app.status not in ("PENDING", "APPROVED"):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only PENDING or APPROVED leave can be cancelled")
+        if app.status == "APPROVED" and now_ist().date() >= app.from_date:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Started leave must be cancelled through an approved early-return request",
+            )
 
         # Cache relationship data before commit/expire
         leave_type_name = app.leave_type.name if app.leave_type else ""
@@ -535,7 +541,7 @@ class LeaveService:
         app.erp_event_id = f"LEAVE-{app.id}-CANCELLED"
         app.erp_sync_status = "PENDING"
         app.actioned_by = cancelled_by_user_id
-        app.actioned_at = datetime.now()
+        app.actioned_at = now_ist()
 
         if app.leave_type and app.leave_type.is_paid:
             balance = await self._get_leave_balance(app_employee_id, app_leave_type_id, app_from_date.year)
@@ -580,6 +586,119 @@ class LeaveService:
             read_obj.employee_name = f"{refreshed.employee.first_name} {refreshed.employee.last_name or ''}".strip()
             read_obj.employee_code = refreshed.employee.employee_code
         return read_obj
+
+    async def request_leave_cancellation(
+        self,
+        application_id: int,
+        requested_by_user_id: int,
+        effective_date: date | None,
+        reason: str | None,
+    ) -> LeaveApplicationRead:
+        app = await self.repo.get_application_by_id(application_id)
+        if not app:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Leave application not found")
+        if app.status == "PENDING":
+            return await self.cancel_leave(application_id, requested_by_user_id)
+        if app.status != "APPROVED":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only pending or approved leave can be cancelled")
+
+        today = now_ist().date()
+        if today < app.from_date:
+            return await self.cancel_leave(application_id, requested_by_user_id)
+        if today > app.to_date:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Completed leave cannot be cancelled; ask HR to create an attendance correction instead",
+            )
+        normalized_reason = reason.strip() if reason else ""
+        if not normalized_reason:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="An early-return reason is required")
+
+        requested_effective_date = effective_date or today
+        if requested_effective_date != today or requested_effective_date < app.from_date or requested_effective_date > app.to_date:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="The early-return date must be today and within the approved leave period",
+            )
+        app.status = "CANCELLATION_PENDING"
+        app.cancellation_requested_by = requested_by_user_id
+        app.cancellation_requested_at = now_ist()
+        app.cancellation_effective_date = requested_effective_date
+        app.cancellation_reason = normalized_reason
+        app.cancellation_rejection_reason = None
+        await self.session.commit()
+        return await self.get_application(application_id)
+
+    async def approve_leave_cancellation(self, application_id: int, actioned_by_user_id: int) -> LeaveApplicationRead:
+        app = await self.repo.get_application_by_id(application_id)
+        if not app:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Leave application not found")
+        if app.status != "CANCELLATION_PENDING" or app.cancellation_effective_date is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No cancellation request is awaiting approval")
+        employee = await self.employee_repo.get_by_id(app.employee_id)
+        if employee and employee.user_id == actioned_by_user_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Approvers cannot approve their own leave cancellation")
+
+        effective_date = app.cancellation_effective_date
+        refundable_days = await self.calculate_leave_days(
+            app.employee_id, app.leave_type, effective_date, app.to_date, app.half_day
+        )
+        original_from_date, original_to_date = app.from_date, app.to_date
+        original_days = float(app.days_count)
+        if app.leave_type.is_paid:
+            balance = await self._get_leave_balance(app.employee_id, app.leave_type_id, original_from_date.year)
+            if balance is not None:
+                balance.used = max(0, balance.used - int(refundable_days))
+        await self.repo.create_ledger_entry(
+            LeaveLedgerEntry(
+                employee_id=app.employee_id,
+                leave_type_id=app.leave_type_id,
+                transaction_type="REVERSAL",
+                transaction_id=app.id,
+                leaves=refundable_days,
+                from_date=effective_date,
+                to_date=original_to_date,
+                is_carry_forward=False,
+                is_expired=False,
+            )
+        )
+        current_date = effective_date
+        while current_date <= original_to_date:
+            record = await self.attendance_record_repo.get_by_employee_and_date(app.employee_id, current_date)
+            if record and record.status in ("ON_LEAVE", "HALF_DAY"):
+                if record.punch_in or record.punch_out or record.worked_minutes > 0:
+                    record.status = "PRESENT"
+                else:
+                    await self.attendance_record_repo.delete(record)
+            current_date += timedelta(days=1)
+
+        app.cancellation_actioned_by = actioned_by_user_id
+        app.cancellation_actioned_at = now_ist()
+        app.erp_event_id = f"LEAVE-{app.id}-CANCELLATION-APPROVED"
+        app.erp_sync_status = "PENDING"
+        if effective_date <= original_from_date:
+            app.status = "CANCELLED"
+        else:
+            app.status = "APPROVED"
+            app.to_date = effective_date - timedelta(days=1)
+            app.days_count = original_days - refundable_days
+        await self.session.commit()
+        return await self.get_application(application_id)
+
+    async def reject_leave_cancellation(
+        self, application_id: int, actioned_by_user_id: int, rejection_reason: str | None
+    ) -> LeaveApplicationRead:
+        app = await self.repo.get_application_by_id(application_id)
+        if not app:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Leave application not found")
+        if app.status != "CANCELLATION_PENDING":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No cancellation request is awaiting approval")
+        app.status = "APPROVED"
+        app.cancellation_actioned_by = actioned_by_user_id
+        app.cancellation_actioned_at = now_ist()
+        app.cancellation_rejection_reason = rejection_reason
+        await self.session.commit()
+        return await self.get_application(application_id)
 
     async def list_applications(
         self,

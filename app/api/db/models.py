@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, date, time
+from datetime import date, datetime, time
 from zoneinfo import ZoneInfo
 
 from fastapi_users.db import SQLAlchemyBaseUserTable
@@ -465,6 +465,13 @@ class LeaveApplication(Base):
     actioned_by: Mapped[int | None] = mapped_column(ForeignKey("users.user_id"), nullable=True)
     actioned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cancellation_requested_by: Mapped[int | None] = mapped_column(ForeignKey("users.user_id"), nullable=True)
+    cancellation_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancellation_effective_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    cancellation_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cancellation_actioned_by: Mapped[int | None] = mapped_column(ForeignKey("users.user_id"), nullable=True)
+    cancellation_actioned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancellation_rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     erp_event_id: Mapped[str | None] = mapped_column(String(120), unique=True, nullable=True, index=True)
     erp_sync_status: Mapped[str] = mapped_column(String(30), default="PENDING", nullable=False, index=True)
     erp_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

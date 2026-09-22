@@ -2,25 +2,23 @@ import asyncio
 import selectors
 import sys
 import uuid
-from datetime import date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time
 
 import pytest
 from fastapi import HTTPException
 from sqlalchemy import select
 
+import services.leave_service as leave_service_module
 from core.database import async_session_maker
 from db.models import (
-    AttendanceCorrectionRequest,
     AttendanceRecord,
     Department,
     Designation,
     Employee,
-    LeaveApplication,
     Organization,
     OvertimeRecord,
     Unit,
     User,
-    WorkArrangementRequest,
 )
 from schemas.attendance import AttendanceCorrectionCreate
 from schemas.leaves import (
@@ -184,10 +182,12 @@ def test_leave_self_approval_prevention(unique_suffix):
 
 # ── 2. Leave Cancellation Cleans Attendance Records ──────────────────────────
 
-def test_leave_cancellation_cleans_attendance_records(unique_suffix):
+def test_in_progress_leave_early_return_preserves_taken_day_and_restores_unused_days(unique_suffix, monkeypatch):
+    monkeypatch.setattr(leave_service_module, "now_ist", lambda: datetime(2026, 5, 5, 10, 0, tzinfo=UTC))
+
     async def _test():
         async with async_session_maker() as session:
-            _, _, _, emp, _, mgr_user = await _setup_audit_env(session, unique_suffix)
+            _, _, _, emp, emp_user, mgr_user = await _setup_audit_env(session, unique_suffix)
             leave_service = LeaveService(session)
 
             period = await leave_service.create_period(
@@ -233,10 +233,24 @@ def test_leave_cancellation_cleans_attendance_records(unique_suffix):
             )).scalars().all()
             assert len(records) >= 2
 
-            # Cancel the approved leave
-            await leave_service.cancel_leave(app.id, cancelled_by_user_id=emp.user_id)
+            requested = await leave_service.request_leave_cancellation(
+                app.id,
+                requested_by_user_id=emp_user.id,
+                effective_date=date(2026, 5, 5),
+                reason="Returning to work early",
+            )
+            assert requested.status == "CANCELLATION_PENDING"
 
-            # Verify ON_LEAVE records were cleaned up
+            amended = await leave_service.approve_leave_cancellation(app.id, actioned_by_user_id=mgr_user.id)
+            assert amended.status == "APPROVED"
+            assert amended.to_date == date(2026, 5, 4)
+            assert amended.days_count == 1.0
+
+            balances = await leave_service.get_employee_leave_balances(emp.id, for_date=date(2026, 5, 5))
+            balance = next(item for item in balances if item.leave_type_id == ltype.id)
+            assert balance.used == 1.0
+
+            # The taken day remains ON_LEAVE; only the unused day is removed.
             post_records = (await session.execute(
                 select(AttendanceRecord).where(
                     AttendanceRecord.employee_id == emp.id,
@@ -244,7 +258,17 @@ def test_leave_cancellation_cleans_attendance_records(unique_suffix):
                     AttendanceRecord.attendance_date.in_([date(2026, 5, 4), date(2026, 5, 5)]),
                 )
             )).scalars().all()
-            assert len(post_records) == 0
+            assert [record.attendance_date for record in post_records] == [date(2026, 5, 4)]
+
+            monkeypatch.setattr(leave_service_module, "now_ist", lambda: datetime(2026, 5, 6, 10, 0, tzinfo=UTC))
+            with pytest.raises(HTTPException) as exc_info:
+                await leave_service.request_leave_cancellation(
+                    app.id,
+                    requested_by_user_id=emp_user.id,
+                    effective_date=date(2026, 5, 6),
+                    reason="Attempting to change completed leave",
+                )
+            assert exc_info.value.status_code == 409
 
     run_async(_test())
 

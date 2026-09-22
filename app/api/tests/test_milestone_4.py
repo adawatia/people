@@ -2,12 +2,13 @@ import asyncio
 import selectors
 import sys
 import uuid
-from datetime import date, datetime, time, timedelta
+from datetime import UTC, date, datetime
 
 import pytest
 from fastapi import HTTPException
 from sqlalchemy import select
 
+import services.leave_service as leave_service_module
 from core.database import async_session_maker
 from db.models import Department, Designation, Employee, Organization, Unit, User
 from schemas.holidays import HolidayListCreate
@@ -241,7 +242,9 @@ def test_insufficient_leave_balance_prevention(unique_suffix):
     run_async(_test())
 
 
-def test_leave_approval_ledger_debit_and_attendance_marking(unique_suffix):
+def test_leave_approval_ledger_debit_and_attendance_marking(unique_suffix, monkeypatch):
+    monkeypatch.setattr(leave_service_module, "now_ist", lambda: datetime(2026, 8, 16, 10, 0, tzinfo=UTC))
+
     async def _test():
         async with async_session_maker() as session:
             _, _, _, _, emp, period = await _setup_m4_test_environment(session, unique_suffix)

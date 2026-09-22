@@ -65,6 +65,7 @@ function openApplication() {
 function statusConfig(status: string) {
   const values: Record<string, { color: 'warning' | 'success' | 'error' | 'neutral', icon: string }> = {
     PENDING: { color: 'warning', icon: 'i-lucide-clock-3' },
+    CANCELLATION_PENDING: { color: 'warning', icon: 'i-lucide-rotate-ccw' },
     APPROVED: { color: 'success', icon: 'i-lucide-circle-check' },
     REJECTED: { color: 'error', icon: 'i-lucide-circle-x' },
     CANCELLED: { color: 'neutral', icon: 'i-lucide-ban' }
@@ -104,11 +105,22 @@ async function submitApplication() {
 }
 
 async function cancelApplication(application: LeaveApplication) {
-  if (!confirm(`Cancel your ${application.leave_type_name || 'leave'} request?`)) return
+  const leaveHasStarted = application.status === 'APPROVED' && application.from_date <= today && today <= application.to_date
+  let body: { effective_date?: string, reason?: string } | undefined
+  if (leaveHasStarted) {
+    const reason = prompt('Why are you returning from leave today? This will be sent to your approver.')
+    if (!reason || reason.trim().length < 3) return
+    body = { effective_date: today, reason: reason.trim() }
+  } else if (!confirm(`Cancel your ${application.leave_type_name || 'leave'} request?`)) return
   cancellingId.value = application.id
   try {
-    await api.request(`leaves/${application.id}/cancel`, { method: 'PATCH' })
-    toast.add({ title: 'Leave request cancelled', color: 'neutral', icon: 'i-lucide-ban' })
+    await api.request(`leaves/${application.id}/cancel`, { method: 'PATCH', body })
+    toast.add({
+      title: leaveHasStarted ? 'Early-return request submitted' : 'Leave request cancelled',
+      description: leaveHasStarted ? 'Your approver must confirm the unused leave days.' : undefined,
+      color: 'neutral',
+      icon: leaveHasStarted ? 'i-lucide-clock-3' : 'i-lucide-ban'
+    })
     await refresh()
   } catch (cancelError) {
     const candidate = cancelError as { data?: { statusMessage?: string } }
@@ -311,14 +323,14 @@ async function cancelApplication(application: LeaveApplication) {
                   {{ application.reason || '—' }}
                 </td><td class="px-6 py-4 text-right">
                   <UButton
-                    v-if="['PENDING', 'APPROVED'].includes(application.status)"
+                    v-if="application.status === 'PENDING' || (application.status === 'APPROVED' && application.to_date >= today)"
                     size="sm"
                     color="neutral"
                     variant="ghost"
                     :loading="cancellingId === application.id"
                     @click="cancelApplication(application)"
                   >
-                    Cancel
+                    {{ application.status === 'APPROVED' && application.from_date <= today ? 'Request early return' : 'Cancel' }}
                   </UButton>
                 </td>
               </tr>
@@ -355,7 +367,7 @@ async function cancelApplication(application: LeaveApplication) {
             >
               {{ application.rejection_reason }}
             </p><UButton
-              v-if="['PENDING', 'APPROVED'].includes(application.status)"
+              v-if="application.status === 'PENDING' || (application.status === 'APPROVED' && application.to_date >= today)"
               class="mt-3"
               size="sm"
               color="neutral"
@@ -363,7 +375,7 @@ async function cancelApplication(application: LeaveApplication) {
               :loading="cancellingId === application.id"
               @click="cancelApplication(application)"
             >
-              Cancel request
+              {{ application.status === 'APPROVED' && application.from_date <= today ? 'Request early return' : 'Cancel request' }}
             </UButton>
           </article>
         </div>

@@ -1,4 +1,5 @@
 from datetime import date
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,6 +17,8 @@ from schemas.leaves import (
     LeaveApplicationCreate,
     LeaveApplicationRead,
     LeaveBalanceRead,
+    LeaveCancellationAction,
+    LeaveCancellationRequest,
     LeavePeriodCreate,
     LeavePeriodRead,
     LeaveTypeCreate,
@@ -244,6 +247,7 @@ async def reject_leave(
 @router.patch("/{app_id}/cancel", response_model=LeaveApplicationRead)
 async def cancel_leave(
     app_id: int,
+    request: LeaveCancellationRequest | None = None,
     current_user: User = Depends(fastapi_users.current_user(active=True)),
     session: AsyncSession = Depends(get_async_session),
 ) -> LeaveApplicationRead:
@@ -252,4 +256,38 @@ async def cancel_leave(
     if application is None:
         raise HTTPException(status_code=404, detail="Leave application not found")
     await require_employee_access(current_user, application.employee, "leave.cancel", session, allow_self=True)
-    return await service.cancel_leave(app_id, current_user.id)
+    return await service.request_leave_cancellation(
+        app_id,
+        current_user.id,
+        request.effective_date if request else None,
+        request.reason if request else None,
+    )
+
+
+@router.patch("/{app_id}/cancellation/approve", response_model=LeaveApplicationRead)
+async def approve_leave_cancellation(
+    app_id: int,
+    current_user: User = Depends(require_permission("leave.approve")),
+    session: AsyncSession = Depends(get_async_session),
+) -> LeaveApplicationRead:
+    service = LeaveService(session)
+    application = await service.repo.get_application_by_id(app_id)
+    if application is None:
+        raise HTTPException(status_code=404, detail="Leave application not found")
+    await require_employee_access(current_user, application.employee, "leave.approve", session)
+    return await service.approve_leave_cancellation(app_id, current_user.id)
+
+
+@router.patch("/{app_id}/cancellation/reject", response_model=LeaveApplicationRead)
+async def reject_leave_cancellation(
+    app_id: int,
+    action: LeaveCancellationAction,
+    current_user: User = Depends(require_permission("leave.reject")),
+    session: AsyncSession = Depends(get_async_session),
+) -> LeaveApplicationRead:
+    service = LeaveService(session)
+    application = await service.repo.get_application_by_id(app_id)
+    if application is None:
+        raise HTTPException(status_code=404, detail="Leave application not found")
+    await require_employee_access(current_user, application.employee, "leave.reject", session)
+    return await service.reject_leave_cancellation(app_id, current_user.id, action.rejection_reason)
