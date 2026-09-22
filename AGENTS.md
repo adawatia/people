@@ -4,6 +4,8 @@
 
 This repository contains an HRMS application split into two main workspaces. `app/api/` holds the FastAPI backend, with route handlers in `routers/`, domain logic in `services/`, persistence helpers in `repositories/`, shared utilities in `utils/`, Alembic configuration in `alembic.ini`, and tests in `tests/`. `app/web/` contains the Nuxt frontend, with pages and layouts under `app/`, shared TypeScript types in `shared/types/`, server proxy/auth endpoints in `server/api/`, and static assets in `public/`. Planning and audit notes live in `docs/`.
 
+**Before changing architecture, auth, roles, or any workflow, read `docs/system-architecture-and-flows.md`.** It is the end-to-end reference: layering rules, the permission/scope model, the ERP ownership boundary, per-role UI and API flows, state machines, and a decision register of known gaps. If your change adds or removes a router, permission code, page, or ERP endpoint, update the matching table in that document in the same pull request.
+
 ## Build, Test, and Development Commands
 
 Run backend commands from `app/api/`:
