@@ -1,9 +1,10 @@
-from datetime import date
+from datetime import date, timedelta
+
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from db.models import Shift, ShiftAssignment
+from db.models import Shift, ShiftAssignment, now_ist
 
 
 class ShiftRepository:
@@ -58,6 +59,64 @@ class ShiftRepository:
                 ),
             )
             .order_by(ShiftAssignment.effective_from.desc())
+        )
+        return list((await self.session.execute(stmt)).scalars().all())
+
+    async def list_active_assignments_between(
+        self,
+        employee_id: int,
+        start_date: date,
+        end_date: date,
+    ) -> list[ShiftAssignment]:
+        """Finds active assignments overlapping [start_date, end_date] in one query.
+
+        This is the batched counterpart of `list_active_assignments_for_date`:
+        schedule lookups that need the effective shift for many consecutive days
+        use this and partition the result in Python instead of issuing one query
+        per calendar date.
+        """
+        stmt = (
+            select(ShiftAssignment)
+            .options(selectinload(ShiftAssignment.shift))
+            .where(
+                ShiftAssignment.employee_id == employee_id,
+                ShiftAssignment.status == "ACTIVE",
+                ShiftAssignment.effective_from <= end_date,
+                or_(
+                    ShiftAssignment.effective_to.is_(None),
+                    ShiftAssignment.effective_to >= start_date,
+                ),
+            )
+            .order_by(ShiftAssignment.effective_from.desc())
+        )
+        return list((await self.session.execute(stmt)).scalars().all())
+
+    async def list_active_assignment_shifts(
+        self,
+        employee_id: int,
+        today: date | None = None,
+        lookahead_days: int = 15,
+    ) -> list[Shift]:
+        """Return the distinct shift definitions the employee works over the
+        next `lookahead_days` (including today and any night shift started
+        yesterday) — the only shifts a self-scoped employee needs to see.
+        """
+        today = today or now_ist().date()
+        end_date = today + timedelta(days=lookahead_days - 1)
+        stmt = (
+            select(Shift)
+            .distinct()
+            .join(ShiftAssignment, ShiftAssignment.shift_id == Shift.id)
+            .where(
+                ShiftAssignment.employee_id == employee_id,
+                ShiftAssignment.status == "ACTIVE",
+                ShiftAssignment.effective_from <= end_date,
+                or_(
+                    ShiftAssignment.effective_to.is_(None),
+                    ShiftAssignment.effective_to >= today,
+                ),
+            )
+            .order_by(Shift.name)
         )
         return list((await self.session.execute(stmt)).scalars().all())
 

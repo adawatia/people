@@ -449,11 +449,10 @@ async def get_dashboard_metrics(
     if emp:
         # An employee sees only their own effective assignment.  The dated
         # assignment wins over the ERP default shift, including for a future
-        # upcoming schedule change.
-        shift_service = ShiftService(session)
-        assigned_shift = await shift_service.get_shift_window_for_date(emp.id, today)
-        shift_schedule = await shift_service.get_employee_shift_schedule(emp.id, now_ist())
-        employee_metrics["currentShift"] = _dashboard_shift(assigned_shift)
+        # upcoming schedule change. One batched schedule call covers both the
+        # today window and the upcoming search.
+        shift_schedule = await ShiftService(session).get_employee_shift_schedule(emp.id, now_ist())
+        employee_metrics["currentShift"] = _dashboard_shift(shift_schedule.assigned_shift)
         employee_metrics["upcomingShift"] = _dashboard_shift(shift_schedule.upcoming_shift)
 
         # Today's attendance

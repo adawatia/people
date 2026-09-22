@@ -1,4 +1,5 @@
 from datetime import date, datetime, time
+
 from pydantic import BaseModel, ConfigDict
 
 
@@ -98,6 +99,10 @@ class ShiftWindowDetail(BaseModel):
 
 class EmployeeShiftScheduleRead(BaseModel):
     employee_id: int
+    # The shift scheduled for today's calendar date, regardless of whether
+    # "now" falls inside its check-in/check-out window — this is what an
+    # employee sees as "my assigned shift" on the dashboard.
+    assigned_shift: ShiftWindowDetail | None = None
     current_shift: ShiftWindowDetail | None = None
     previous_shift: ShiftWindowDetail | None = None
     upcoming_shift: ShiftWindowDetail | None = None

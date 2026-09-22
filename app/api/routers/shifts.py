@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.auth import fastapi_users
 from core.database import get_async_session
 from core.employee_access import get_current_employee
-from db.models import User, now_ist
+from db.models import User
 from schemas.shifts import (
     EmployeeShiftScheduleRead,
     ShiftAssignmentRead,
@@ -30,12 +30,15 @@ async def _employee_self_scope(user: User, session: AsyncSession):
     return employee if employee.role == "EMPLOYEE" else None
 
 
-async def _employee_visible_shift_ids(service: ShiftService, employee_id: int) -> set[int]:
-    """Return only the employee's assigned, active, and next shift definitions."""
-    assigned = await service.get_shift_window_for_date(employee_id, now_ist().date())
-    schedule = await service.get_employee_shift_schedule(employee_id, now_ist())
-    windows = (assigned, schedule.current_shift, schedule.upcoming_shift)
-    return {window.shift_id for window in windows if window is not None}
+async def _employee_visible_shifts(service: ShiftService, employee_id: int) -> list[ShiftRead]:
+    """Return the shift definitions the employee works over the schedule horizon.
+
+    A single repository query covers the assignment window (today through the
+    upcoming-schedule horizon, including a night shift started yesterday), so
+    no per-window service lookups — and no N+1 — are needed.
+    """
+    shifts = await service.repo.list_active_assignment_shifts(employee_id)
+    return [ShiftRead.model_validate(shift) for shift in shifts]
 
 
 @router.get("/", response_model=list[ShiftRead])
@@ -48,8 +51,7 @@ async def list_shifts(
     service = ShiftService(session)
     employee = await _employee_self_scope(user, session)
     if employee:
-        shift_ids = await _employee_visible_shift_ids(service, employee.id)
-        return [ShiftRead.model_validate(await service.get_shift(shift_id)) for shift_id in sorted(shift_ids)]
+        return await _employee_visible_shifts(service, employee.id)
     return await service.list_shifts(unit_id=unit_id, is_active=is_active)
 
 
@@ -105,7 +107,8 @@ async def get_shift(
     service = ShiftService(session)
     employee = await _employee_self_scope(user, session)
     if employee:
-        if shift_id not in await _employee_visible_shift_ids(service, employee.id):
+        visible_shifts = await _employee_visible_shifts(service, employee.id)
+        if shift_id not in {shift.id for shift in visible_shifts}:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have access to this shift")
     shift = await service.get_shift(shift_id)
     return ShiftRead.model_validate(shift)

@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
@@ -18,6 +19,36 @@ from schemas.shifts import (
     ShiftUpdate,
     ShiftWindowDetail,
 )
+
+
+@dataclass
+class ShiftScheduleContext:
+    """In-memory shift-resolution context for one employee over a date range.
+
+    ``load_schedule_context`` fills this from a single batched query, after
+    which per-date and per-timestamp window resolution is pure computation.
+    """
+
+    start_date: date
+    end_date: date
+    assignments: list[ShiftAssignment]
+    default_shift: Shift | None
+
+    def assignments_for_date(self, target: date) -> list[ShiftAssignment]:
+        """Active assignments effective on ``target``, newest first."""
+        if not (self.start_date <= target <= self.end_date):
+            return []
+        return [
+            assignment
+            for assignment in self.assignments
+            if assignment.effective_from <= target
+            and (assignment.effective_to is None or assignment.effective_to >= target)
+        ]
+
+    def dates(self) -> list[date]:
+        """Every calendar date covered by the context, in order."""
+        day_count = (self.end_date - self.start_date).days + 1
+        return [self.start_date + timedelta(days=offset) for offset in range(day_count)]
 
 
 class ShiftService:
@@ -328,36 +359,17 @@ class ShiftService:
         # Shift windows are deliberately represented as local wall-clock values
         # because the company operates in India. Normalize aware API timestamps
         # before comparing them with those windows.
-        timestamp = self._local_naive(timestamp)
-        check_date = timestamp.date()
+        naive_ts = self._local_naive(timestamp)
+        check_date = naive_ts.date()
         # A punch at 01:00 may belong to the previous day's night shift, and a
-        # punch just before a shift may belong to tomorrow's — so assignments
-        # for yesterday, today, and tomorrow are all considered.
-        candidate_dates = [check_date - timedelta(days=1), check_date, check_date + timedelta(days=1)]
-
-        best_match = None
-        for cand_date in candidate_dates:
-            assignments = await self.repo.list_active_assignments_for_date(employee_id, cand_date)
-            for a in assignments:
-                if not a.shift:
-                    continue
-                window = self.get_shift_window(a.shift, cand_date)
-                if window.actual_start <= timestamp <= window.actual_end:
-                    return window
-
-        # Fallback to the employee's default shift if no dated assignment
-        # matched — most employees have a fixed shift without formal
-        # assignment rows for every day.
-        emp = await self.employee_repo.get_by_id(employee_id)
-        if emp and emp.shift_id:
-            default_shift = await self.repo.get_by_id(emp.shift_id)
-            if default_shift and default_shift.is_active:
-                for cand_date in candidate_dates:
-                    window = self.get_shift_window(default_shift, cand_date)
-                    if window.actual_start <= timestamp <= window.actual_end:
-                        return window
-
-        return None
+        # punch just before a shift may belong to tomorrow's — so the context
+        # covers yesterday, today, and tomorrow in one batched query.
+        context = await self.load_schedule_context(
+            employee_id,
+            start_date=check_date - timedelta(days=1),
+            end_date=check_date + timedelta(days=1),
+        )
+        return self._window_for_timestamp(context, naive_ts)
 
     async def get_shift_window_for_date(
         self,
@@ -371,43 +383,114 @@ class ShiftService:
         not require the current time to be inside the check-in/out window, so it
         is suitable for displaying an assigned or future shift.
         """
-        assignments = await self.repo.list_active_assignments_for_date(employee_id, shift_date)
-        for assignment in assignments:
-            if assignment.shift and assignment.shift.is_active:
-                return self.get_shift_window(assignment.shift, shift_date)
-
-        employee = await self.employee_repo.get_by_id(employee_id)
-        if not employee or not employee.shift_id:
-            return None
-        shift = await self.repo.get_by_id(employee.shift_id)
-        if not shift or not shift.is_active:
-            return None
-        return self.get_shift_window(shift, shift_date)
+        context = await self.load_schedule_context(employee_id, shift_date)
+        return self._window_for_date(context, shift_date)
 
     async def get_employee_shift_schedule(
         self,
         employee_id: int,
         for_timestamp: datetime | None = None,
     ) -> EmployeeShiftScheduleRead:
+        """Resolve previous/current/upcoming shift windows for an employee.
+
+        All dated assignments for the whole window (yesterday through the
+        15-day upcoming horizon) are fetched in a single query; the rest is
+        pure in-memory window math. The upcoming search looks for the next
+        scheduled *start* after now rather than checking the same clock time
+        tomorrow, which previously missed ordinary day shifts after working
+        hours and left the employee dashboard empty.
+        """
         ts = for_timestamp or now_ist()
-        curr_window = await self.resolve_shift_for_timestamp(employee_id, ts)
-
         local_ts = self._local_naive(ts)
-        prev_window = await self.get_shift_window_for_date(employee_id, local_ts.date() - timedelta(days=1))
+        today = local_ts.date()
 
-        # Find the next scheduled start rather than checking the same clock
-        # time tomorrow. The latter misses ordinary day shifts after working
-        # hours and caused the employee dashboard to show no upcoming shift.
+        context = await self.load_schedule_context(
+            employee_id,
+            start_date=today - timedelta(days=1),
+            end_date=today + timedelta(days=14),
+        )
+        previous_shift = self._window_for_date(context, today - timedelta(days=1))
+        assigned_shift = self._window_for_date(context, today)
+
+        # A punch "now" only counts as the current shift when it falls inside
+        # a shift's actual (buffered) window — otherwise the next start wins.
+        curr_window = self._window_for_timestamp(context, local_ts)
         upcoming_window = None
         for offset in range(15):
-            candidate = await self.get_shift_window_for_date(employee_id, local_ts.date() + timedelta(days=offset))
+            candidate = self._window_for_date(context, today + timedelta(days=offset))
             if candidate and candidate.shift_start > local_ts:
                 upcoming_window = candidate
                 break
 
         return EmployeeShiftScheduleRead(
             employee_id=employee_id,
+            assigned_shift=assigned_shift,
             current_shift=curr_window,
-            previous_shift=prev_window,
+            previous_shift=previous_shift,
             upcoming_shift=upcoming_window,
         )
+
+    async def load_schedule_context(
+        self,
+        employee_id: int,
+        start_date: date,
+        end_date: date | None = None,
+    ) -> ShiftScheduleContext:
+        """Load everything needed to resolve shift windows for a date range.
+
+        One query returns every active assignment overlapping the range (with
+        the shift rows eagerly loaded) plus the employee's default shift and
+        one shared copy of that default's unbuffered window. Callers then
+        resolve windows purely in memory instead of issuing per-date queries.
+        """
+        end_date = end_date or start_date
+        assignments = await self.repo.list_active_assignments_between(employee_id, start_date, end_date)
+        employee = await self.employee_repo.get_by_id(employee_id)
+        default_shift = None
+        if employee and employee.shift_id:
+            default_shift = await self.repo.get_by_id(employee.shift_id)
+        return ShiftScheduleContext(
+            start_date=start_date,
+            end_date=end_date,
+            assignments=assignments,
+            default_shift=default_shift,
+        )
+
+    @classmethod
+    def _window_for_date(cls, context: ShiftScheduleContext, shift_date: date) -> ShiftWindowDetail | None:
+        """Resolve the effective scheduled shift on a calendar date from a loaded context.
+
+        A dated assignment wins over the employee's default shift. Outside the
+        loaded range the default shift is the only sensible answer; within the
+        range an absent assignment still falls back to the default, matching
+        the behaviour before batching.
+        """
+        if context.start_date <= shift_date <= context.end_date:
+            for assignment in context.assignments_for_date(shift_date):
+                if assignment.shift and assignment.shift.is_active:
+                    return cls.get_shift_window(assignment.shift, shift_date)
+        if context.default_shift and context.default_shift.is_active:
+            return cls.get_shift_window(context.default_shift, shift_date)
+        return None
+
+    @classmethod
+    def _window_for_timestamp(cls, context: ShiftScheduleContext, timestamp: datetime) -> ShiftWindowDetail | None:
+        """Find the buffered shift window that contains a timestamp, if any.
+
+        A punch at 01:00 may belong to the previous day's night shift, and a
+        punch just before a shift may belong to tomorrow's — so every date in
+        the loaded context is considered. Dated assignments win over the
+        default shift across all dates; the default is the final fallback.
+        """
+        for shift_date in context.dates():
+            for assignment in context.assignments_for_date(shift_date):
+                if assignment.shift and assignment.shift.is_active:
+                    window = cls.get_shift_window(assignment.shift, shift_date)
+                    if window.actual_start <= timestamp <= window.actual_end:
+                        return window
+        if context.default_shift and context.default_shift.is_active:
+            for shift_date in context.dates():
+                window = cls.get_shift_window(context.default_shift, shift_date)
+                if window.actual_start <= timestamp <= window.actual_end:
+                    return window
+        return None
