@@ -1,8 +1,10 @@
 <script setup lang="ts">
-useSeoMeta({ title: 'System administration' })
 const auth = useAuth()
 const api = useHrmsApi()
 const toast = useToast()
+const isTechnicalAdmin = computed(() => Boolean(auth.user.value?.is_superuser))
+const pageTitle = computed(() => isTechnicalAdmin.value ? 'System administration' : 'Security settings')
+useSeoMeta({ title: () => pageTitle.value })
 const username = ref(auth.user.value?.username || '')
 const currentPassword = ref('')
 const newPassword = ref('')
@@ -31,12 +33,14 @@ async function savePassword() {
 <template>
   <div class="max-w-3xl space-y-6">
     <div>
-      <p class="text-sm font-medium text-primary">Technical access</p>
-      <h2 class="mt-1 text-2xl font-semibold tracking-tight">System administration</h2>
-      <p class="mt-2 text-sm text-muted">Manage the technical login and the operational controls available to this installation.</p>
+      <p class="text-sm font-medium text-primary">{{ isTechnicalAdmin ? 'Technical access' : 'Account security' }}</p>
+      <h2 class="mt-1 text-2xl font-semibold tracking-tight">{{ pageTitle }}</h2>
+      <p class="mt-2 text-sm text-muted">
+        {{ isTechnicalAdmin ? 'Manage the technical login and the operational controls available to this installation.' : 'Keep your People account secure by updating your own password.' }}
+      </p>
     </div>
-    <UAlert color="info" variant="soft" icon="i-lucide-shield-check" title="Technical account" description="This account is separate from employee records. Use it for system setup, integrations, access configuration and operational support." />
-    <section class="people-card space-y-5 p-5 sm:p-6">
+    <UAlert v-if="isTechnicalAdmin" color="info" variant="soft" icon="i-lucide-shield-check" title="Technical account" description="This account is separate from employee records. Use it for system setup, integrations, access configuration and operational support." />
+    <section v-if="isTechnicalAdmin" class="people-card space-y-5 p-5 sm:p-6">
       <div><h3 class="font-semibold">Username</h3><p class="mt-1 text-sm text-muted">This is the only identifier used for technical sign-in.</p></div>
       <UFormField label="Username" name="username" hint="3–50 characters; letters, numbers, dots, dashes or underscores">
         <UInput v-model="username" class="w-full max-w-md" icon="i-lucide-user-round-cog" placeholder="Enter username" autocomplete="username" />
@@ -44,10 +48,19 @@ async function savePassword() {
       <UButton :loading="savingUsername" icon="i-lucide-save" @click="saveUsername">Save username</UButton>
     </section>
     <section class="people-card space-y-5 p-5 sm:p-6">
-      <div><h3 class="font-semibold">Password</h3><p class="mt-1 text-sm text-muted">Choose a strong password. Your current password is required.</p></div>
+      <div><h3 class="font-semibold">Password</h3><p class="mt-1 text-sm text-muted">Choose a strong password for your own account. Your current password is required.</p></div>
       <div class="grid gap-5 sm:grid-cols-2">
-        <UFormField label="Current password"><UInput v-model="currentPassword" class="w-full" type="password" icon="i-lucide-lock-keyhole" /></UFormField>
-        <UFormField label="New password" hint="At least 12 characters with upper, lower, number and symbol"><UInput v-model="newPassword" class="w-full" type="password" icon="i-lucide-key-round" /></UFormField>
+        <div>
+          <label for="current-password" class="text-sm font-medium">Current password</label>
+          <UInput id="current-password" v-model="currentPassword" class="mt-2 w-full" type="password" icon="i-lucide-lock-keyhole" autocomplete="current-password" />
+        </div>
+        <div>
+          <label for="new-password" class="text-sm font-medium">New password</label>
+          <UInput id="new-password" v-model="newPassword" class="mt-2 w-full" type="password" icon="i-lucide-key-round" autocomplete="new-password" aria-describedby="new-password-help" />
+          <p id="new-password-help" class="mt-2 text-xs leading-5 text-muted">
+            At least 12 characters with upper, lower, number and symbol.
+          </p>
+        </div>
       </div>
       <UButton :loading="savingPassword" icon="i-lucide-key-round" @click="savePassword">Change password</UButton>
     </section>

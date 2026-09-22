@@ -18,16 +18,16 @@ const { data, pending, error, refresh } = await useAsyncData('dashboard-metrics'
 const { data: technicalMetrics } = await useAsyncData('technical-admin-metrics', () => api.request<{ users: number, employees: number, units: number, departments: number, designations: number }>('dashboard/technical-metrics'), { immediate: isTechnicalAdmin.value })
 const stats = computed(() => isManager.value
   ? [
-      { label: role.value === 'HR_ADMIN' ? 'Unit members' : 'Department members', value: data.value?.unitMetrics.totalHeadcount ?? 0, icon: 'i-lucide-users-round', tone: 'var(--people-blue)' },
-      { label: 'Present today', value: data.value?.unitMetrics.presentCount ?? 0, icon: 'i-lucide-circle-check-big', tone: 'var(--people-mint)' },
-      { label: 'On leave', value: data.value?.unitMetrics.leaveCount ?? 0, icon: 'i-lucide-calendar-heart', tone: 'var(--people-lavender)' },
-      { label: 'Needs attention', value: (data.value?.unitMetrics.pendingLeaves ?? 0) + (data.value?.unitMetrics.pendingCorrections ?? 0), icon: 'i-lucide-inbox', tone: 'var(--people-peach)' }
+      { label: role.value === 'HR_ADMIN' ? 'Unit members' : 'Department members', value: data.value?.unitMetrics.totalHeadcount ?? 0, icon: 'i-lucide-users-round', tone: 'var(--people-blue)', ink: 'var(--people-blue-ink)' },
+      { label: 'Present today', value: data.value?.unitMetrics.presentCount ?? 0, icon: 'i-lucide-circle-check-big', tone: 'var(--people-mint)', ink: 'var(--people-mint-ink)' },
+      { label: 'On leave', value: data.value?.unitMetrics.leaveCount ?? 0, icon: 'i-lucide-calendar-heart', tone: 'var(--people-lavender)', ink: 'var(--people-lavender-ink)' },
+      { label: 'Needs attention', value: (data.value?.unitMetrics.pendingLeaves ?? 0) + (data.value?.unitMetrics.pendingCorrections ?? 0), icon: 'i-lucide-inbox', tone: 'var(--people-peach)', ink: 'var(--people-peach-ink)' }
     ]
   : [
-      { label: 'Present this month', value: data.value?.employeeMetrics.monthlyPresent ?? 0, icon: 'i-lucide-circle-check-big', tone: 'var(--people-mint)' },
-      { label: 'Absent this month', value: data.value?.employeeMetrics.monthlyAbsent ?? 0, icon: 'i-lucide-calendar-x-2', tone: 'var(--people-peach)' },
-      { label: 'Leave days', value: data.value?.employeeMetrics.monthlyLeave ?? 0, icon: 'i-lucide-calendar-heart', tone: 'var(--people-lavender)' },
-      { label: 'Overtime', value: `${data.value?.employeeMetrics.overtimeHours ?? 0}h`, icon: 'i-lucide-timer', tone: 'var(--people-blue)' }
+      { label: 'Present this month', value: data.value?.employeeMetrics.monthlyPresent ?? 0, icon: 'i-lucide-circle-check-big', tone: 'var(--people-mint)', ink: 'var(--people-mint-ink)' },
+      { label: 'Absent this month', value: data.value?.employeeMetrics.monthlyAbsent ?? 0, icon: 'i-lucide-calendar-x-2', tone: 'var(--people-peach)', ink: 'var(--people-peach-ink)' },
+      { label: 'Leave days', value: data.value?.employeeMetrics.monthlyLeave ?? 0, icon: 'i-lucide-calendar-heart', tone: 'var(--people-lavender)', ink: 'var(--people-lavender-ink)' },
+      { label: 'Overtime', value: `${data.value?.employeeMetrics.overtimeHours ?? 0}h`, icon: 'i-lucide-timer', tone: 'var(--people-blue)', ink: 'var(--people-blue-ink)' }
     ])
 
 const formatShiftTime = (value?: string) => value
@@ -77,11 +77,11 @@ const shiftTimeRange = (shift?: EmployeeDashboardShift | null) => shift
       <div class="mt-7 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <div
           v-for="item in [
-            { label: 'Users', value: technicalMetrics?.users ?? 0, icon: 'i-lucide-users-round', tone: 'var(--people-blue)' },
-            { label: 'Employees', value: technicalMetrics?.employees ?? 0, icon: 'i-lucide-user-round', tone: 'var(--people-mint)' },
-            { label: 'Units', value: technicalMetrics?.units ?? 0, icon: 'i-lucide-building-2', tone: 'var(--people-lavender)' },
-            { label: 'Departments', value: technicalMetrics?.departments ?? 0, icon: 'i-lucide-network', tone: 'var(--people-peach)' },
-            { label: 'Designations', value: technicalMetrics?.designations ?? 0, icon: 'i-lucide-badge', tone: 'var(--people-yellow)' }
+            { label: 'Users', value: technicalMetrics?.users ?? 0, icon: 'i-lucide-users-round', tone: 'var(--people-blue)', ink: 'var(--people-blue-ink)' },
+            { label: 'Employees', value: technicalMetrics?.employees ?? 0, icon: 'i-lucide-user-round', tone: 'var(--people-mint)', ink: 'var(--people-mint-ink)' },
+            { label: 'Units', value: technicalMetrics?.units ?? 0, icon: 'i-lucide-building-2', tone: 'var(--people-lavender)', ink: 'var(--people-lavender-ink)' },
+            { label: 'Departments', value: technicalMetrics?.departments ?? 0, icon: 'i-lucide-network', tone: 'var(--people-peach)', ink: 'var(--people-peach-ink)' },
+            { label: 'Designations', value: technicalMetrics?.designations ?? 0, icon: 'i-lucide-badge', tone: 'var(--people-yellow)', ink: 'var(--people-yellow-ink)' }
           ]"
           :key="item.label"
           class="people-card p-5"
@@ -91,7 +91,7 @@ const shiftTimeRange = (shift?: EmployeeDashboardShift | null) => shift
               {{ item.label }}
             </p><span
               class="grid size-10 place-items-center rounded-xl"
-              :style="{ background: item.tone }"
+              :style="{ background: item.tone, color: item.ink }"
             ><UIcon
               :name="item.icon"
               class="size-5"
@@ -175,7 +175,7 @@ const shiftTimeRange = (shift?: EmployeeDashboardShift | null) => shift
               {{ stat.label }}
             </p><span
               class="grid size-10 place-items-center rounded-xl"
-              :style="{ background: stat.tone }"
+              :style="{ background: stat.tone, color: stat.ink }"
             ><UIcon
               :name="stat.icon"
               class="size-5"
@@ -199,12 +199,18 @@ const shiftTimeRange = (shift?: EmployeeDashboardShift | null) => shift
         :class="isManager ? 'xl:grid-cols-[1.15fr_0.85fr]' : 'xl:grid-cols-2'"
       >
         <UCard>
-          <div>
-            <h3 class="font-semibold">
-              Your shifts
-            </h3><p class="mt-1 text-sm text-muted">
-              Your assigned shift and next scheduled workday
-            </p>
+          <div class="flex items-start gap-3">
+            <span class="people-icon people-icon--blue size-10 shrink-0"><UIcon
+              name="i-lucide-clock-3"
+              class="size-5"
+            /></span>
+            <div>
+              <h3 class="font-semibold">
+                Your shifts
+              </h3><p class="mt-1 text-sm text-muted">
+                Your assigned shift and next scheduled workday
+              </p>
+            </div>
           </div>
           <div class="mt-6 grid gap-3 sm:grid-cols-2">
             <div class="rounded-xl bg-muted/5 p-4">
@@ -230,12 +236,18 @@ const shiftTimeRange = (shift?: EmployeeDashboardShift | null) => shift
 
         <UCard>
           <div class="flex items-center justify-between">
-            <div>
-              <h3 class="font-semibold">
-                Today
-              </h3><p class="mt-1 text-sm text-muted">
-                Your ERP-synced attendance
-              </p>
+            <div class="flex items-start gap-3">
+              <span class="people-icon people-icon--mint size-10 shrink-0"><UIcon
+                name="i-lucide-calendar-check-2"
+                class="size-5"
+              /></span>
+              <div>
+                <h3 class="font-semibold">
+                  Today
+                </h3><p class="mt-1 text-sm text-muted">
+                  Your ERP-synced attendance
+                </p>
+              </div>
             </div>
             <UBadge
               :label="data?.employeeMetrics.todayStatus || 'Not marked'"

@@ -8,22 +8,22 @@
  * Technical admins (superuser) skip the business nav entirely and get a
  * dedicated "System administration" link instead.
  */
-interface NavItem { label: string, icon: string, to: string, permissions?: string[], roles?: Array<'EMPLOYEE' | 'DEPARTMENT_MANAGER' | 'HR_ADMIN' | 'ORGANIZATION_OWNER'> }
+interface NavItem { label: string, icon: string, to: string, iconTone?: string, permissions?: string[], roles?: Array<'EMPLOYEE' | 'DEPARTMENT_MANAGER' | 'HR_ADMIN' | 'ORGANIZATION_OWNER'> }
 const route = useRoute()
 const auth = useAuth()
 const mobileOpen = ref(false)
 const navItems: NavItem[] = [
-  { label: 'Dashboard', icon: 'i-lucide-layout-dashboard', to: '/' },
-  { label: 'Employees', icon: 'i-lucide-users-round', to: '/employees', roles: ['DEPARTMENT_MANAGER', 'HR_ADMIN', 'ORGANIZATION_OWNER'], permissions: ['employee.view'] },
-  { label: 'Attendance', icon: 'i-lucide-calendar-check-2', to: '/attendance' },
-  { label: 'Leave', icon: 'i-lucide-calendar-days', to: '/leaves' },
-  { label: 'Work arrangements', icon: 'i-lucide-briefcase-business', to: '/work-arrangements' },
-  { label: 'Overtime', icon: 'i-lucide-timer', to: '/overtime' },
-  { label: 'Approvals', icon: 'i-lucide-clipboard-check', to: '/approvals', roles: ['DEPARTMENT_MANAGER', 'HR_ADMIN'], permissions: ['leave.approve', 'attendance.approve_correction', 'work_arrangement.approve'] },
-  { label: 'Shifts', icon: 'i-lucide-clock-3', to: '/shifts', roles: ['HR_ADMIN'], permissions: ['shift.assign', 'shift.update'] },
-  { label: 'Holidays', icon: 'i-lucide-calendar-heart', to: '/holidays' },
-  { label: 'Organization', icon: 'i-lucide-building-2', to: '/organization', roles: ['HR_ADMIN'], permissions: ['system.configure', 'designation.view', 'employee.view'] },
-  { label: 'Reports', icon: 'i-lucide-chart-no-axes-combined', to: '/reports', roles: ['DEPARTMENT_MANAGER', 'HR_ADMIN', 'ORGANIZATION_OWNER'], permissions: ['reports.attendance', 'reports.leave'] }
+  { label: 'Dashboard', icon: 'i-lucide-layout-dashboard', to: '/', iconTone: 'people-icon--blue' },
+  { label: 'Employees', icon: 'i-lucide-users-round', to: '/employees', iconTone: 'people-icon--mint', roles: ['DEPARTMENT_MANAGER', 'HR_ADMIN', 'ORGANIZATION_OWNER'], permissions: ['employee.view'] },
+  { label: 'Attendance', icon: 'i-lucide-calendar-check-2', to: '/attendance', iconTone: 'people-icon--blue' },
+  { label: 'Leave', icon: 'i-lucide-calendar-days', to: '/leaves', iconTone: 'people-icon--lavender' },
+  { label: 'Work arrangements', icon: 'i-lucide-briefcase-business', to: '/work-arrangements', iconTone: 'people-icon--peach' },
+  { label: 'Overtime', icon: 'i-lucide-timer', to: '/overtime', iconTone: 'people-icon--yellow' },
+  { label: 'Approvals', icon: 'i-lucide-clipboard-check', to: '/approvals', iconTone: 'people-icon--rose', roles: ['DEPARTMENT_MANAGER', 'HR_ADMIN'], permissions: ['leave.approve', 'attendance.approve_correction', 'work_arrangement.approve'] },
+  { label: 'Shifts', icon: 'i-lucide-clock-3', to: '/shifts', iconTone: 'people-icon--blue', roles: ['HR_ADMIN'], permissions: ['shift.assign', 'shift.update'] },
+  { label: 'Holidays', icon: 'i-lucide-calendar-heart', to: '/holidays', iconTone: 'people-icon--lavender' },
+  { label: 'Organization', icon: 'i-lucide-building-2', to: '/organization', iconTone: 'people-icon--mint', roles: ['HR_ADMIN'], permissions: ['system.configure', 'designation.view', 'employee.view'] },
+  { label: 'Reports', icon: 'i-lucide-chart-no-axes-combined', to: '/reports', iconTone: 'people-icon--yellow', roles: ['DEPARTMENT_MANAGER', 'HR_ADMIN', 'ORGANIZATION_OWNER'], permissions: ['reports.attendance', 'reports.leave'] }
 ]
 const isTechnicalAdmin = computed(() => Boolean(auth.user.value?.is_superuser))
 const businessRole = computed(() => auth.user.value?.role)
@@ -40,7 +40,9 @@ const visibleItems = computed(() => isTechnicalAdmin.value
       if (item.roles && (!isBusinessRole(currentRole) || !item.roles.includes(currentRole))) return false
       return !item.permissions || item.permissions.some(auth.hasPermission)
     }))
-const pageTitle = computed(() => route.path === '/settings' ? 'System administration' : navItems.find(item => item.to === route.path)?.label || 'People')
+const pageTitle = computed(() => route.path === '/settings'
+  ? isTechnicalAdmin.value ? 'System administration' : 'Security settings'
+  : navItems.find(item => item.to === route.path)?.label || 'People')
 const mobileItems = computed(() => visibleItems.value.filter(item => item.to !== '/').slice(0, 4))
 watch(() => route.fullPath, () => {
   // Navigating should always collapse the mobile drawer.
@@ -83,10 +85,15 @@ watch(() => route.fullPath, () => {
           class="flex min-h-11 items-center gap-3 rounded-xl px-3 text-sm font-medium transition-colors"
           :class="route.path === item.to || (item.to !== '/' && route.path.startsWith(item.to)) ? 'bg-[var(--people-lavender)] text-primary-700 dark:text-primary-300' : 'text-muted hover:bg-muted/10 hover:text-highlighted'"
         >
-          <UIcon
-            :name="item.icon"
-            class="size-[18px] shrink-0"
-          />{{ item.label }}
+          <span
+            class="people-icon size-8 shrink-0"
+            :class="item.iconTone"
+          >
+            <UIcon
+              :name="item.icon"
+              class="size-4"
+            />
+          </span>{{ item.label }}
         </NuxtLink>
         <NuxtLink
           v-if="isTechnicalAdmin"
@@ -94,14 +101,19 @@ watch(() => route.fullPath, () => {
           class="flex min-h-11 items-center gap-3 rounded-xl px-3 text-sm font-medium transition-colors"
           :class="route.path === '/settings' ? 'bg-[var(--people-lavender)] text-primary-700 dark:text-primary-300' : 'text-muted hover:bg-muted/10 hover:text-highlighted'"
         >
-          <UIcon
-            name="i-lucide-shield-check"
-            class="size-[18px] shrink-0"
-          />System administration
+          <span class="people-icon people-icon--lavender size-8 shrink-0">
+            <UIcon
+              name="i-lucide-shield-check"
+              class="size-4"
+            />
+          </span>System administration
         </NuxtLink>
       </nav>
       <div class="border-t border-[var(--people-border)] pt-4">
-        <NuxtLink to="/profile" class="flex items-center gap-3 rounded-xl px-2 py-2 hover:bg-muted/10">
+        <NuxtLink
+          to="/profile"
+          class="flex items-center gap-3 rounded-xl px-2 py-2 hover:bg-muted/10"
+        >
           <UAvatar
             :text="auth.initials.value"
             size="md"
@@ -125,7 +137,14 @@ watch(() => route.fullPath, () => {
     </aside>
     <div class="lg:pl-[17rem]">
       <header class="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-[var(--people-border)] bg-[var(--people-surface)]/90 px-4 backdrop-blur-xl sm:px-6 lg:px-8">
-        <UButton class="lg:hidden" icon="i-lucide-user-round" color="neutral" variant="ghost" to="/profile" aria-label="Open profile" />
+        <UButton
+          class="lg:hidden"
+          icon="i-lucide-user-round"
+          color="neutral"
+          variant="ghost"
+          to="/profile"
+          aria-label="Open profile"
+        />
         <h1 class="min-w-0 flex-1 truncate text-base font-semibold">
           {{ pageTitle }}
         </h1>
@@ -148,7 +167,10 @@ watch(() => route.fullPath, () => {
         <slot />
       </main>
     </div>
-    <nav class="fixed inset-x-0 bottom-0 z-40 border-t border-[var(--people-border)] bg-[var(--people-surface)]/95 px-2 pb-[env(safe-area-inset-bottom)] pt-2 shadow-[0_-8px_24px_rgba(15,23,42,0.08)] backdrop-blur-xl lg:hidden" aria-label="Mobile navigation">
+    <nav
+      class="fixed inset-x-0 bottom-0 z-40 border-t border-[var(--people-border)] bg-[var(--people-surface)]/95 px-2 pb-[env(safe-area-inset-bottom)] pt-2 shadow-[0_-8px_24px_rgba(15,23,42,0.08)] backdrop-blur-xl lg:hidden"
+      aria-label="Mobile navigation"
+    >
       <div class="mx-auto flex max-w-lg items-center justify-around gap-1">
         <UButton
           v-for="item in mobileItems"
@@ -163,7 +185,15 @@ watch(() => route.fullPath, () => {
         >
           {{ item.label }}
         </UButton>
-        <UButton to="/profile" icon="i-lucide-user-round" color="neutral" :variant="route.path === '/profile' ? 'soft' : 'ghost'" size="sm" class="min-w-0 flex-1 flex-col gap-0.5 px-1 py-2 text-[10px]" aria-label="Profile">
+        <UButton
+          to="/profile"
+          icon="i-lucide-user-round"
+          color="neutral"
+          :variant="route.path === '/profile' ? 'soft' : 'ghost'"
+          size="sm"
+          class="min-w-0 flex-1 flex-col gap-0.5 px-1 py-2 text-[10px]"
+          aria-label="Profile"
+        >
           Profile
         </UButton>
       </div>

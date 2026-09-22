@@ -15,6 +15,14 @@
   --people-mint: #e5f5eb;
   --people-peach: #fbebdd;
   --people-blue: #e5eeff;
+  --people-yellow: #fff4cf;
+  --people-rose: #fde8ee;
+  --people-blue-ink: #3156a8;
+  --people-mint-ink: #17734c;
+  --people-lavender-ink: #6a4bb5;
+  --people-peach-ink: #a85528;
+  --people-yellow-ink: #9a6700;
+  --people-rose-ink: #be3455;
 }
 
 html, body { background: var(--people-canvas); }
@@ -28,6 +36,19 @@ button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
   box-shadow: 0 1px 2px rgb(28 32 45 / 0.04), 0 10px 32px rgb(28 32 45 / 0.035);
 }
 
+@utility people-icon {
+  display: grid;
+  place-items: center;
+  border-radius: 0.75rem;
+}
+
+@utility people-icon--blue { background: var(--people-blue); color: var(--people-blue-ink); }
+@utility people-icon--mint { background: var(--people-mint); color: var(--people-mint-ink); }
+@utility people-icon--lavender { background: var(--people-lavender); color: var(--people-lavender-ink); }
+@utility people-icon--peach { background: var(--people-peach); color: var(--people-peach-ink); }
+@utility people-icon--yellow { background: var(--people-yellow); color: var(--people-yellow-ink); }
+@utility people-icon--rose { background: var(--people-rose); color: var(--people-rose-ink); }
+
 .dark {
   --people-canvas: #12131a;
   --people-surface: #191b24;
@@ -38,4 +59,12 @@ button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
   --people-mint: #183228;
   --people-peach: #36291f;
   --people-blue: #202d48;
+  --people-yellow: #3b3118;
+  --people-rose: #3a202a;
+  --people-blue-ink: #a9c3ff;
+  --people-mint-ink: #8ee6ba;
+  --people-lavender-ink: #d0bcff;
+  --people-peach-ink: #ffc19d;
+  --people-yellow-ink: #f8d57a;
+  --people-rose-ink: #ffb0c1;
 }
