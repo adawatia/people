@@ -31,11 +31,24 @@ class EmployeeDashboardLeaveBalance(BaseModel):
     color: str | None = None
 
 
+class EmployeeDashboardShift(BaseModel):
+    """A single employee's scheduled shift, represented in India local time."""
+
+    name: str
+    shiftDate: date
+    startsAt: datetime
+    endsAt: datetime
+    isCrossMidnight: bool = False
+
+
 class EmployeeMetrics(BaseModel):
     todayStatus: str = "ABSENT"
     punchIn: str | None = None
     punchOut: str | None = None
-    currentShift: str | None = None
+    # These are intentionally limited to the signed-in employee's own schedule.
+    # Shift definitions and other employees' assignments remain management data.
+    currentShift: EmployeeDashboardShift | None = None
+    upcomingShift: EmployeeDashboardShift | None = None
     monthlyPresent: int = 0
     monthlyAbsent: int = 0
     monthlyLeave: int = 0

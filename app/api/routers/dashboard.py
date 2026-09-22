@@ -1,19 +1,25 @@
 """routers/dashboard.py — Dynamic permission-based dashboard widget API."""
-import asyncio
 from datetime import date
+
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from core.auth import fastapi_users
-from core.database import get_async_session
-from core.auth import get_user_permissions
 from core.audit import record_audit_event
+from core.auth import fastapi_users, get_user_permissions
+from core.database import get_async_session
 from core.rbac import get_visible_widgets
 from db.models import (
-    User, Employee, AttendanceRecord, LeaveApplication, LeaveBalance, LeaveType,
-    AttendanceCorrectionRequest, OvertimeRecord, Shift, WorkArrangementRequest
+    AttendanceCorrectionRequest,
+    AttendanceRecord,
+    Employee,
+    LeaveApplication,
+    LeaveBalance,
+    OvertimeRecord,
+    User,
+    WorkArrangementRequest,
+    now_ist,
 )
 from schemas.dashboard import (
     DashboardMetricsResponse,
@@ -23,12 +29,27 @@ from schemas.dashboard import (
     TechnicalAdminMetrics,
 )
 from services.owner_dashboard_service import OwnerDashboardService
+from services.shift_service import ShiftService
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
+PENDING_LEAVE_STATUSES = ("PENDING", "CANCELLATION_PENDING")
 
 
 def _audit_request_values(request: Request) -> tuple[str | None, str | None]:
     return request.headers.get("x-request-id"), request.client.host if request.client else None
+
+
+def _dashboard_shift(window) -> dict[str, object] | None:
+    """Convert a shift window to the narrow, employee-safe dashboard projection."""
+    if window is None:
+        return None
+    return {
+        "name": window.shift_name,
+        "shiftDate": window.shift_start.date(),
+        "startsAt": window.shift_start,
+        "endsAt": window.shift_end,
+        "isCrossMidnight": window.is_cross_midnight,
+    }
 
 
 @router.get("/owner", response_model=OwnerDashboardResponse, summary="Organization owner analytics dashboard")
@@ -125,7 +146,7 @@ async def get_dashboard_metrics(
     user: User = Depends(fastapi_users.current_user(active=True)),
     session: AsyncSession = Depends(get_async_session),
 ) -> DashboardMetricsResponse:
-    today = date.today()
+    today = now_ist().date()
     yr = today.year
     mo = today.month
 
@@ -149,6 +170,7 @@ async def get_dashboard_metrics(
         "punchIn": None,
         "punchOut": None,
         "currentShift": None,
+        "upcomingShift": None,
         "monthlyPresent": 0,
         "monthlyAbsent": 0,
         "monthlyLeave": 0,
@@ -256,7 +278,7 @@ async def get_dashboard_metrics(
             select(func.count())
             .select_from(LeaveApplication)
             .join(Employee, LeaveApplication.employee_id == Employee.id)
-            .where(LeaveApplication.status == 'PENDING')
+            .where(LeaveApplication.status.in_(PENDING_LEAVE_STATUSES))
         )
         pending_corr_stmt = (
             select(func.count())
@@ -287,7 +309,7 @@ async def get_dashboard_metrics(
                 selectinload(LeaveApplication.employee).selectinload(Employee.department),
                 selectinload(LeaveApplication.leave_type),
             )
-            .where(LeaveApplication.status == 'PENDING')
+            .where(LeaveApplication.status.in_(PENDING_LEAVE_STATUSES))
         )
         if emp:
             leaves_stmt = leaves_stmt.where(LeaveApplication.employee_id != emp.id)
@@ -305,11 +327,15 @@ async def get_dashboard_metrics(
             dept_name = l.employee.department.name if (l.employee and l.employee.department) else "General"
             pending_approvals.append({
                 "id": f"leave_{l.id}",
-                "type": "leave",
+                "type": "leave_cancellation" if l.status == "CANCELLATION_PENDING" else "leave",
                 "employeeName": emp_name or (l.employee.employee_code if l.employee else "Unknown"),
                 "employeeCode": l.employee.employee_code if l.employee else "",
                 "department": dept_name,
-                "detail": f"{l.leave_type.name} ({l.days_count} days)" if l.leave_type else f"{l.days_count} days",
+                "detail": (
+                    f"Early return from {l.cancellation_effective_date}"
+                    if l.status == "CANCELLATION_PENDING"
+                    else f"{l.leave_type.name} ({l.days_count} days)" if l.leave_type else f"{l.days_count} days"
+                ),
                 "timeAgo": l.applied_at.strftime("%b %d, %H:%M") if l.applied_at else "",
             })
 
@@ -422,8 +448,14 @@ async def get_dashboard_metrics(
 
 
     if emp:
-        # Current Shift
-        employee_metrics["currentShift"] = emp.shift.name if emp.shift else "General Shift"
+        # An employee sees only their own effective assignment.  The dated
+        # assignment wins over the ERP default shift, including for a future
+        # upcoming schedule change.
+        shift_service = ShiftService(session)
+        assigned_shift = await shift_service.get_shift_window_for_date(emp.id, today)
+        shift_schedule = await shift_service.get_employee_shift_schedule(emp.id, now_ist())
+        employee_metrics["currentShift"] = _dashboard_shift(assigned_shift)
+        employee_metrics["upcomingShift"] = _dashboard_shift(shift_schedule.upcoming_shift)
 
         # Today's attendance
         today_att = (await session.execute(

@@ -32,6 +32,7 @@ from services.employee_service import EmployeeService
 WORKING_STATUSES = {"PRESENT", "HALF_DAY", "WORK_FROM_HOME"}
 NON_WORKING_STATUSES = {"WEEKLY_OFF", "HOLIDAY"}
 EXCEPTION_KINDS = {"absent", "late", "late_or_missed_punch", "missed_punch", "on_leave", "pending_request"}
+PENDING_LEAVE_STATUSES = ("PENDING", "CANCELLATION_PENDING")
 
 
 class OwnerDashboardService:
@@ -141,7 +142,11 @@ class OwnerDashboardService:
             query = (
                 select(func.count(model.id))
                 .join(Employee, employee_column == Employee.id)
-                .where(model.status == "PENDING")
+                .where(
+                    model.status.in_(PENDING_LEAVE_STATUSES)
+                    if model is LeaveApplication
+                    else model.status == "PENDING"
+                )
             )
             if unit_id is not None:
                 query = query.where(Employee.unit_id == unit_id)
@@ -255,7 +260,7 @@ class OwnerDashboardService:
         if kind == "pending_request":
             pending_employee_ids = (
                 select(LeaveApplication.employee_id)
-                .where(LeaveApplication.status == "PENDING")
+                .where(LeaveApplication.status.in_(PENDING_LEAVE_STATUSES))
                 .union(
                     select(OvertimeRecord.employee_id).where(OvertimeRecord.status == "PENDING"),
                     select(WorkArrangementRequest.employee_id).where(WorkArrangementRequest.status == "PENDING"),

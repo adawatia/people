@@ -1,5 +1,6 @@
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
+
 from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -358,6 +359,31 @@ class ShiftService:
 
         return None
 
+    async def get_shift_window_for_date(
+        self,
+        employee_id: int,
+        shift_date: date,
+    ) -> ShiftWindowDetail | None:
+        """Return the employee's effective scheduled shift for a calendar date.
+
+        A dated assignment takes precedence over the employee's ERP-synchronised
+        default shift.  Unlike ``resolve_shift_for_timestamp``, this method does
+        not require the current time to be inside the check-in/out window, so it
+        is suitable for displaying an assigned or future shift.
+        """
+        assignments = await self.repo.list_active_assignments_for_date(employee_id, shift_date)
+        for assignment in assignments:
+            if assignment.shift and assignment.shift.is_active:
+                return self.get_shift_window(assignment.shift, shift_date)
+
+        employee = await self.employee_repo.get_by_id(employee_id)
+        if not employee or not employee.shift_id:
+            return None
+        shift = await self.repo.get_by_id(employee.shift_id)
+        if not shift or not shift.is_active:
+            return None
+        return self.get_shift_window(shift, shift_date)
+
     async def get_employee_shift_schedule(
         self,
         employee_id: int,
@@ -366,16 +392,18 @@ class ShiftService:
         ts = for_timestamp or now_ist()
         curr_window = await self.resolve_shift_for_timestamp(employee_id, ts)
 
-        prev_window = None
+        local_ts = self._local_naive(ts)
+        prev_window = await self.get_shift_window_for_date(employee_id, local_ts.date() - timedelta(days=1))
+
+        # Find the next scheduled start rather than checking the same clock
+        # time tomorrow. The latter misses ordinary day shifts after working
+        # hours and caused the employee dashboard to show no upcoming shift.
         upcoming_window = None
-
-        # Previous shift: look back 1 day
-        prev_ts = ts - timedelta(days=1)
-        prev_window = await self.resolve_shift_for_timestamp(employee_id, prev_ts)
-
-        # Upcoming shift: look forward 1 day
-        next_ts = ts + timedelta(days=1)
-        upcoming_window = await self.resolve_shift_for_timestamp(employee_id, next_ts)
+        for offset in range(15):
+            candidate = await self.get_shift_window_for_date(employee_id, local_ts.date() + timedelta(days=offset))
+            if candidate and candidate.shift_start > local_ts:
+                upcoming_window = candidate
+                break
 
         return EmployeeShiftScheduleRead(
             employee_id=employee_id,

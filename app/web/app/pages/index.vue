@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { DashboardMetrics } from '#shared/types/dashboard'
+import type { DashboardMetrics, EmployeeDashboardShift } from '#shared/types/dashboard'
 
 useSeoMeta({ title: 'Dashboard' })
 const auth = useAuth()
@@ -29,6 +29,19 @@ const stats = computed(() => isManager.value
       { label: 'Leave days', value: data.value?.employeeMetrics.monthlyLeave ?? 0, icon: 'i-lucide-calendar-heart', tone: 'var(--people-lavender)' },
       { label: 'Overtime', value: `${data.value?.employeeMetrics.overtimeHours ?? 0}h`, icon: 'i-lucide-timer', tone: 'var(--people-blue)' }
     ])
+
+const formatShiftTime = (value?: string) => value
+  ? new Intl.DateTimeFormat('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true }).format(new Date(value))
+  : '—'
+
+const formatShiftDate = (shift?: EmployeeDashboardShift | null) => {
+  if (!shift) return 'No upcoming assignment'
+  return new Intl.DateTimeFormat('en-IN', { weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(`${shift.shiftDate}T00:00:00`))
+}
+
+const shiftTimeRange = (shift?: EmployeeDashboardShift | null) => shift
+  ? `${formatShiftTime(shift.startsAt)} – ${formatShiftTime(shift.endsAt)}`
+  : 'Not assigned'
 </script>
 
 <template>
@@ -181,14 +194,47 @@ const stats = computed(() => isManager.value
         </div>
       </div>
 
-      <div class="mt-6 grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
+      <div
+        class="mt-6 grid gap-6"
+        :class="isManager ? 'xl:grid-cols-[1.15fr_0.85fr]' : 'xl:grid-cols-2'"
+      >
+        <UCard>
+          <div>
+            <h3 class="font-semibold">
+              Your shifts
+            </h3><p class="mt-1 text-sm text-muted">
+              Your assigned shift and next scheduled workday
+            </p>
+          </div>
+          <div class="mt-6 grid gap-3 sm:grid-cols-2">
+            <div class="rounded-xl bg-muted/5 p-4">
+              <p class="text-xs font-medium text-muted">
+                Assigned shift
+              </p><p class="mt-2 font-semibold">
+                {{ data?.employeeMetrics.currentShift?.name || 'Not assigned' }}
+              </p><p class="mt-1 text-xs text-muted tabular-nums">
+                {{ shiftTimeRange(data?.employeeMetrics.currentShift) }}
+              </p>
+            </div>
+            <div class="rounded-xl bg-muted/5 p-4">
+              <p class="text-xs font-medium text-muted">
+                Upcoming shift
+              </p><p class="mt-2 font-semibold">
+                {{ data?.employeeMetrics.upcomingShift?.name || 'No upcoming shift' }}
+              </p><p class="mt-1 text-xs text-muted tabular-nums">
+                {{ data?.employeeMetrics.upcomingShift ? `${formatShiftDate(data?.employeeMetrics.upcomingShift)} · ${shiftTimeRange(data?.employeeMetrics.upcomingShift)}` : 'No upcoming assignment' }}
+              </p>
+            </div>
+          </div>
+        </UCard>
+
         <UCard>
           <div class="flex items-center justify-between">
             <div>
               <h3 class="font-semibold">
                 Today
               </h3><p class="mt-1 text-sm text-muted">
-                Your ERP-synced attendance and schedule
+                Your ERP-synced attendance
               </p>
             </div>
             <UBadge
@@ -197,14 +243,7 @@ const stats = computed(() => isManager.value
               variant="soft"
             />
           </div>
-          <div class="mt-6 grid gap-3 sm:grid-cols-3">
-            <div class="rounded-xl bg-muted/5 p-4">
-              <p class="text-xs font-medium text-muted">
-                Current shift
-              </p><p class="mt-2 font-semibold">
-                {{ data?.employeeMetrics.currentShift || 'Not assigned' }}
-              </p>
-            </div>
+          <div class="mt-6 grid gap-3 sm:grid-cols-2">
             <div class="rounded-xl bg-muted/5 p-4">
               <p class="text-xs font-medium text-muted">
                 Punch in

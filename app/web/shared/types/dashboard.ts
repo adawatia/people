@@ -13,12 +13,21 @@ export interface EmployeeMetrics {
   todayStatus: string
   punchIn?: string | null
   punchOut?: string | null
-  currentShift?: string | null
+  currentShift?: EmployeeDashboardShift | null
+  upcomingShift?: EmployeeDashboardShift | null
   monthlyPresent: number
   monthlyAbsent: number
   monthlyLeave: number
   overtimeHours: number
   leaveBalances: Array<{ type: string, available: number, used: number, code?: string | null }>
+}
+
+export interface EmployeeDashboardShift {
+  name: string
+  shiftDate: string
+  startsAt: string
+  endsAt: string
+  isCrossMidnight: boolean
 }
 
 export interface PendingApproval {

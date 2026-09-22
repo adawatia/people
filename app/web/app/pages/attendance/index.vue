@@ -72,30 +72,37 @@ const statusSegments = computed(() => {
   return [
     { label: 'Present', value: summary?.total_present ?? 0, color: '#10b981' },
     { label: 'Half day', value: summary?.total_half_day ?? 0, color: '#8b5cf6' },
-    { label: 'Leave', value: summary?.total_leave ?? 0, color: '#6366f1' },
+    { label: 'On leave', value: summary?.total_leave ?? 0, color: '#6366f1' },
     { label: 'Absent', value: summary?.total_absent ?? 0, color: '#f43f5e' },
-    { label: 'Other', value: (summary?.total_holiday ?? 0) + (summary?.total_weekly_off ?? 0), color: '#94a3b8' }
-  ]
+    { label: 'Missed punch', value: summary?.total_missed_punch ?? 0, color: '#f59e0b' },
+    { label: 'Weekly off', value: summary?.total_weekly_off ?? 0, color: '#94a3b8' },
+    { label: 'Public holiday', value: summary?.total_holiday ?? 0, color: '#0ea5e9' }
+  ].filter(segment => segment.value > 0)
 })
 
 const chartTotal = computed(() => statusSegments.value.reduce((total, segment) => total + segment.value, 0))
 const attendanceChartOption = computed<ECOption>(() => ({
   tooltip: {
     trigger: 'item',
-    valueFormatter: value => `${value} days`
+    confine: true,
+    valueFormatter: value => `${value} day${Number(value) === 1 ? '' : 's'}`
+  },
+  title: {
+    text: `${chartTotal.value}`,
+    subtext: 'recorded days',
+    left: 'center',
+    top: 'center',
+    textStyle: { fontSize: 22, fontWeight: 700, color: '#172033' },
+    subtextStyle: { fontSize: 11, color: '#667085' }
   },
   series: [{
     name: 'Attendance status',
     type: 'pie',
-    radius: ['45%', '64%'],
-    label: {
-      show: true,
-      formatter: '{b}: {c}',
-      fontSize: 11,
-      minMargin: 4
-    },
-    labelLine: { length: 8, length2: 6 },
-    labelLayout: { hideOverlap: true },
+    radius: ['58%', '78%'],
+    center: ['50%', '50%'],
+    avoidLabelOverlap: true,
+    label: { show: false },
+    labelLine: { show: false },
     data: statusSegments.value.map(segment => ({
       name: segment.label,
       value: segment.value,
@@ -271,7 +278,7 @@ function hasPendingCorrection(recordId: number) {
               <ClientOnly>
                 <VChart
                   class="block"
-                  style="width: 100%; height: 13rem"
+                  style="width: 100%; height: 14rem"
                   :option="attendanceChartOption"
                   :init-options="{ renderer: 'svg' }"
                   autoresize
@@ -297,6 +304,9 @@ function hasPendingCorrection(recordId: number) {
                 />{{ segment.label }}</span>
                 <span class="font-semibold tabular-nums">{{ segment.value }}</span>
               </div>
+              <p class="pt-1 text-xs leading-5 text-muted">
+                Weekly offs and public holidays are non-working days; they are shown separately and are not treated as absence.
+              </p>
             </div>
           </div>
         </UCard>

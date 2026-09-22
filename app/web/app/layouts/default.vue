@@ -20,7 +20,7 @@ const navItems: NavItem[] = [
   { label: 'Work arrangements', icon: 'i-lucide-briefcase-business', to: '/work-arrangements' },
   { label: 'Overtime', icon: 'i-lucide-timer', to: '/overtime' },
   { label: 'Approvals', icon: 'i-lucide-clipboard-check', to: '/approvals', roles: ['DEPARTMENT_MANAGER', 'HR_ADMIN'], permissions: ['leave.approve', 'attendance.approve_correction', 'work_arrangement.approve'] },
-  { label: 'Shifts', icon: 'i-lucide-clock-3', to: '/shifts', permissions: ['shift.view_self', 'shift.assign', 'shift.update'] },
+  { label: 'Shifts', icon: 'i-lucide-clock-3', to: '/shifts', roles: ['HR_ADMIN'], permissions: ['shift.assign', 'shift.update'] },
   { label: 'Holidays', icon: 'i-lucide-calendar-heart', to: '/holidays' },
   { label: 'Organization', icon: 'i-lucide-building-2', to: '/organization', roles: ['HR_ADMIN'], permissions: ['system.configure', 'designation.view', 'employee.view'] },
   { label: 'Reports', icon: 'i-lucide-chart-no-axes-combined', to: '/reports', roles: ['DEPARTMENT_MANAGER', 'HR_ADMIN', 'ORGANIZATION_OWNER'], permissions: ['reports.attendance', 'reports.leave'] }
