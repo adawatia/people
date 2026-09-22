@@ -11,6 +11,9 @@ const monthCursor = ref(new Date(new Date().getFullYear(), new Date().getMonth()
 const correctionRecord = ref<AttendanceRecord | null>(null)
 const correction = reactive({ requested_punch_in: '', requested_punch_out: '', reason: '' })
 const correctionLoading = ref(false)
+// Only HR can raise a correction (the API enforces the same rule), and employees
+// are not linked to an employee profile anyway.
+const canRequestCorrection = computed(() => Boolean(auth.user.value?.is_superuser) || auth.user.value?.role === 'HR_ADMIN')
 
 function dateKey(value: Date) {
   const year = value.getFullYear()
@@ -358,7 +361,7 @@ function hasPendingCorrection(recordId: number) {
                   {{ formatTime(day.record.punch_in) }} – {{ formatTime(day.record.punch_out) }}
                 </p>
                 <button
-                  v-if="['MISSED_PUNCH', 'ABSENT'].includes(day.record.status) && !hasPendingCorrection(day.record.id)"
+                  v-if="canRequestCorrection && ['MISSED_PUNCH', 'ABSENT'].includes(day.record.status) && !hasPendingCorrection(day.record.id)"
                   type="button"
                   class="mt-2 text-xs font-semibold text-primary hover:underline"
                   @click="openCorrection(day.record)"
@@ -409,7 +412,7 @@ function hasPendingCorrection(recordId: number) {
             >
               <span v-if="record.late_minutes">{{ record.late_minutes }}m late</span><span v-if="record.early_exit_minutes">{{ record.early_exit_minutes }}m early exit</span>
               <button
-                v-if="!hasPendingCorrection(record.id)"
+                v-if="canRequestCorrection && !hasPendingCorrection(record.id)"
                 type="button"
                 class="font-semibold text-primary"
                 @click="openCorrection(record)"

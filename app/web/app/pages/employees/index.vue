@@ -1,23 +1,17 @@
 <script setup lang="ts">
 /* eslint-disable better-tailwindcss/no-unknown-classes */
-/* eslint-disable @stylistic/max-statements-per-line, vue/multiline-html-element-content-newline, vue/singleline-html-element-content-newline */
+/* eslint-disable vue/multiline-html-element-content-newline */
 import type { Employee, EmployeePage } from '#shared/types/employee'
 import type { Department, Designation, Unit } from '#shared/types/organization'
 
 useSeoMeta({ title: 'Employees' })
 const api = useHrmsApi()
-const auth = useAuth()
-const toast = useToast()
 const search = ref('')
 const debouncedSearch = ref('')
 const unitId = ref<number>(0)
 const departmentId = ref<number>(0)
 const status = ref('ACTIVE')
 const page = ref(1)
-const createOpen = ref(false)
-const saving = ref(false)
-const editingId = ref<number | null>(null)
-const form = reactive({ employee_code: '', first_name: '', last_name: '', official_email: '', phone_number: '', unit_id: undefined as number | undefined, department_id: undefined as number | undefined, designation_id: undefined as number | undefined, date_of_joining: '', employment_type: 'PERMANENT', create_user_account: true, username: '', initial_password: '' })
 let searchTimer: ReturnType<typeof setTimeout> | undefined
 watch(search, (value) => {
   clearTimeout(searchTimer)
@@ -36,41 +30,7 @@ const { data: masters } = await useAsyncData('employee-masters', async () => {
 const { data, pending, error, refresh } = await useAsyncData('employees', () => api.request<EmployeePage>('employees/', { query: { page: page.value, page_size: 20, q: debouncedSearch.value || undefined, unit_id: unitId.value || undefined, department_id: departmentId.value || undefined, status: status.value === 'ALL' ? undefined : status.value } }), { watch: [page, debouncedSearch, unitId, departmentId, status] })
 const departments = computed(() => (masters.value?.departments || []).filter(item => !unitId.value || item.unit_id === unitId.value))
 const initials = (item: Employee) => `${item.first_name[0] || ''}${item.last_name?.[0] || ''}`.toUpperCase()
-function resetForm() {
-  editingId.value = null
-  Object.assign(form, { employee_code: '', first_name: '', last_name: '', official_email: '', phone_number: '', unit_id: undefined, department_id: undefined, designation_id: undefined, date_of_joining: '', employment_type: 'PERMANENT', create_user_account: true, username: '', initial_password: '' })
-  createOpen.value = true
-}
-function editEmployee(item: Employee) {
-  editingId.value = item.id
-  Object.assign(form, { employee_code: item.employee_code, first_name: item.first_name, last_name: item.last_name || '', official_email: item.official_email || '', phone_number: item.phone_number || '', unit_id: item.unit_id || undefined, department_id: item.department_id || undefined, designation_id: item.designation_id || undefined, date_of_joining: item.date_of_joining || '', employment_type: item.employment_type })
-  createOpen.value = true
-}
-async function saveEmployee() {
-  if (!form.employee_code.trim() || !form.first_name.trim()) return
-  saving.value = true
-  try {
-    const body = { ...form, employee_code: form.employee_code.trim(), first_name: form.first_name.trim(), last_name: form.last_name.trim() || null, official_email: form.official_email.trim() || null, phone_number: form.phone_number.trim() || null, date_of_joining: form.date_of_joining || null }
-    await api.request(editingId.value ? `employees/${editingId.value}` : 'employees/onboard', { method: editingId.value ? 'PATCH' : 'POST', body: editingId.value ? Object.fromEntries(Object.entries(body).filter(([key]) => !['employee_code', 'create_user_account', 'username'].includes(key))) : body })
-    createOpen.value = false
-    toast.add({ title: `Employee ${editingId.value ? 'updated' : 'created'}`, color: 'success', icon: 'i-lucide-user-round-check' })
-    await refresh()
-  } catch (saveError) {
-    const candidate = saveError as { data?: { detail?: string, statusMessage?: string } }
-    toast.add({ title: 'Could not save employee', description: candidate.data?.detail || candidate.data?.statusMessage, color: 'error' })
-  } finally { saving.value = false }
-}
-async function toggleEmployee(item: Employee) {
-  try {
-    await api.request(`employees/${item.id}/${item.status === 'ACTIVE' ? 'deactivate' : 'activate'}`, { method: 'PATCH' })
-    toast.add({ title: `${item.full_name || item.employee_code} ${item.status === 'ACTIVE' ? 'deactivated' : 'activated'}`, color: 'success' })
-    await refresh()
-  } catch (toggleError) { const candidate = toggleError as { data?: { detail?: string, statusMessage?: string } }; toast.add({ title: 'Could not change employee status', description: candidate.data?.detail || candidate.data?.statusMessage, color: 'error' }) }
-}
-async function deleteEmployee(item: Employee) {
-  if (!confirm(`Delete ${item.full_name || item.employee_code}? This cannot be undone.`)) return
-  try { await api.request(`employees/${item.id}`, { method: 'DELETE' }); toast.add({ title: 'Employee deleted', color: 'success' }); await refresh() } catch (deleteError) { const candidate = deleteError as { data?: { detail?: string, statusMessage?: string } }; toast.add({ title: 'Could not delete employee', description: candidate.data?.detail || candidate.data?.statusMessage, color: 'error' }) }
-}
+// Employee records are provisioned and maintained in ERP; this page is read-only.
 </script>
 
 <template>
@@ -155,7 +115,7 @@ async function deleteEmployee(item: Employee) {
         /><h3 class="mt-4 font-semibold">
           No employees found
         </h3><p class="mt-1 text-sm text-muted">
-          Change your filters or add the first employee.
+          Change your filters or ask an administrator to provision the employee in ERP.
         </p>
       </div>
       <div v-else>
@@ -229,122 +189,5 @@ async function deleteEmployee(item: Employee) {
         />
       </div>
     </section>
-    <USlideover
-      v-model:open="createOpen"
-      :title="`${editingId ? 'Edit' : 'Add'} employee`"
-      description="Create the core employment record."
-    >
-      <template #body>
-        <form
-          id="employee-create"
-          class="space-y-5"
-          @submit.prevent="saveEmployee"
-        >
-          <div class="grid gap-4 sm:grid-cols-2">
-            <UFormField
-              label="Employee code"
-              required
-            >
-              <UInput
-                v-model="form.employee_code"
-                class="w-full"
-                :disabled="!!editingId"
-              />
-            </UFormField><UFormField label="Employment type">
-              <USelect
-                v-model="form.employment_type"
-                class="w-full"
-                :items="['PERMANENT', 'CONTRACT', 'INTERN', 'TEMPORARY']"
-              />
-            </UFormField><UFormField
-              label="First name"
-              required
-            >
-              <UInput
-                v-model="form.first_name"
-                class="w-full"
-              />
-            </UFormField><UFormField label="Last name">
-              <UInput
-                v-model="form.last_name"
-                class="w-full"
-              />
-            </UFormField>
-          </div><UFormField label="Official email">
-            <UInput
-              v-model="form.official_email"
-              class="w-full"
-              type="email"
-            />
-          </UFormField><UFormField label="Phone">
-            <UInput
-              v-model="form.phone_number"
-              class="w-full"
-            />
-          </UFormField><UFormField label="Unit">
-            <USelect
-              v-model="form.unit_id"
-              class="w-full"
-              :items="(masters?.units || []).map(item => ({ label: item.name, value: item.id }))"
-            />
-          </UFormField><UFormField label="Department">
-            <USelect
-              v-model="form.department_id"
-              class="w-full"
-              :items="(masters?.departments || []).filter(item => !form.unit_id || item.unit_id === form.unit_id).map(item => ({ label: item.name, value: item.id }))"
-            />
-          </UFormField><UFormField label="Designation">
-            <USelect
-              v-model="form.designation_id"
-              class="w-full"
-              :items="(masters?.designations || []).map(item => ({ label: item.name, value: item.id }))"
-            />
-          </UFormField><UFormField label="Joining date">
-            <UInput
-              v-model="form.date_of_joining"
-              class="w-full"
-              type="date"
-            />
-          </UFormField>
-          <div v-if="!editingId" class="rounded-lg border border-[var(--people-border)] bg-muted/5 p-4 sm:col-span-2">
-            <UCheckbox v-model="form.create_user_account" label="Create portal login account" />
-            <p class="mt-1 text-xs text-muted">The employee will receive a temporary password and must change it after first login.</p>
-            <div v-if="form.create_user_account" class="mt-4 grid gap-4 sm:grid-cols-2">
-              <UFormField label="Username (optional)">
-                <UInput v-model="form.username" class="w-full" placeholder="Defaults to email prefix" />
-              </UFormField>
-              <UFormField label="Initial password" required>
-                <UInput
-                  v-model="form.initial_password"
-                  class="w-full"
-                  type="password"
-                  autocomplete="new-password"
-                  placeholder="Temporary password"
-                />
-                <template #help>
-                  The employee must change this password after first login.
-                </template>
-              </UFormField>
-            </div>
-          </div>
-        </form>
-      </template><template #footer>
-        <div class="flex w-full justify-end gap-2">
-          <UButton
-            color="neutral"
-            variant="ghost"
-            @click="createOpen = false"
-          >
-            Cancel
-          </UButton><UButton
-            type="submit"
-            form="employee-create"
-            :loading="saving"
-          >
-            {{ editingId ? 'Save changes' : 'Create employee' }}
-          </UButton>
-        </div>
-      </template>
-    </USlideover>
   </div>
 </template>

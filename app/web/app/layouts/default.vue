@@ -19,7 +19,7 @@ const navItems: NavItem[] = [
   { label: 'Leave', icon: 'i-lucide-calendar-days', to: '/leaves', iconTone: 'people-icon--lavender' },
   { label: 'Work arrangements', icon: 'i-lucide-briefcase-business', to: '/work-arrangements', iconTone: 'people-icon--peach' },
   { label: 'Overtime', icon: 'i-lucide-timer', to: '/overtime', iconTone: 'people-icon--yellow' },
-  { label: 'Approvals', icon: 'i-lucide-clipboard-check', to: '/approvals', iconTone: 'people-icon--rose', roles: ['DEPARTMENT_MANAGER', 'HR_ADMIN'], permissions: ['leave.approve', 'attendance.approve_correction', 'work_arrangement.approve'] },
+  { label: 'Approvals', icon: 'i-lucide-clipboard-check', to: '/approvals', iconTone: 'people-icon--rose', roles: ['DEPARTMENT_MANAGER', 'HR_ADMIN'], permissions: ['leave.approve', 'work_arrangement.approve'] },
   { label: 'Shifts', icon: 'i-lucide-clock-3', to: '/shifts', iconTone: 'people-icon--blue', roles: ['HR_ADMIN'], permissions: ['shift.assign', 'shift.update'] },
   { label: 'Holidays', icon: 'i-lucide-calendar-heart', to: '/holidays', iconTone: 'people-icon--lavender' },
   { label: 'Organization', icon: 'i-lucide-building-2', to: '/organization', iconTone: 'people-icon--mint', roles: ['HR_ADMIN'], permissions: ['system.configure', 'designation.view', 'employee.view'] },

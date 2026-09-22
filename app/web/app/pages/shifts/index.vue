@@ -1,33 +1,16 @@
 <script setup lang="ts">
-/* eslint-disable better-tailwindcss/no-unknown-classes, @stylistic/max-statements-per-line */
-import type { EmployeePage } from '#shared/types/employee'
-import type { Unit } from '#shared/types/organization'
+/* eslint-disable better-tailwindcss/no-unknown-classes */
 import type { Shift, ShiftAssignment } from '#shared/types/workforce'
 
 useSeoMeta({ title: 'Shifts' })
-const api = useHrmsApi(); const auth = useAuth(); const toast = useToast()
-const tab = ref<'definitions' | 'assignments'>('definitions'); const createOpen = ref(false); const assignOpen = ref(false); const saving = ref(false)
-const today = new Date().toISOString().slice(0, 10)
-const shiftForm = reactive({ name: '', code: '', unit_id: undefined as number | undefined, start_time: '09:00', end_time: '18:00', grace_minutes: 10, break_minutes: 30, enable_auto_attendance: true })
-const assignmentForm = reactive({ employee_id: undefined as number | undefined, shift_id: undefined as number | undefined, effective_from: today, effective_to: '' })
-const canManage = computed(() => auth.hasPermission('shift.assign'))
+const api = useHrmsApi()
+const tab = ref<'definitions' | 'assignments'>('definitions')
+// Shift definitions and employee assignments are authored in ERP and mirrored here.
 const { data, pending, error, refresh } = await useAsyncData('shift-workspace', async () => {
-  const [shifts, assignments, units, employees] = await Promise.all([api.request<Shift[]>('shifts/', { query: { is_active: true } }), api.request<ShiftAssignment[]>('shifts/assignments'), api.request<Unit[]>('org/units'), api.request<EmployeePage>('employees/', { query: { page_size: 100, status: 'ACTIVE' } })])
-  return { shifts, assignments, units, employees: employees.items }
+  const [shifts, assignments] = await Promise.all([api.request<Shift[]>('shifts/', { query: { is_active: true } }), api.request<ShiftAssignment[]>('shifts/assignments')])
+  return { shifts, assignments }
 })
 const time = (value: string) => value?.slice(0, 5) || '—'
-function newShift() { Object.assign(shiftForm, { name: '', code: '', unit_id: undefined, start_time: '09:00', end_time: '18:00', grace_minutes: 10, break_minutes: 30, enable_auto_attendance: true }); createOpen.value = true }
-async function createShift() {
-  if (!shiftForm.name.trim()) return
-  saving.value = true
-  try { await api.request('shifts/', { method: 'POST', body: { ...shiftForm, code: shiftForm.code || null, is_cross_midnight: shiftForm.end_time <= shiftForm.start_time } }); createOpen.value = false; toast.add({ title: 'Shift created', color: 'success' }); await refresh() } finally { saving.value = false }
-}
-function newAssignment() { assignmentForm.employee_id = data.value?.employees[0]?.id; assignmentForm.shift_id = data.value?.shifts[0]?.id; assignmentForm.effective_from = today; assignmentForm.effective_to = ''; assignOpen.value = true }
-async function createAssignment() {
-  if (!assignmentForm.employee_id || !assignmentForm.shift_id) return
-  saving.value = true
-  try { await api.request('shifts/assignments', { method: 'POST', body: { ...assignmentForm, effective_to: assignmentForm.effective_to || null } }); assignOpen.value = false; toast.add({ title: 'Shift assigned', color: 'success' }); await refresh() } finally { saving.value = false }
-}
 </script>
 
 <template>
@@ -39,16 +22,9 @@ async function createAssignment() {
         </p><h2 class="mt-1 text-2xl font-semibold sm:text-3xl">
           Shifts
         </h2><p class="mt-2 text-sm text-muted">
-          Configure working hours and maintain the active employee roster.
+          Review the shift definitions and employee assignments synchronized from ERP.
         </p>
-      </div><UButton
-        v-if="canManage"
-        icon="i-lucide-plus"
-        size="lg"
-        @click="tab === 'definitions' ? newShift() : newAssignment()"
-      >
-        {{ tab === 'definitions' ? 'New shift' : 'Assign shift' }}
-      </UButton>
+      </div>
     </div><div class="mt-7 flex gap-2 border-b border-[var(--people-border)]">
       <button
         v-for="item in [{ key: 'definitions', label: 'Shift definitions', icon: 'i-lucide-clock-3' }, { key: 'assignments', label: 'Assignments', icon: 'i-lucide-calendar-range' }]"
@@ -158,128 +134,6 @@ async function createAssignment() {
           </UBadge>
         </article>
       </div>
-    </section><USlideover
-      v-model:open="createOpen"
-      title="Create shift"
-    >
-      <template #body>
-        <form
-          id="shift-create"
-          class="space-y-5"
-          @submit.prevent="createShift"
-        >
-          <UFormField
-            label="Name"
-            required
-          >
-            <UInput
-              v-model="shiftForm.name"
-              class="w-full"
-            />
-          </UFormField><UFormField label="Code">
-            <UInput
-              v-model="shiftForm.code"
-              class="w-full"
-            />
-          </UFormField><UFormField label="Unit">
-            <USelect
-              v-model="shiftForm.unit_id"
-              class="w-full"
-              :items="(data?.units || []).map(item => ({ label: item.name, value: item.id }))"
-            />
-          </UFormField><div class="grid grid-cols-2 gap-4">
-            <UFormField label="Starts">
-              <UInput
-                v-model="shiftForm.start_time"
-                class="w-full"
-                type="time"
-              />
-            </UFormField><UFormField label="Ends">
-              <UInput
-                v-model="shiftForm.end_time"
-                class="w-full"
-                type="time"
-              />
-            </UFormField><UFormField label="Grace minutes">
-              <UInput
-                v-model.number="shiftForm.grace_minutes"
-                class="w-full"
-                type="number"
-              />
-            </UFormField><UFormField label="Break minutes">
-              <UInput
-                v-model.number="shiftForm.break_minutes"
-                class="w-full"
-                type="number"
-              />
-            </UFormField>
-          </div><UCheckbox
-            v-model="shiftForm.enable_auto_attendance"
-            label="Enable automatic attendance"
-          />
-        </form>
-      </template><template #footer>
-        <UButton
-          type="submit"
-          form="shift-create"
-          block
-          :loading="saving"
-        >
-          Create shift
-        </UButton>
-      </template>
-    </USlideover><USlideover
-      v-model:open="assignOpen"
-      title="Assign shift"
-    >
-      <template #body>
-        <form
-          id="shift-assign"
-          class="space-y-5"
-          @submit.prevent="createAssignment"
-        >
-          <UFormField
-            label="Employee"
-            required
-          >
-            <USelect
-              v-model="assignmentForm.employee_id"
-              class="w-full"
-              :items="(data?.employees || []).map(item => ({ label: item.full_name || item.employee_code, value: item.id }))"
-            />
-          </UFormField><UFormField
-            label="Shift"
-            required
-          >
-            <USelect
-              v-model="assignmentForm.shift_id"
-              class="w-full"
-              :items="(data?.shifts || []).map(item => ({ label: item.name, value: item.id }))"
-            />
-          </UFormField><UFormField label="Effective from">
-            <UInput
-              v-model="assignmentForm.effective_from"
-              class="w-full"
-              type="date"
-            />
-          </UFormField><UFormField label="Effective to">
-            <UInput
-              v-model="assignmentForm.effective_to"
-              class="w-full"
-              type="date"
-            />
-          </UFormField>
-        </form>
-      </template><template #footer>
-        <UButton
-          type="submit"
-          form="shift-assign"
-          block
-          :loading="saving"
-        >
-          Assign shift
-        </UButton>
-      </template>
-    </USlideover>
+    </section>
   </div>
 </template>

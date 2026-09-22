@@ -1,36 +1,22 @@
 <script setup lang="ts">
 /* eslint-disable better-tailwindcss/no-unknown-classes */
-import type { AttendanceCorrection, AttendanceRecord } from '#shared/types/attendance'
 import type { LeaveApplication } from '#shared/types/leave'
 import type { WorkArrangement } from '#shared/types/work-arrangement'
 
-interface CorrectionReview extends AttendanceCorrection { record?: AttendanceRecord }
-type ApprovalTab = 'attendance' | 'leave' | 'work'
+type ApprovalTab = 'leave' | 'work'
 
 useSeoMeta({ title: 'Approvals' })
 const api = useHrmsApi()
 const auth = useAuth()
 const toast = useToast()
-const canAttendance = computed(() => auth.hasPermission('attendance.approve_correction'))
 const canLeave = computed(() => auth.hasPermission('leave.approve'))
 const canRejectLeave = computed(() => auth.hasPermission('leave.reject'))
 const canWork = computed(() => auth.hasPermission('work_arrangement.approve'))
-const activeTab = ref<ApprovalTab>(canAttendance.value ? 'attendance' : 'leave')
+const activeTab = ref<ApprovalTab>(canLeave.value ? 'leave' : 'work')
 const actionKey = ref('')
-const attendanceReject = ref<CorrectionReview | null>(null)
 const leaveReject = ref<LeaveApplication | null>(null)
 const workReject = ref<WorkArrangement | null>(null)
 const rejectionReason = ref('')
-
-const attendanceQueue = useAsyncData('attendance-approval-queue', async () => {
-  if (!canAttendance.value) return []
-  const items = await api.request<AttendanceCorrection[]>('attendance/corrections', { query: { status: 'PENDING' } })
-  return await Promise.all(items.map(async (item) => {
-    try {
-      return { ...item, record: await api.request<AttendanceRecord>(`attendance/records/${item.attendance_record_id}`) }
-    } catch { return item }
-  })) as CorrectionReview[]
-})
 
 const leaveQueue = useAsyncData('leave-approval-queue', async () => {
   if (!canLeave.value) return []
@@ -46,15 +32,10 @@ const workQueue = useAsyncData('work-arrangement-approval-queue', async () => {
   return await api.request<WorkArrangement[]>('work-arrangements/', { query: { status: 'PENDING' } })
 })
 
-const totalWaiting = computed(() => (attendanceQueue.data.value?.length || 0) + (leaveQueue.data.value?.length || 0) + (workQueue.data.value?.length || 0))
-const activePending = computed(() => activeTab.value === 'attendance' ? attendanceQueue.pending.value : activeTab.value === 'leave' ? leaveQueue.pending.value : workQueue.pending.value)
-const activeError = computed(() => activeTab.value === 'attendance' ? attendanceQueue.error.value : activeTab.value === 'leave' ? leaveQueue.error.value : workQueue.error.value)
+const totalWaiting = computed(() => (leaveQueue.data.value?.length || 0) + (workQueue.data.value?.length || 0))
+const activePending = computed(() => activeTab.value === 'leave' ? leaveQueue.pending.value : workQueue.pending.value)
+const activeError = computed(() => activeTab.value === 'leave' ? leaveQueue.error.value : workQueue.error.value)
 
-function formatTime(value?: string | null) {
-  if (!value) return '—'
-  const [hours, minutes] = value.split(':')
-  return new Intl.DateTimeFormat('en-IN', { hour: '2-digit', minute: '2-digit' }).format(new Date(2000, 0, 1, Number(hours), Number(minutes)))
-}
 function formatDate(value?: string | null) {
   if (!value) return 'Unknown date'
   return new Intl.DateTimeFormat('en-IN', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(`${value}T00:00:00`))
@@ -65,19 +46,6 @@ function dateRange(item: LeaveApplication) {
 }
 function requestError(error: unknown, fallback: string) {
   return (error as { data?: { statusMessage?: string } }).data?.statusMessage || fallback
-}
-
-async function approveAttendance(item: CorrectionReview) {
-  actionKey.value = `attendance-${item.id}`
-  try {
-    await api.request(`attendance/corrections/${item.id}/approve`, { method: 'PATCH' })
-    toast.add({ title: 'Correction approved', description: 'The attendance record has been updated.', color: 'success', icon: 'i-lucide-circle-check' })
-    await attendanceQueue.refresh()
-  } catch (error) {
-    toast.add({ title: 'Approval failed', description: requestError(error, 'Please try again.'), color: 'error' })
-  } finally {
-    actionKey.value = ''
-  }
 }
 
 async function approveLeave(item: LeaveApplication) {
@@ -112,15 +80,13 @@ async function approveWork(item: WorkArrangement) {
   } finally { actionKey.value = '' }
 }
 
-function startReject(item: CorrectionReview | LeaveApplication | WorkArrangement, type: ApprovalTab) {
+function startReject(item: LeaveApplication | WorkArrangement, type: ApprovalTab) {
   rejectionReason.value = ''
-  if (type === 'attendance') attendanceReject.value = item as CorrectionReview
-  else if (type === 'leave') leaveReject.value = item as LeaveApplication
+  if (type === 'leave') leaveReject.value = item as LeaveApplication
   else workReject.value = item as WorkArrangement
 }
 
 function closeReject() {
-  attendanceReject.value = null
   leaveReject.value = null
   workReject.value = null
   rejectionReason.value = ''
@@ -128,20 +94,18 @@ function closeReject() {
 
 async function rejectRequest() {
   if (rejectionReason.value.trim().length < 3) return
-  const type: ApprovalTab = attendanceReject.value ? 'attendance' : leaveReject.value ? 'leave' : 'work'
-  const item = attendanceReject.value || leaveReject.value || workReject.value
+  const type: ApprovalTab = leaveReject.value ? 'leave' : 'work'
+  const item = leaveReject.value || workReject.value
   if (!item) return
   actionKey.value = `${type}-${item.id}`
   try {
-    const path = type === 'attendance'
-      ? `attendance/corrections/${item.id}/reject`
-      : type === 'leave'
-        ? `leaves/${item.id}${(item as LeaveApplication).status === 'CANCELLATION_PENDING' ? '/cancellation/reject' : '/reject'}`
-        : `work-arrangements/${item.id}/reject`
+    const path = type === 'leave'
+      ? `leaves/${item.id}${(item as LeaveApplication).status === 'CANCELLATION_PENDING' ? '/cancellation/reject' : '/reject'}`
+      : `work-arrangements/${item.id}/reject`
     await api.request(path, { method: 'PATCH', body: { rejection_reason: rejectionReason.value.trim() } })
-    toast.add({ title: type === 'attendance' ? 'Correction rejected' : 'Leave rejected', color: 'neutral', icon: 'i-lucide-circle-x' })
+    toast.add({ title: type === 'leave' ? 'Leave rejected' : 'Work arrangement rejected', color: 'neutral', icon: 'i-lucide-circle-x' })
     closeReject()
-    await (type === 'attendance' ? attendanceQueue.refresh() : type === 'leave' ? leaveQueue.refresh() : workQueue.refresh())
+    await (type === 'leave' ? leaveQueue.refresh() : workQueue.refresh())
   } catch (error) {
     toast.add({ title: 'Rejection failed', description: requestError(error, 'Please try again.'), color: 'error' })
   } finally {
@@ -172,15 +136,6 @@ async function rejectRequest() {
 
     <div class="mt-7 flex gap-2 overflow-x-auto border-b border-[var(--people-border)]">
       <button
-        v-if="canAttendance"
-        type="button"
-        class="flex min-h-11 shrink-0 items-center gap-2 border-b-2 px-3 text-sm font-semibold"
-        :class="activeTab === 'attendance' ? 'border-primary text-primary' : 'border-transparent text-muted'"
-        @click="activeTab = 'attendance'"
-      >
-        <UIcon name="i-lucide-clock-alert" />Attendance<span class="rounded-full bg-primary/10 px-2 py-0.5 text-xs">{{ attendanceQueue.data.value?.length || 0 }}</span>
-      </button>
-      <button
         v-if="canLeave"
         type="button"
         class="flex min-h-11 shrink-0 items-center gap-2 border-b-2 px-3 text-sm font-semibold"
@@ -201,7 +156,7 @@ async function rejectRequest() {
     </div>
 
     <UAlert
-      v-if="!canAttendance && !canLeave && !canWork"
+      v-if="!canLeave && !canWork"
       class="mt-6"
       color="warning"
       variant="soft"
@@ -217,7 +172,7 @@ async function rejectRequest() {
       icon="i-lucide-coffee"
       title="Your approval queue is taking a short break"
       description="We couldn’t refresh pending requests right now. Please try again in a moment."
-      :actions="[{ label: 'Refresh approvals', onClick: () => activeTab === 'attendance' ? attendanceQueue.refresh() : activeTab === 'leave' ? leaveQueue.refresh() : workQueue.refresh() }]"
+      :actions="[{ label: 'Refresh approvals', onClick: () => activeTab === 'leave' ? leaveQueue.refresh() : workQueue.refresh() }]"
     />
 
     <div
@@ -231,76 +186,6 @@ async function rejectRequest() {
       >
         <USkeleton class="h-5 w-40" /><USkeleton class="mt-4 h-24 w-full" /><USkeleton class="mt-5 h-10 w-full" />
       </div>
-    </div>
-
-    <div
-      v-else-if="activeTab === 'attendance' && attendanceQueue.data.value?.length"
-      class="mt-6 grid gap-4 xl:grid-cols-2"
-    >
-      <article
-        v-for="item in attendanceQueue.data.value"
-        :key="item.id"
-        class="people-card overflow-hidden"
-      >
-        <div class="flex items-start gap-4 border-b border-[var(--people-border)] p-5 sm:p-6">
-          <span class="grid size-11 shrink-0 place-items-center rounded-2xl bg-[var(--people-peach)]"><UIcon
-            name="i-lucide-clock-alert"
-            class="size-5"
-          /></span><div class="min-w-0 flex-1">
-            <div class="flex flex-wrap items-center gap-2">
-              <h3 class="font-semibold">
-                Employee #{{ item.record?.employee_id || '—' }}
-              </h3><AttendanceStatusBadge
-                v-if="item.record"
-                :status="item.record.status"
-              />
-            </div><p class="mt-1 text-sm text-muted">
-              {{ formatDate(item.record?.attendance_date) }}
-            </p>
-          </div><UBadge
-            label="Pending"
-            color="warning"
-            variant="soft"
-          />
-        </div>
-        <div class="p-5 sm:p-6">
-          <div class="grid grid-cols-[1fr_auto_1fr] items-center gap-3 rounded-2xl bg-muted/5 p-4">
-            <div>
-              <p class="text-xs font-semibold uppercase tracking-wide text-muted">
-                Recorded
-              </p><p class="mt-2 text-sm font-semibold tabular-nums">
-                {{ formatTime(item.record?.punch_in) }} – {{ formatTime(item.record?.punch_out) }}
-              </p>
-            </div><UIcon
-              name="i-lucide-arrow-right"
-              class="size-5 text-muted"
-            /><div>
-              <p class="text-xs font-semibold uppercase tracking-wide text-primary">
-                Requested
-              </p><p class="mt-2 text-sm font-semibold tabular-nums">
-                {{ formatTime(item.requested_punch_in || item.record?.punch_in) }} – {{ formatTime(item.requested_punch_out || item.record?.punch_out) }}
-              </p>
-            </div>
-          </div><p class="mt-4 text-sm leading-6">
-            <span class="mr-2 text-xs font-semibold uppercase tracking-wide text-muted">Reason</span>{{ item.reason }}
-          </p><div class="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-            <UButton
-              color="neutral"
-              variant="soft"
-              icon="i-lucide-x"
-              @click="startReject(item, 'attendance')"
-            >
-              Reject
-            </UButton><UButton
-              icon="i-lucide-check"
-              :loading="actionKey === `attendance-${item.id}`"
-              @click="approveAttendance(item)"
-            >
-              Approve correction
-            </UButton>
-          </div>
-        </div>
-      </article>
     </div>
 
     <div
@@ -453,7 +338,7 @@ async function rejectRequest() {
     </div>
 
     <div
-      v-else-if="!activeError && (canAttendance || canLeave || canWork)"
+      v-else-if="!activeError && (canLeave || canWork)"
       class="people-card mt-6 flex flex-col items-center px-6 py-16 text-center"
     >
       <span class="grid size-14 place-items-center rounded-2xl bg-[var(--people-mint)]"><UIcon
@@ -467,7 +352,7 @@ async function rejectRequest() {
     </div>
 
     <div
-      v-if="attendanceReject || leaveReject || workReject"
+      v-if="leaveReject || workReject"
       class="fixed inset-0 z-[70] flex items-end justify-center bg-slate-950/40 backdrop-blur-[2px] sm:items-center sm:p-6"
       @click.self="closeReject"
     >
@@ -475,7 +360,7 @@ async function rejectRequest() {
         <div class="flex items-start justify-between gap-4">
           <div>
             <p class="text-sm font-semibold text-rose-600">
-              Reject {{ attendanceReject ? 'correction' : leaveReject ? 'leave request' : 'work arrangement' }}
+              Reject {{ leaveReject ? 'leave request' : 'work arrangement' }}
             </p><h3 class="mt-1 text-xl font-semibold">
               Add a clear reason
             </h3>

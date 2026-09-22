@@ -1,19 +1,18 @@
 <script setup lang="ts">
 /* eslint-disable better-tailwindcss/no-unknown-classes, @stylistic/max-statements-per-line */
-import type { Unit } from '#shared/types/organization'
 import type { HolidayList } from '#shared/types/workforce'
 
 useSeoMeta({ title: 'Holidays' })
-const api = useHrmsApi(); const toast = useToast(); const selectedId = ref<number>(); const createOpen = ref(false); const holidayOpen = ref(false); const saving = ref(false)
-const year = new Date().getFullYear(); const form = reactive({ name: `${year} Holiday Calendar`, from_date: `${year}-01-01`, to_date: `${year}-12-31`, weekly_off_day: 'Sunday', unit_id: undefined as number | undefined, is_default: false }); const holiday = reactive({ name: '', holiday_date: `${year}-01-01`, description: '' })
+const api = useHrmsApi()
+const selectedId = ref<number>()
 // Holiday calendars are ERP-owned; the UI is display-only.
-const canManage = computed(() => false)
-const { data, pending, error, refresh } = await useAsyncData('holiday-workspace', async () => { const [lists, units] = await Promise.all([api.request<HolidayList[]>('holidays/lists'), api.request<Unit[]>('org/units')]); return { lists, units } })
+const { data, pending, error, refresh } = await useAsyncData('holiday-workspace', async () => {
+  const lists = await api.request<HolidayList[]>('holidays/lists')
+  return { lists }
+})
 watchEffect(() => { if (!selectedId.value && data.value?.lists[0]) selectedId.value = data.value.lists[0].id })
 const selected = computed(() => data.value?.lists.find(item => item.id === selectedId.value))
 const formatDate = (value: string) => new Intl.DateTimeFormat('en-IN', { weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(`${value}T00:00:00`))
-async function createList() { saving.value = true; try { await api.request('holidays/lists', { method: 'POST', body: form }); createOpen.value = false; toast.add({ title: 'Holiday calendar created', color: 'success' }); await refresh() } finally { saving.value = false } }
-async function addHoliday() { if (!selected.value || !holiday.name.trim()) return; saving.value = true; try { await api.request(`holidays/lists/${selected.value.id}/holidays`, { method: 'POST', body: { ...holiday, holiday_list_id: selected.value.id } }); holidayOpen.value = false; toast.add({ title: 'Holiday added', color: 'success' }); await refresh() } finally { saving.value = false } }
 </script>
 
 <template>
@@ -27,14 +26,7 @@ async function addHoliday() { if (!selected.value || !holiday.name.trim()) retur
         </h2><p class="mt-2 text-sm text-muted">
           View the organization holiday calendar synchronized from ERP.
         </p>
-      </div><UButton
-        v-if="canManage"
-        icon="i-lucide-calendar-plus"
-        size="lg"
-        @click="createOpen = true"
-      >
-        New calendar
-      </UButton>
+      </div>
     </div><UAlert
       v-if="error"
       class="mt-6"
@@ -90,15 +82,7 @@ async function addHoliday() { if (!selected.value || !holiday.name.trim()) retur
             >
               {{ selected.from_date }} – {{ selected.to_date }}
             </p>
-          </div><UButton
-            v-if="selected && canManage"
-            color="neutral"
-            variant="soft"
-            icon="i-lucide-plus"
-            @click="holidayOpen = true"
-          >
-            Add holiday
-          </UButton>
+          </div>
         </div><div
           v-if="selected && !selected.holidays.length"
           class="p-12 text-center text-sm text-muted"
@@ -128,100 +112,6 @@ async function addHoliday() { if (!selected.value || !holiday.name.trim()) retur
           </article>
         </div>
       </section>
-    </div><USlideover
-      v-model:open="createOpen"
-      title="New holiday calendar"
-    >
-      <template #body>
-        <form
-          id="holiday-list"
-          class="space-y-5"
-          @submit.prevent="createList"
-        >
-          <UFormField label="Name">
-            <UInput
-              v-model="form.name"
-              class="w-full"
-            />
-          </UFormField><div class="grid grid-cols-2 gap-4">
-            <UFormField label="From">
-              <UInput
-                v-model="form.from_date"
-                type="date"
-                class="w-full"
-              />
-            </UFormField><UFormField label="To">
-              <UInput
-                v-model="form.to_date"
-                type="date"
-                class="w-full"
-              />
-            </UFormField>
-          </div><UFormField label="Weekly off">
-            <USelect
-              v-model="form.weekly_off_day"
-              class="w-full"
-              :items="['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']"
-            />
-          </UFormField><UFormField label="Unit">
-            <USelect
-              v-model="form.unit_id"
-              class="w-full"
-              :items="(data?.units || []).map(item => ({ label: item.name, value: item.id }))"
-            />
-          </UFormField><UCheckbox
-            v-model="form.is_default"
-            label="Use as default calendar"
-          />
-        </form>
-      </template><template #footer>
-        <UButton
-          type="submit"
-          form="holiday-list"
-          block
-          :loading="saving"
-        >
-          Create calendar
-        </UButton>
-      </template>
-    </USlideover><UModal
-      v-model:open="holidayOpen"
-      title="Add holiday"
-    >
-      <template #body>
-        <form
-          id="holiday-add"
-          class="space-y-5"
-          @submit.prevent="addHoliday"
-        >
-          <UFormField label="Holiday name">
-            <UInput
-              v-model="holiday.name"
-              class="w-full"
-            />
-          </UFormField><UFormField label="Date">
-            <UInput
-              v-model="holiday.holiday_date"
-              type="date"
-              class="w-full"
-            />
-          </UFormField><UFormField label="Description">
-            <UTextarea
-              v-model="holiday.description"
-              class="w-full"
-            />
-          </UFormField>
-        </form>
-      </template><template #footer>
-        <UButton
-          type="submit"
-          form="holiday-add"
-          block
-          :loading="saving"
-        >
-          Add holiday
-        </UButton>
-      </template>
-    </UModal>
+    </div>
   </div>
 </template>
