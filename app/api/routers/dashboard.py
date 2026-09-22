@@ -192,7 +192,6 @@ async def get_dashboard_metrics(
         user.is_super_admin
         or user.is_superuser
         or "leave.approve" in user_perms
-        or "attendance.approve_correction" in user_perms
         or "employee.view" in user_perms
     )
 

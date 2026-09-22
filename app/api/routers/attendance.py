@@ -1,10 +1,10 @@
 from datetime import date, datetime
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.auth import fastapi_users, require_permission
 from core.attendance_access import require_hr_admin, require_hr_unit_access
+from core.auth import fastapi_users, require_permission
 from core.database import get_async_session
 from core.employee_access import (
     EmployeeAccessScope,
@@ -14,7 +14,6 @@ from core.employee_access import (
 )
 from db.models import User
 from schemas.attendance import (
-    AttendanceCorrectionAction,
     AttendanceCorrectionCreate,
     AttendanceCorrectionRead,
     AttendancePunchCreate,
@@ -237,9 +236,13 @@ async def list_corrections(
     current_user: User = Depends(fastapi_users.current_user(active=True)),
     session: AsyncSession = Depends(get_async_session),
 ) -> list[AttendanceCorrectionRead]:
+    """List attendance correction requests.
+
+    HR sees their unit, everyone else sees only their own requests.
+    """
     service = AttendanceService(session)
     current_employee = await get_current_employee(current_user, session)
-    scope = await get_permission_scope(current_user, "attendance.approve_correction", session)
+    scope = await get_permission_scope(current_user, "attendance.correct", session)
     employee_id = None
     if not scope.organization and not scope.unit_ids and not scope.department_ids:
         employee_id = current_employee.id
@@ -251,42 +254,6 @@ async def list_corrections(
     )
 
 
-@router.patch("/corrections/{correction_id}/approve", response_model=AttendanceCorrectionRead)
-async def approve_correction(
-    correction_id: int,
-    current_user: User = Depends(require_permission("attendance.approve_correction")),
-    session: AsyncSession = Depends(get_async_session),
-) -> AttendanceCorrectionRead:
-    raise HTTPException(status_code=403, detail="ERP confirmation is the attendance correction approval")
-    service = AttendanceService(session)
-    correction = await service.record_repo.get_correction_by_id(correction_id)
-    if correction is None:
-        raise HTTPException(status_code=404, detail="Correction request not found")
-    record = await service.record_repo.get_by_id(correction.attendance_record_id)
-    if record is None:
-        raise HTTPException(status_code=404, detail="Attendance record not found")
-    await require_employee_access(current_user, record.employee, "attendance.approve_correction", session)
-    return await service.approve_correction(correction_id, current_user.id)
-
-
-@router.patch("/corrections/{correction_id}/reject", response_model=AttendanceCorrectionRead)
-async def reject_correction(
-    correction_id: int,
-    action: AttendanceCorrectionAction | None = None,
-    current_user: User = Depends(require_permission("attendance.approve_correction")),
-    session: AsyncSession = Depends(get_async_session),
-) -> AttendanceCorrectionRead:
-    raise HTTPException(status_code=403, detail="ERP confirmation is the attendance correction approval")
-    service = AttendanceService(session)
-    correction = await service.record_repo.get_correction_by_id(correction_id)
-    if correction is None:
-        raise HTTPException(status_code=404, detail="Correction request not found")
-    record = await service.record_repo.get_by_id(correction.attendance_record_id)
-    if record is None:
-        raise HTTPException(status_code=404, detail="Attendance record not found")
-    await require_employee_access(current_user, record.employee, "attendance.approve_correction", session)
-    return await service.reject_correction(
-        correction_id,
-        current_user.id,
-        action.rejection_reason if action else None,
-    )
+# Attendance corrections are raised here but confirmed by ERP, so no approve/reject
+# endpoints are exposed: a correction request stays PENDING and the ERP-confirmed
+# attendance record remains the source of truth.

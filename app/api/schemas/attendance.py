@@ -1,4 +1,5 @@
 from datetime import date, datetime, time
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -109,10 +110,6 @@ class AttendanceCorrectionRead(BaseModel):
         if val is not None:
             return val
         raise KeyError(item)
-
-
-class AttendanceCorrectionAction(BaseModel):
-    rejection_reason: str | None = None
 
 
 class ProcessAttendanceRequest(BaseModel):
