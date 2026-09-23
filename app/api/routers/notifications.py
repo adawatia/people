@@ -1,12 +1,17 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import fastapi_users
+from core.business_roles import (
+    DEPARTMENT_MANAGER,
+    HR_ADMIN,
+    ORGANIZATION_OWNER,
+    resolve_business_role,
+)
 from core.database import get_async_session
-from db.models import Notification, User
+from db.models import Employee, Notification, User
 from schemas.notifications import (
-    NotificationMarkRead,
     NotificationRead,
     NotificationUnreadCount,
 )
@@ -19,11 +24,49 @@ async def build_notification_filter(user: User, session: AsyncSession):
     if user.is_superuser:
         return None  # All notifications
 
+    employee = await session.scalar(select(Employee).where(Employee.user_id == user.id))
+    target_roles = notification_target_roles(
+        resolve_business_role(employee) if employee else None,
+        employee_linked=employee is not None,
+    )
     return or_(
         Notification.user_id == user.id,
-        Notification.target_role.in_(["ALL", "STAFF", "HR", "MANAGER", "EMPLOYEE"]),
-        Notification.notification_type.in_(["system"]),
+        and_(
+            Notification.user_id.is_(None),
+            func.upper(func.trim(Notification.target_role)).in_(target_roles),
+        ),
+        and_(
+            Notification.user_id.is_(None),
+            Notification.target_role.is_(None),
+            Notification.notification_type == "system",
+        ),
     )
+
+
+def notification_target_roles(business_role: str | None, *, employee_linked: bool = True) -> set[str]:
+    """Return broad plus role-specific broadcast audiences for one employee."""
+    roles = {"ALL", "STAFF"}
+    if not employee_linked:
+        return roles
+    if business_role == HR_ADMIN:
+        roles.add("HR")
+    elif business_role == DEPARTMENT_MANAGER:
+        roles.add("MANAGER")
+    elif business_role == ORGANIZATION_OWNER:
+        roles.add("OWNER")
+    else:
+        roles.add("EMPLOYEE")
+    return roles
+
+
+def can_read_notification(user: User, notification: Notification, target_roles: set[str]) -> bool:
+    if user.is_superuser or notification.user_id == user.id:
+        return True
+    if notification.user_id is not None:
+        return False
+    if notification.target_role is None:
+        return notification.notification_type == "system"
+    return notification.target_role.strip().upper() in target_roles
 
 
 async def create_notification(
@@ -43,7 +86,7 @@ async def create_notification(
         message=message,
         notification_type=notification_type,
         user_id=user_id,
-        target_role=target_role,
+        target_role=(target_role.strip().upper() or None) if target_role else None,
         reference_id=reference_id,
         reference_type=reference_type,
         link=link,
@@ -93,7 +136,14 @@ async def mark_notification_read(
     if not notif:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Notification not found.")
 
-    if not current_user.is_superuser and notif.user_id is not None and notif.user_id != current_user.id:
+    employee = None
+    if not current_user.is_superuser and notif.user_id != current_user.id:
+        employee = await session.scalar(select(Employee).where(Employee.user_id == current_user.id))
+    roles = notification_target_roles(
+        resolve_business_role(employee) if employee else None,
+        employee_linked=employee is not None,
+    )
+    if not can_read_notification(current_user, notif, roles):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to mark this notification as read.",

@@ -532,8 +532,8 @@ Config: `create_period`, `create_type`, `update_type`, `allocate_leaves` (writes
 #### 2.7.8 Notifications & audit
 
 * `routers/notifications.py` exposes `create_notification()` for services plus `GET /notifications`, `GET /notifications/unread-count`, `PATCH /notifications/{id}/read`, `POST /notifications/mark-all-read`.
-* Visibility filter: superuser sees all; everyone else sees `user_id == me` **or** `target_role ∈ {ALL, STAFF, HR, MANAGER, EMPLOYEE}` **or** `notification_type == "system"`.
-* `mark_notification_read` forbids marking another user's notification.
+* Visibility filter: superuser sees all; everyone else sees direct notifications, `ALL`/`STAFF`, only the linked employee's current business-role audience, and unscoped global `system` notifications. Accounts without a linked employee do not receive employee/HR/manager/owner broadcasts.
+* `mark_notification_read` applies the same audience rules as listing, preventing guessed IDs from reading or mutating another user's or role's notification.
 * Audit: `GET /dashboard/owner` and `/dashboard/owner/exceptions` write `ORGANIZATION_DASHBOARD_VIEWED` / `ORGANIZATION_EXCEPTION_DRILLDOWN_VIEWED` rows with filters, request id and IP.
 
 #### 2.7.9 Background work
@@ -989,6 +989,7 @@ OvertimeRecord  PENDING ──approve/reject──▶ APPROVED | REJECTED
 | `test_milestone_5.py` | WFH creation/overlap, approval + attendance marking, rejection & cancellation |
 | `test_milestone_6.py` | attendance matrix report, leave balance summary report |
 | `test_notifications.py` | notification lifecycle |
+| `test_notification_audience.py` | role-scoped notification listing and mark-read authorization |
 | `test_audit_and_workflows.py` | self-approval prevention (leave/correction/overtime/WFH), early-return day accounting, overtime self-approval + monthly summary filtering, WFH-aware processor, org CRUD validation, detail endpoints, notification + manager dashboard |
 | `test_shift_schedule_batching.py` | batched schedule context equals per-date resolution, fallback outside context, upcoming search + schema, single-query employee shift listing |
 | `test_migration_setup.py` | Postgres config + Alembic files present |
@@ -1034,6 +1035,7 @@ These are verified against the current code and are the highest-value item in th
 * **Super Admin has organization-wide read scope** via `get_permission_scope`; production posture depends on keeping that account break-glass only. Set `MFA_REQUIRED_FOR_SUPER_ADMIN=true` and enrol before going live — the API logs a startup warning while it is off.
 * **Throttling is only as shared as its store.** `AUTH_THROTTLE_BACKEND=memory` (the default) means each worker counts separately; production validates against this at startup (D9), but a single-worker deployment still has a single point of failure for the counters.
 * **Login throttling feedback**: the BFF forwards the upstream `Retry-After` header and includes the retry countdown in the sign-in error message. The displayed time is the server's retry interval; it is not a client-side lockout timer.
+* **Notification audience isolation**: role broadcasts are limited to the linked employee's current business role; global `system` visibility applies only when no target role is set. Listing, unread counts, mark-all, and single mark-read share the same authorization predicate.
 * **Anonymous `/health`** leaks DB reachability + uptime (rate-limited to 10/min).
 * `ensure_permission(email, path, method)` in `core/auth.py` returns `bool(email)` for everything — dead/placeholder authorization helper; do not build on it.
 * Seed defaults (`SuperAdmin@123`, dev JWT secret) are guarded by `validate_runtime_secrets()`; the development shortcut is an explicit allow-list of environment names, so a typo such as `ENVIRONMENT=Production` no longer disables the checks.
