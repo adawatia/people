@@ -18,8 +18,6 @@ export const WORKSPACES: WorkspaceDefinition[] = [
   { key: 'TECHNICAL', label: 'Technical Administration', shortLabel: 'Admin', description: 'System access and integrations', icon: 'i-lucide-shield-check' }
 ]
 
-const WORKSPACE_KEYS = new Set<Workspace>(WORKSPACES.map(workspace => workspace.key))
-
 interface WorkspaceRouteRule {
   path: string
   permissions?: string[]
@@ -78,7 +76,7 @@ export function workspacesForUser(user: CurrentUser | null): Workspace[] {
     'user.view', 'user.create', 'user.update', 'user.deactivate',
     'employee.create', 'employee.update', 'employee.deactivate',
     'designation.view', 'designation.create', 'designation.update', 'designation.delete',
-    'leave.manage', 'attendance.view', 'attendance.view_unit', 'attendance.process', 'attendance.correct',
+    'leave.manage', 'attendance.process', 'attendance.correct',
     'work_arrangement.manage', 'shift.assign', 'shift.update', 'system.configure', 'audit.view',
     'salary_cost.view_unit', 'salary_cost.view_department'
   ].some(permission => permissions.has(permission))) {
@@ -86,6 +84,20 @@ export function workspacesForUser(user: CurrentUser | null): Workspace[] {
   }
   if (permissions.has('dashboard.view_organization')) workspaces.push('EXECUTIVE')
   return workspaces
+}
+
+export function resolveWorkspace(user: CurrentUser | null, requested: unknown, saved: unknown): Workspace {
+  const available = workspacesForUser(user)
+  const query = typeof requested === 'string' ? requested.toUpperCase() as Workspace : undefined
+  if (query && available.includes(query)) return query
+  if (typeof saved === 'string' && available.includes(saved as Workspace)) return saved as Workspace
+  return available[0] || 'MY'
+}
+
+export function canVisitWorkspace(user: CurrentUser | null, workspace: Workspace, path: string): boolean {
+  if (!workspacesForUser(user).includes(workspace)) return false
+  const rule = WORKSPACE_ROUTES[workspace].find(candidate => candidate.path === path || (candidate.path !== '/' && path.startsWith(`${candidate.path}/`)))
+  return Boolean(rule && (!rule.permissions || rule.permissions.some(permission => user?.is_superuser || user?.permissions?.includes(permission))))
 }
 
 export function useWorkspace() {
@@ -97,17 +109,11 @@ export function useWorkspace() {
   // from current permissions below on every app load.
   const selected = useCookie<Workspace | null>('people_workspace', { maxAge: 60 * 60 * 24 * 365, sameSite: 'lax' })
   const available = computed(() => workspacesForUser(auth.user.value))
-  const requested = computed(() => String(route.query.workspace || '').toUpperCase() as Workspace)
-  const current = computed<Workspace>(() => {
-    if (WORKSPACE_KEYS.has(requested.value) && available.value.includes(requested.value)) return requested.value
-    if (selected.value && available.value.includes(selected.value)) return selected.value
-    return available.value[0] || 'MY'
-  })
+  const current = computed(() => resolveWorkspace(auth.user.value, route.query.workspace, selected.value))
   const definition = computed(() => WORKSPACES.find(workspace => workspace.key === current.value) || WORKSPACES[0]!)
 
   function canVisit(path: string, inWorkspace = current.value) {
-    const rule = WORKSPACE_ROUTES[inWorkspace].find(candidate => candidate.path === path || (candidate.path !== '/' && path.startsWith(`${candidate.path}/`)))
-    return Boolean(rule && (!rule.permissions || rule.permissions.some(auth.hasPermission)))
+    return canVisitWorkspace(auth.user.value, inWorkspace, path)
   }
 
   watch(current, (value) => {

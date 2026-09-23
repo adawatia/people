@@ -1,8 +1,8 @@
 <script setup lang="ts">
 /* eslint-disable better-tailwindcss/no-unknown-classes */
-/* eslint-disable vue/multiline-html-element-content-newline */
+
 import type { Employee, EmployeePage } from '#shared/types/employee'
-import type { Department, Designation, Unit } from '#shared/types/organization'
+import type { Department, Unit } from '#shared/types/organization'
 
 useSeoMeta({ title: 'Employees' })
 const api = useHrmsApi()
@@ -23,11 +23,15 @@ watch(search, (value) => {
 watch([unitId, departmentId, status], () => {
   page.value = 1
 })
-const { data: masters } = await useAsyncData('employee-masters', async () => {
-  const [units, departments, designations] = await Promise.all([api.request<Unit[]>('org/units'), api.request<Department[]>('org/departments'), api.request<Designation[]>('designations/', { query: { is_active: true } })])
-  return { units, departments, designations }
+watch(unitId, () => {
+  departmentId.value = 0
 })
-const { data, pending, error, refresh } = await useAsyncData('employees', () => api.request<EmployeePage>('employees/', { query: { page: page.value, page_size: 20, q: debouncedSearch.value || undefined, unit_id: unitId.value || undefined, department_id: departmentId.value || undefined, status: status.value === 'ALL' ? undefined : status.value } }), { watch: [page, debouncedSearch, unitId, departmentId, status] })
+onBeforeUnmount(() => clearTimeout(searchTimer))
+const { data: masters } = useLazyAsyncData('employee-masters', async () => {
+  const [units, departments] = await Promise.all([api.request<Unit[]>('org/units'), api.request<Department[]>('org/departments')])
+  return { units, departments }
+})
+const { data, pending, error, refresh } = useLazyAsyncData('employees', () => api.request<EmployeePage>('employees/', { query: { page: page.value, page_size: 20, q: debouncedSearch.value || undefined, unit_id: unitId.value || undefined, department_id: departmentId.value || undefined, status: status.value === 'ALL' ? undefined : status.value } }), { watch: [page, debouncedSearch, unitId, departmentId, status] })
 const departments = computed(() => (masters.value?.departments || []).filter(item => !unitId.value || item.unit_id === unitId.value))
 const initials = (item: Employee) => `${item.first_name[0] || ''}${item.last_name?.[0] || ''}`.toUpperCase()
 // Employee records are provisioned and maintained in ERP; this page is read-only.
@@ -164,7 +168,6 @@ const initials = (item: Employee) => `${item.first_name[0] || ''}${item.last_nam
                   <span class="block">{{ item.department_name || '—' }}</span><span class="text-xs text-muted">{{ item.unit_name }}</span>
                 </td><td class="px-4 py-4">
                   {{ item.employment_type }}
-                </td><td class="px-4 py-4 text-right">—
                 </td><td class="px-6 py-4 text-right">
                   <UBadge
                     :color="item.status === 'ACTIVE' ? 'success' : 'neutral'"

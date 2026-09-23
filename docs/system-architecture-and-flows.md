@@ -749,7 +749,11 @@ Navigation is grouped by purpose inside each workspace (for example Workforce, R
 
 The shared Approvals page is available when the user can approve leave, work arrangements, **or overtime**; overtime approval must not depend on also granting one of the other approval permissions.
 
-Mobile: the 4 first non-dashboard visible items become the bottom bar, plus Profile; the header menu button opens the full grouped sidebar drawer so later items remain reachable.
+Mobile uses four workspace-specific primary groups plus **More**, with no hamburger or sidebar. Each group opens a scrollable bottom sheet occupying about half the screen, with related pages as cards. More holds remaining pages, account actions, and the workspace selector. The desktop sidebar remains grouped by purpose.
+
+The workspace route guard resolves the **destination** query and validated saved preference using pure helpers. It does not instantiate reactive workspace watchers inside middleware or read the previous page's route. Owners receive My + Executive, managers My + Team, HR My + HR, and technical administrators only Technical. Regression checks: `node --test tests/workspace.test.mjs` from `app/web` (Node 24).
+
+The employee directory starts master-data and paginated directory requests independently using lazy loading, allowing client navigation to show its skeleton immediately. Changing unit resets the department filter, and leaving the page clears the search debounce timer.
 
 The workspace middleware keeps hidden routes out of the current workspace and returns users to its dashboard. It is a user-experience guard only: every endpoint still re-checks permission and row scope (§2.6). Collection views in Attendance, Leave, Work arrangements and Overtime choose self-service employee filters in `MY`, and omit the employee filter in `TEAM`/`HR` so the backend applies the manager's department or HR's unit/organization scope. Self-service actions are hidden in management views.
 
@@ -780,7 +784,7 @@ The workspace middleware keeps hidden routes out of the current workspace and re
 * Tokens in `app/assets/css/main.css` (`--people-canvas`, `--people-surface`, `--people-border`, `--people-blue/mint/lavender/peach/yellow` + `-ink` pairs) drive every card/icon tone; `people-card`, `people-icon`, `people-icon--*` are the shared class contracts.
 * Every page header follows: eyebrow label → `h2` title → one-line subtitle → right-aligned primary action.
 * Skeletons (`USkeleton`) for first paint, `UAlert` "taking a short break" pattern with a retry action for failed dashboards, `UToast` for action results, `confirm()` for destructive actions.
-* Breakpoints: single column → `sm:grid-cols-2` → `xl:grid-cols-3/4`; sidebar is fixed ≥ `lg`, drawer below; bottom nav < `lg`; `min-h-11` tap targets; safe-area padding on mobile nav.
+* Breakpoints: single column → `sm:grid-cols-2` → `xl:grid-cols-3/4`; sidebar is fixed ≥ `lg`; grouped bottom navigation and bottom sheets below `lg`; `min-h-11` tap targets; safe-area padding on mobile nav.
 * Dark mode via `UColorModeButton`; charts use `nuxt-echarts` with SVG/canvas renderers registered in `nuxt.config.ts`.
 
 ---

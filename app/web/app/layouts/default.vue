@@ -18,6 +18,7 @@ const availableWorkspaces = workspace.available
 const currentWorkspace = workspace.current
 const workspaceDefinition = computed(() => workspace.definition.value || WORKSPACES[0]!)
 const mobileOpen = ref(false)
+const mobileGroup = ref('More')
 const isTechnicalAdmin = computed(() => Boolean(auth.user.value?.is_superuser))
 const navByWorkspace: Record<string, NavItem[]> = {
   MY: [
@@ -83,7 +84,41 @@ const pageTitle = computed(() => {
   if (route.path === '/profile') return 'Profile'
   return visibleItems.value.find(item => item.to === route.path)?.label || workspaceDefinition.value.label || 'People'
 })
-const mobileItems = computed(() => visibleItems.value.filter(item => item.to !== '/').slice(0, 4))
+const accountItems: NavItem[] = [
+  { label: 'Profile', icon: 'i-lucide-user-round', to: '/profile' },
+  { label: 'Settings', icon: 'i-lucide-settings', to: '/settings' },
+  { label: 'Notifications', icon: 'i-lucide-bell', to: '/notifications' }
+]
+const mobileGroups = computed(() => {
+  const itemsFor = (...paths: string[]) => visibleItems.value.filter(item => paths.includes(item.to))
+  if (isTechnicalAdmin.value) return [
+    { label: 'Home', icon: 'i-lucide-house', items: itemsFor('/') },
+    { label: 'Profile', icon: 'i-lucide-user-round', items: [accountItems[0]!] },
+    { label: 'Settings', icon: 'i-lucide-settings', items: [accountItems[1]!] },
+    { label: 'Updates', icon: 'i-lucide-bell', items: [accountItems[2]!] }
+  ]
+  if (currentWorkspace.value === 'EXECUTIVE') return [
+    { label: 'Home', icon: 'i-lucide-house', items: itemsFor('/') },
+    { label: 'Reports', icon: 'i-lucide-chart-no-axes-combined', items: itemsFor('/reports') },
+    { label: 'Company', icon: 'i-lucide-building-2', items: itemsFor('/organization') },
+    { label: 'Account', icon: 'i-lucide-user-round', items: accountItems }
+  ]
+  return [
+    { label: 'Home', icon: 'i-lucide-house', items: itemsFor('/') },
+    { label: 'Time', icon: 'i-lucide-clock-3', items: itemsFor('/attendance', '/overtime', '/shifts') },
+    { label: 'Requests', icon: 'i-lucide-clipboard-check', items: itemsFor('/leaves', '/work-arrangements', '/approvals') },
+    currentWorkspace.value === 'MY'
+      ? { label: 'Calendar', icon: 'i-lucide-calendar-days', items: itemsFor('/holidays') }
+      : { label: 'People', icon: 'i-lucide-users-round', items: itemsFor('/employees', '/organization') }
+  ]
+})
+const mobileSheetItems = computed(() => mobileGroup.value === 'More'
+  ? [...visibleItems.value.filter(item => !mobileGroups.value.some(group => group.items.some(primary => primary.to === item.to))), ...accountItems]
+  : mobileGroups.value.find(group => group.label === mobileGroup.value)?.items || [])
+function openMobileGroup(label: string) {
+  mobileGroup.value = label
+  mobileOpen.value = true
+}
 async function changeWorkspace(event: Event) {
   const next = (event.target as HTMLSelectElement).value as Workspace
   await workspace.select(next)
@@ -92,31 +127,23 @@ watch(() => route.fullPath, () => {
   // Navigating should always collapse the mobile drawer.
   mobileOpen.value = false
 })
+onMounted(() => {
+  const desktop = window.matchMedia('(min-width: 1024px)')
+  const closeOnDesktop = () => {
+    if (desktop.matches) mobileOpen.value = false
+  }
+  desktop.addEventListener('change', closeOnDesktop)
+  onBeforeUnmount(() => desktop.removeEventListener('change', closeOnDesktop))
+})
 </script>
 
 <template>
   <div class="min-h-dvh bg-[var(--people-canvas)]">
-    <button
-      v-if="mobileOpen"
-      type="button"
-      class="fixed inset-0 z-40 bg-slate-950/35 backdrop-blur-[2px] lg:hidden"
-      aria-label="Close navigation"
-      @click="mobileOpen = false"
-    />
     <aside
-      class="fixed inset-y-0 left-0 z-50 flex w-[17rem] flex-col border-r border-[var(--people-border)] bg-[var(--people-surface)] px-4 py-5 transition-transform lg:translate-x-0"
-      :class="mobileOpen ? 'translate-x-0' : '-translate-x-full'"
+      class="fixed inset-y-0 left-0 z-50 hidden w-[17rem] flex-col border-r border-[var(--people-border)] bg-[var(--people-surface)] px-4 py-5 lg:flex"
     >
       <div class="flex items-center justify-between px-2">
         <BrandMark />
-        <UButton
-          class="lg:hidden"
-          icon="i-lucide-x"
-          color="neutral"
-          variant="ghost"
-          aria-label="Close menu"
-          @click="mobileOpen = false"
-        />
       </div>
       <div
         v-if="availableWorkspaces.length > 1"
@@ -224,14 +251,6 @@ watch(() => route.fullPath, () => {
     </aside>
     <div class="lg:pl-[17rem]">
       <header class="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-[var(--people-border)] bg-[var(--people-surface)]/90 px-4 backdrop-blur-xl sm:px-6 lg:px-8">
-        <UButton
-          class="lg:hidden"
-          icon="i-lucide-menu"
-          color="neutral"
-          variant="ghost"
-          aria-label="Open navigation"
-          @click="mobileOpen = true"
-        />
         <h1 class="min-w-0 flex-1 truncate text-base font-semibold">
           {{ pageTitle }}
         </h1>
@@ -260,30 +279,100 @@ watch(() => route.fullPath, () => {
     >
       <div class="mx-auto flex max-w-lg items-center justify-around gap-1">
         <UButton
-          v-for="item in mobileItems"
-          :key="item.to"
-          :to="workspace.link(item.to)"
+          v-for="item in mobileGroups"
+          :key="item.label"
           :icon="item.icon"
-          :color="route.path === item.to || (item.to !== '/' && route.path.startsWith(`${item.to}/`)) ? 'primary' : 'neutral'"
-          :variant="route.path === item.to || (item.to !== '/' && route.path.startsWith(`${item.to}/`)) ? 'soft' : 'ghost'"
+          :color="item.items.some(link => route.path === link.to) ? 'primary' : 'neutral'"
+          variant="ghost"
           size="sm"
           class="min-w-0 flex-1 flex-col gap-0.5 px-1 py-2 text-[10px]"
           :aria-label="item.label"
+          aria-haspopup="dialog"
+          :aria-expanded="mobileOpen && mobileGroup === item.label"
+          @click="openMobileGroup(item.label)"
         >
           {{ item.label }}
         </UButton>
         <UButton
-          to="/profile"
-          icon="i-lucide-user-round"
+          icon="i-lucide-grid-2x2"
           color="neutral"
-          :variant="route.path === '/profile' ? 'soft' : 'ghost'"
+          variant="ghost"
           size="sm"
           class="min-w-0 flex-1 flex-col gap-0.5 px-1 py-2 text-[10px]"
-          aria-label="Profile"
+          aria-label="More navigation"
+          aria-haspopup="dialog"
+          :aria-expanded="mobileOpen && mobileGroup === 'More'"
+          @click="openMobileGroup('More')"
         >
-          Profile
+          More
         </UButton>
       </div>
     </nav>
+    <UDrawer
+      v-model:open="mobileOpen"
+      :title="mobileGroup"
+      :description="workspaceDefinition.label"
+      direction="bottom"
+      close
+      :ui="{ content: 'h-[55dvh]', container: 'h-full min-h-0', body: 'overflow-y-auto pb-[env(safe-area-inset-bottom)]' }"
+    >
+      <template #body>
+        <div
+          v-if="mobileGroup === 'More' && availableWorkspaces.length > 1"
+          class="mb-5"
+        >
+          <label
+            for="mobile-workspace"
+            class="mb-2 block text-sm font-semibold"
+          >Workspace</label>
+          <select
+            id="mobile-workspace"
+            :value="currentWorkspace"
+            class="min-h-11 w-full rounded-xl border border-[var(--people-border)] bg-[var(--people-surface)] px-3 text-sm"
+            @change="changeWorkspace"
+          >
+            <option
+              v-for="item in availableWorkspaces"
+              :key="item"
+              :value="item"
+            >
+              {{ WORKSPACES.find(definition => definition.key === item)?.label }}
+            </option>
+          </select>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <NuxtLink
+            v-for="item in mobileSheetItems"
+            :key="item.to"
+            :to="workspace.link(item.to)"
+            class="flex min-h-24 flex-col items-start justify-center gap-3 rounded-xl border border-[var(--people-border)] bg-[var(--people-surface)] p-4 text-sm font-semibold"
+            :aria-current="route.path === item.to ? 'page' : undefined"
+            @click="mobileOpen = false"
+          >
+            <UIcon
+              :name="item.icon"
+              class="size-6 text-primary"
+            />
+            {{ item.label }}
+          </NuxtLink>
+        </div>
+        <p
+          v-if="!mobileSheetItems.length"
+          class="py-6 text-sm text-muted"
+        >
+          No pages are available in this section.
+        </p>
+        <UButton
+          v-if="mobileGroup === 'More'"
+          class="mt-5 min-h-11"
+          icon="i-lucide-log-out"
+          color="neutral"
+          variant="soft"
+          @click="auth.logout"
+        >
+          Sign out
+        </UButton>
+      </template>
+    </UDrawer>
   </div>
 </template>
