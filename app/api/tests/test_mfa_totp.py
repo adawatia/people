@@ -80,6 +80,32 @@ def _active_seed(user_id: int) -> str:
     return decrypt_secret(stored, get_settings().mfa_secret_key())
 
 
+def _expire_pending_enrolment(user_id: int) -> None:
+    """Move a pending replacement into the past without waiting in a test."""
+
+    async def _expire() -> None:
+        async with async_session_maker() as session:
+            user = await session.scalar(select(User).where(User.id == user_id))
+            assert user is not None
+            user.mfa_pending_expires_at = now_ist() - timedelta(seconds=1)
+            await session.commit()
+
+    run_async(_expire())
+
+
+def _store_legacy_plaintext_seed(user_id: int, secret: str) -> None:
+    """Simulate a pre-encryption row so verification can migrate it in place."""
+
+    async def _store() -> None:
+        async with async_session_maker() as session:
+            user = await session.scalar(select(User).where(User.id == user_id))
+            assert user is not None
+            user.mfa_secret = secret
+            await session.commit()
+
+    run_async(_store())
+
+
 def _begin_enrolment(instance, identity: str, *, super_admin: bool = False) -> dict:
     """Obtain a pending secret without confirming it.
 
@@ -264,6 +290,46 @@ def test_confirming_a_replacement_promotes_it_and_retires_the_old_secret(unique_
         # The replaced authenticator no longer authenticates.
         assert _verify(instance, identity, _later(old_secret)).status_code == 401
         assert _row(user_id)[0] == stored
+
+
+def test_an_expired_replacement_is_rejected_and_hidden_from_status(unique_suffix):
+    user_id = _seed(unique_suffix)
+    identity = f"emp.{unique_suffix}"
+    with client() as instance:
+        session = _enrol(instance, identity)
+        headers = bearer(session["access_token"])
+        issued = instance.post(f"{API}/auth/mfa/reset", json={"current_password": PASSWORD}, headers=headers)
+        assert issued.status_code == 200, issued.text
+        pending_secret = issued.json()["secret"]
+
+        _expire_pending_enrolment(user_id)
+
+        expired = instance.post(
+            f"{API}/auth/mfa/confirm",
+            json={"current_password": PASSWORD, "code": _later(pending_secret)},
+            headers=headers,
+        )
+        assert expired.status_code == 400
+        assert "expired" in expired.json()["detail"].lower()
+        assert instance.get(f"{API}/auth/mfa/status", headers=headers).json()["replacement_pending"] is False
+        assert _active_seed(user_id) == session["secret"]
+
+
+def test_legacy_plaintext_seed_is_reencrypted_on_successful_verification(unique_suffix):
+    user_id = _seed(unique_suffix)
+    identity = f"emp.{unique_suffix}"
+    with client() as instance:
+        enrolled = _enrol(instance, identity)
+        secret = enrolled["secret"]
+        _store_legacy_plaintext_seed(user_id, secret)
+        assert _row(user_id)[0] == secret
+
+        verified = _verify(instance, identity, _later(secret))
+        assert verified.status_code == 200, verified.text
+        stored = _row(user_id)[0]
+        assert stored and is_encrypted(stored)
+        assert secret not in stored
+        assert _active_seed(user_id) == secret
 
 
 def test_super_admin_is_not_forced_to_re_enrol_after_an_abandoned_reset(unique_suffix, monkeypatch):

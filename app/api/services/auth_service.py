@@ -30,7 +30,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.audit import add_audit_event
-from core.secret_box import SecretBoxError, decrypt_secret, encrypt_secret
+from core.secret_box import SecretBoxError, decrypt_secret, encrypt_secret, is_encrypted
 from core.session_policy import SessionPolicy, is_privileged, policy_for
 from core.settings import Settings, get_settings
 from core.tokens import (
@@ -646,12 +646,19 @@ class AuthService:
     def _secret_key(self) -> str:
         return self.settings.mfa_secret_key()
 
-    def _active_secret(self, user: User) -> str | None:
+    async def _active_secret(self, user: User) -> str | None:
         """The seed currently protecting the account (decrypted), if any."""
         if not user.mfa_secret:
             return None
         try:
-            return decrypt_secret(user.mfa_secret, self._secret_key())
+            secret = decrypt_secret(user.mfa_secret, self._secret_key())
+            if not is_encrypted(user.mfa_secret):
+                # Legacy deployments stored the seed in plaintext. Upgrade it
+                # opportunistically during the first successful read, without
+                # requiring a risky bulk rewrite or exposing the seed in logs.
+                user.mfa_secret = encrypt_secret(secret, self._secret_key())
+                await self.session.flush()
+            return secret
         except SecretBoxError:
             # Wrong key or tampered value. Fail closed rather than treating the
             # ciphertext as the seed: the account falls back to recovery codes
@@ -677,7 +684,11 @@ class AuthService:
         down and may need tomorrow.
         """
         secret = generate_secret()
+        if user.mfa_pending_secret and user.mfa_pending_expires_at and user.mfa_pending_expires_at <= now_ist():
+            user.mfa_pending_secret = None
+            user.mfa_pending_expires_at = None
         user.mfa_pending_secret = encrypt_secret(secret, self._secret_key())
+        user.mfa_pending_expires_at = now_ist() + timedelta(seconds=self.settings.mfa_pending_ttl_seconds)
         first_factor = not user.mfa_secret
         recovery_codes = generate_recovery_codes() if first_factor else []
         if first_factor:
@@ -728,6 +739,11 @@ class AuthService:
         user = locked_user
         pending = None
         if user.mfa_pending_secret:
+            if user.mfa_pending_expires_at and user.mfa_pending_expires_at <= now_ist():
+                user.mfa_pending_secret = None
+                user.mfa_pending_expires_at = None
+                await self.session.commit()
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="MFA enrolment expired; start again")
             try:
                 pending = decrypt_secret(user.mfa_pending_secret, self._secret_key())
             except SecretBoxError:
@@ -757,6 +773,7 @@ class AuthService:
 
         user.mfa_secret = user.mfa_pending_secret
         user.mfa_pending_secret = None
+        user.mfa_pending_expires_at = None
         user.mfa_enabled = True
         user.mfa_enrolled_at = now_ist()
         user.last_mfa_verified_at = now_ist()
@@ -797,7 +814,7 @@ class AuthService:
             return MfaVerification(ok=False)
         user = locked_user
         submitted = (code or "").strip()
-        secret = self._active_secret(user)
+        secret = await self._active_secret(user)
         matched_step = match_totp_step(submitted, secret, now_ist()) if secret else None
         replayed = matched_step is not None and is_totp_replay(matched_step, user.mfa_last_used_step)
 
@@ -898,6 +915,7 @@ class AuthService:
         user.mfa_enabled = False
         user.mfa_secret = None
         user.mfa_pending_secret = None
+        user.mfa_pending_expires_at = None
         user.mfa_enrolled_at = None
         user.mfa_last_used_step = None
         user.mfa_recovery_code_hashes = None

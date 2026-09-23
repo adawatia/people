@@ -61,6 +61,7 @@ class User(SQLAlchemyBaseUserTable[int], Base):
     # active seed so a half-finished reset cannot destroy (or, worse, disable) a
     # working authenticator: the swap happens only when the new secret is proven.
     mfa_pending_secret: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    mfa_pending_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     mfa_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="false")
     mfa_enrolled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # The TOTP time step of the last accepted code, making each code single-use

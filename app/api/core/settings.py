@@ -101,6 +101,7 @@ class Settings(BaseSettings):
     mfa_issuer: str = Field(default="People HRMS", alias="MFA_ISSUER")
     mfa_challenge_ttl_seconds: int = Field(default=300, ge=60, le=900, alias="MFA_CHALLENGE_TTL_SECONDS")
     password_recovery_ttl_seconds: int = Field(default=600, ge=60, le=1800, alias="PASSWORD_RECOVERY_TTL_SECONDS")
+    mfa_pending_ttl_seconds: int = Field(default=900, ge=60, le=86400, alias="MFA_PENDING_TTL_SECONDS")
     # AES-256 key protecting TOTP seeds at rest (base64).  This key must live
     # outside the database - a dump that also contains the key protects nothing -
     # and it is separate from the JWT key on purpose: rotating a signing key, or

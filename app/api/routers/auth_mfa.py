@@ -27,7 +27,7 @@ from core.auth import UserManager, fastapi_users, get_user_manager
 from core.auth_throttle import AuthThrottle, get_auth_throttle
 from core.database import get_async_session
 from core.request_context import client_ip, request_id
-from db.models import User
+from db.models import User, now_ist
 from routers.auth_sessions import guard_throttle, record_throttle_failure
 from schemas.auth import (
     LoginResponse,
@@ -207,7 +207,10 @@ def _status_payload(user: User) -> MfaStatusResponse:
         enrolled_at=user.mfa_enrolled_at,
         last_verified_at=user.last_mfa_verified_at,
         recovery_codes_remaining=len(hashes) if isinstance(hashes, list) else 0,
-        replacement_pending=bool(user.mfa_pending_secret),
+        replacement_pending=bool(
+            user.mfa_pending_secret
+            and (user.mfa_pending_expires_at is None or user.mfa_pending_expires_at > now_ist())
+        ),
     )
 
 

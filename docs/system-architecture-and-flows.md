@@ -197,6 +197,7 @@ Notes that matter operationally:
 | `MFA_ENABLED` / `MFA_REQUIRED_FOR_SUPER_ADMIN` | `true` / `false` | global MFA kill switch / privileged-account enforcement; startup logs a warning while MFA is off |
 | `MFA_ISSUER` / `MFA_CHALLENGE_TTL_SECONDS` | `People HRMS` / `300` | authenticator label and challenge-token lifetime |
 | `MFA_ENCRYPTION_KEY` | development key | AES-256 key (base64 or hex) encrypting TOTP seeds at rest. Empty means "unset" and resolves to the development key. **Production refuses the development default at startup** — a seed dump protected by a key sitting in the repository protects nothing. Rotating it invalidates enrolled factors (they must re-enrol), so treat it like a database credential |
+| `MFA_PENDING_TTL_SECONDS` | `900` | lifetime of an unconfirmed replacement authenticator; expired pending secrets are cleared when accessed |
 | `PASSWORD_RECOVERY_TTL_SECONDS` | `600` | lifetime of the authenticator-based password recovery and one-time reset capability |
 | `PASSWORD_MIN_LENGTH` / `PASSWORD_MAX_LENGTH` | `12` / `256` | floors/ceilings are validated, so they cannot be lowered accidentally |
 | `PASSWORD_BREACH_CHECK` / `_URL` | `local` / `""` | `off` \| `local` \| `remote` (k-anonymity, fail-open) |
@@ -214,7 +215,7 @@ Notes that matter operationally:
 **Identity & access**
 | Table | Key points |
 |---|---|
-| `users` | `user_id` PK, unique `username`, unique nullable `mobile_number` (E.164), `must_change_password`, `created_by`, invitation metadata (hash, sent/expires/used), fastapi-users fields (`is_active`, `is_verified`, `is_superuser`), MFA columns (`mfa_enabled`, `mfa_secret` — AES-GCM ciphertext, `mfa_pending_secret` — a replacement awaiting proof, `mfa_last_used_step` — the last spent TOTP step, `mfa_enrolled_at`, `last_mfa_verified_at`, `mfa_recovery_code_hashes` — hashes only) |
+| `users` | `user_id` PK, unique `username`, unique nullable `mobile_number` (E.164), `must_change_password`, `created_by`, invitation metadata (hash, sent/expires/used), fastapi-users fields (`is_active`, `is_verified`, `is_superuser`), MFA columns (`mfa_enabled`, `mfa_secret` — AES-GCM ciphertext, `mfa_pending_secret` + expiry — a replacement awaiting proof, `mfa_last_used_step` — the last spent TOTP step, `mfa_enrolled_at`, `last_mfa_verified_at`, `mfa_recovery_code_hashes` — hashes only) |
 | `auth_sessions` | Only the **SHA-256 hash** of the refresh token; `expires_at` (30 d outer bound), `absolute_expires_at` (hard end of the chain), `last_used_at` (idle timeout), `revoked_at` + `revoked_reason` (`rotated`, `logout`, `logout_all`, `password_changed`, `password_reset:*`, `reuse_detected`, `idle_timeout`, `account_inactive`), `replaced_by_id` (rotation chain), `ip_address`, `user_agent` (device list) |
 | `audit_logs` | Append-only: actor, action, entity, `filters_json`, `request_id`, `ip_address` |
 
