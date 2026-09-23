@@ -36,7 +36,7 @@ const navByWorkspace: Record<string, NavItem[]> = {
     { label: 'Leave approvals', icon: 'i-lucide-calendar-days', to: '/leaves', iconTone: 'people-icon--lavender', permissions: ['leave.approve'] },
     { label: 'Work arrangements', icon: 'i-lucide-briefcase-business', to: '/work-arrangements', iconTone: 'people-icon--peach', permissions: ['work_arrangement.approve'] },
     { label: 'Overtime', icon: 'i-lucide-timer', to: '/overtime', iconTone: 'people-icon--yellow', permissions: ['overtime.view_department'] },
-    { label: 'Approvals', icon: 'i-lucide-clipboard-check', to: '/approvals', iconTone: 'people-icon--rose', permissions: ['leave.approve', 'work_arrangement.approve'] },
+    { label: 'Approvals', icon: 'i-lucide-clipboard-check', to: '/approvals', iconTone: 'people-icon--rose', permissions: ['leave.approve', 'work_arrangement.approve', 'overtime.approve'] },
     { label: 'Reports', icon: 'i-lucide-chart-no-axes-combined', to: '/reports', iconTone: 'people-icon--yellow', permissions: ['reports.attendance', 'reports.leave'] }
   ],
   HR: [
@@ -46,7 +46,7 @@ const navByWorkspace: Record<string, NavItem[]> = {
     { label: 'Leave management', icon: 'i-lucide-calendar-days', to: '/leaves', iconTone: 'people-icon--lavender', permissions: ['leave.manage', 'leave.approve'] },
     { label: 'Work arrangements', icon: 'i-lucide-briefcase-business', to: '/work-arrangements', iconTone: 'people-icon--peach', permissions: ['work_arrangement.manage', 'work_arrangement.approve'] },
     { label: 'Overtime', icon: 'i-lucide-timer', to: '/overtime', iconTone: 'people-icon--yellow', permissions: ['overtime.view_department', 'overtime.approve'] },
-    { label: 'Approvals', icon: 'i-lucide-clipboard-check', to: '/approvals', iconTone: 'people-icon--rose', permissions: ['leave.approve', 'work_arrangement.approve'] },
+    { label: 'Approvals', icon: 'i-lucide-clipboard-check', to: '/approvals', iconTone: 'people-icon--rose', permissions: ['leave.approve', 'work_arrangement.approve', 'overtime.approve'] },
     { label: 'Shifts', icon: 'i-lucide-clock-3', to: '/shifts', iconTone: 'people-icon--blue', permissions: ['shift.assign', 'shift.update'] },
     { label: 'Holidays', icon: 'i-lucide-calendar-heart', to: '/holidays', iconTone: 'people-icon--lavender' },
     { label: 'Organization', icon: 'i-lucide-building-2', to: '/organization', iconTone: 'people-icon--mint', permissions: ['designation.view', 'employee.view'] },

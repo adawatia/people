@@ -36,7 +36,7 @@ const WORKSPACE_ROUTES: Record<Workspace, WorkspaceRouteRule[]> = {
     { path: '/' }, { path: '/employees', permissions: ['employee.view'] },
     { path: '/attendance', permissions: ['attendance.view_department'] }, { path: '/leaves', permissions: ['leave.approve'] },
     { path: '/work-arrangements', permissions: ['work_arrangement.approve'] }, { path: '/overtime', permissions: ['overtime.view_department'] },
-    { path: '/approvals', permissions: ['leave.approve', 'work_arrangement.approve'] },
+    { path: '/approvals', permissions: ['leave.approve', 'work_arrangement.approve', 'overtime.approve'] },
     { path: '/reports', permissions: ['reports.attendance', 'reports.leave', 'reports.view'] },
     { path: '/profile' }, { path: '/settings' }, { path: '/notifications' }
   ],
@@ -46,7 +46,7 @@ const WORKSPACE_ROUTES: Record<Workspace, WorkspaceRouteRule[]> = {
     { path: '/leaves', permissions: ['leave.manage', 'leave.approve'] },
     { path: '/work-arrangements', permissions: ['work_arrangement.manage', 'work_arrangement.approve'] },
     { path: '/overtime', permissions: ['overtime.view_department', 'overtime.approve'] },
-    { path: '/approvals', permissions: ['leave.approve', 'work_arrangement.approve'] },
+    { path: '/approvals', permissions: ['leave.approve', 'work_arrangement.approve', 'overtime.approve'] },
     { path: '/shifts', permissions: ['shift.assign', 'shift.update'] }, { path: '/holidays' },
     { path: '/organization', permissions: ['designation.view', 'employee.view'] },
     { path: '/reports', permissions: ['reports.attendance', 'reports.leave', 'reports.view'] },

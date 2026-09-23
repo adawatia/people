@@ -747,6 +747,8 @@ Action and dialog visibility follows the same rule: `pages/attendance/index.vue`
 
 Navigation is grouped by purpose inside each workspace (for example Workforce, Requests & approvals, Time & compensation, Organization, and Insights in HR). Group headings are high-contrast and each group is visually bounded, so the active workspace's operational areas are distinguishable at a glance. Team/HR dashboards show scoped KPIs and approval work only; personal shift and attendance cards appear only in My Workspace. Approval shortcuts are rendered only when the user has a matching approval capability. Super Admin gets **only** Dashboard + System administration — the business nav is replaced, because master data lives in ERP.
 
+The shared Approvals page is available when the user can approve leave, work arrangements, **or overtime**; overtime approval must not depend on also granting one of the other approval permissions.
+
 Mobile: the 4 first non-dashboard visible items become the bottom bar, plus Profile; the header menu button opens the full grouped sidebar drawer so later items remain reachable.
 
 The workspace middleware keeps hidden routes out of the current workspace and returns users to its dashboard. It is a user-experience guard only: every endpoint still re-checks permission and row scope (§2.6). Collection views in Attendance, Leave, Work arrangements and Overtime choose self-service employee filters in `MY`, and omit the employee filter in `TEAM`/`HR` so the backend applies the manager's department or HR's unit/organization scope. Self-service actions are hidden in management views.
