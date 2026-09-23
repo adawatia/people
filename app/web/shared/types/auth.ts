@@ -37,3 +37,45 @@ export interface LoginPayload {
   password: string
   accountType?: 'employee' | 'super_admin'
 }
+
+/**
+ * Second factor required: returned by `/api/session/login` instead of a user
+ * when the account must prove possession of its authenticator. The challenge
+ * token is short-lived and only usable for the MFA endpoints.
+ */
+export interface MfaChallenge {
+  mfa_required: true
+  mfa_token: string
+  /** First sign-in for this account: an authenticator must be enrolled now. */
+  enrollment_required: boolean
+  expires_in: number
+}
+
+/** Login outcome: a signed-in user, or a second-factor challenge to complete. */
+export type LoginResult = CurrentUser | MfaChallenge
+
+/** One-time view of a new authenticator secret; never returned again. */
+export interface MfaEnrollment {
+  secret: string
+  otpauth_uri: string
+  recovery_codes: string[]
+}
+
+export interface MfaStatus {
+  enabled: boolean
+  enrolled_at?: string | null
+  last_verified_at?: string | null
+  recovery_codes_remaining: number
+}
+
+/** A signed-in session (device) as reported by `GET /auth/sessions`. */
+export interface SessionSummary {
+  id: number
+  created_at: string
+  last_used_at?: string | null
+  expires_at: string
+  absolute_expires_at: string
+  ip_address?: string | null
+  user_agent?: string | null
+  is_current: boolean
+}

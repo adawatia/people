@@ -1,32 +1,29 @@
 """
-core/auth.py — Authentication, password policy and permission helpers.
+core/auth.py — Authentication wiring, password policy and permission helpers.
 
 Built on fastapi-users. Login accepts email, username, or Indian mobile
-number; passwords are enforced by a strict local policy; API access is
+number; passwords are enforced by ``core.password_policy``; API access is
 authorized through an effective permission set — the implicit
 ``BASE_EMPLOYEE_PERMISSIONS`` every employee holds plus the bundle of an
 optional elevated business role (see this module's bottom section) — or the
-ERP API key. Row scope resolution lives in ``core.employee_access``.
+ERP API key. Row scope resolution lives in ``core.employee_access`` and the
+session lifecycle (rotation, revocation, idle/absolute expiry) lives in
+``services/auth_service.py``.
 """
 
-import asyncio
 import secrets
-import re
-from typing import AsyncGenerator
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from fastapi import Depends, FastAPI, Request, HTTPException, Security, status
+from fastapi import Depends, FastAPI, HTTPException, Request, Security, status
 from fastapi.security import APIKeyHeader
 from fastapi_users import BaseUserManager, FastAPIUsers, IntegerIDMixin
-from fastapi_users.authentication import AuthenticationBackend, CookieTransport
+from fastapi_users.authentication import AuthenticationBackend
 from fastapi_users.db import SQLAlchemyUserDatabase
 from fastapi_users.exceptions import InvalidPasswordException
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from sqlalchemy import or_, select
-from zxcvbn import zxcvbn
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.business_roles import (
     ELEVATED_BUSINESS_ROLES,
@@ -36,8 +33,9 @@ from core.business_roles import (
 )
 from core.database import check_database_connection as _check_database_connection
 from core.database import get_async_session
-from core.settings import get_settings
 from core.mobile import normalize_indian_mobile
+from core.password_policy import PasswordCheckContext, PasswordPolicyError, validate_password_policy
+from core.settings import get_settings
 from db.models import Employee, User
 from schemas import UserCreate
 
@@ -60,50 +58,22 @@ class UserManager(IntegerIDMixin, BaseUserManager[User, int]):
     async def validate_password(self, password: str, user: User | UserCreate) -> None:
         """Enforce the password policy; called on register and password change.
 
-        Layers, in order:
-        1. Hard rules — minimum length and character-class requirements.
-        2. Personal-info check — reject passwords containing the user's own
-           email, username, or name fragments.
-        3. Strength scoring — zxcvbn (real-world crack estimation) must rate
-           the password at least 3/4, considering the personal info above.
+        The rules themselves live in ``core.password_policy`` so they can be
+        unit-tested without a user row and reviewed in one place: length rules,
+        composition, personal-information rejection, zxcvbn strength scoring and
+        a breached/common-password check.  This method only adapts the outcome to
+        fastapi-users' exception.
         """
-        if not password:
-            raise InvalidPasswordException(reason="Password is required")
-
-        if len(password) < 12:
-            raise InvalidPasswordException(reason="Password must be at least 12 characters long")
-
-        if not re.search(r"[A-Z]", password):
-            raise InvalidPasswordException(reason="Password must contain at least one uppercase letter")
-
-        if not re.search(r"[a-z]", password):
-            raise InvalidPasswordException(reason="Password must contain at least one lowercase letter")
-
-        if not re.search(r"\d", password):
-            raise InvalidPasswordException(reason="Password must contain at least one number")
-
-        if not re.search(r"[^A-Za-z0-9]", password):
-            raise InvalidPasswordException(reason="Password must contain at least one special character")
-
-        forbidden_parts = []
-        if getattr(user, "email", None):
-            forbidden_parts.append(str(user.email).split("@")[0].lower())
-        if getattr(user, "username", None):
-            forbidden_parts.append(str(user.username).lower())
-        if getattr(user, "first_name", None):
-            forbidden_parts.append(str(user.first_name).lower())
-        if getattr(user, "last_name", None):
-            forbidden_parts.append(str(user.last_name).lower())
-
-        password_lower = password.lower()
-        for part in forbidden_parts:
-            if part and len(part) >= 3 and part in password_lower:
-                raise InvalidPasswordException(reason="Password must not contain user email, name, or username")
-
-        results = zxcvbn(password, user_inputs=forbidden_parts)
-        if results.get("score", 0) < 3:
-            reason = results.get("feedback", {}).get("warning") or "Password is too weak"
-            raise InvalidPasswordException(reason=reason)
+        context = PasswordCheckContext(
+            email=getattr(user, "email", None),
+            username=getattr(user, "username", None),
+            first_name=getattr(user, "first_name", None),
+            last_name=getattr(user, "last_name", None),
+        )
+        try:
+            await validate_password_policy(password, context=context)
+        except PasswordPolicyError as exc:
+            raise InvalidPasswordException(reason=exc.reason) from exc
 
         await super().validate_password(password, user)
 
@@ -138,7 +108,8 @@ class UserManager(IntegerIDMixin, BaseUserManager[User, int]):
         if user is None:
             # Try username or mobile_number lookup
             from sqlalchemy import select as sa_select
-            from core.database import get_async_session as _get_session  # noqa: PLC0415
+
+            from core.database import get_async_session as _get_session
 
             async for session in _get_session():
                 normalized_mobile = None
@@ -222,7 +193,7 @@ async def get_user_manager(
     yield UserManager(user_db)
 
 
-from fastapi_users.authentication import AuthenticationBackend, BearerTransport
+from fastapi_users.authentication import BearerTransport
 
 # Swagger's OAuth2 Authorize dialog needs one concrete password-flow URL.
 # Employee login is the regular application flow; Super Admin uses its
@@ -230,10 +201,18 @@ from fastapi_users.authentication import AuthenticationBackend, BearerTransport
 bearer_transport = BearerTransport(tokenUrl="/api/v1/auth/employee/login")
 
 def get_jwt_strategy() -> object:
-    """Build the JWT strategy — access tokens live 8 hours per workday."""
+    """Build the JWT strategy used to *validate* bearer tokens.
+
+    Historically this minted an 8-hour login token that clients exchanged for a
+    session, which left an independently-valid credential alive for a workday.
+    Login now issues the short-lived session access token directly (see
+    ``services/auth_service.py``), so this strategy only needs to describe the
+    same token shape and a short lifetime for any remaining minting callers
+    (Swagger's OAuth2 password flow, tests).
+    """
     from fastapi_users.authentication.strategy.jwt import JWTStrategy
 
-    return JWTStrategy(secret=settings.jwt_secret, lifetime_seconds=28800)  # 8 hours
+    return JWTStrategy(secret=settings.jwt_secret, lifetime_seconds=settings.login_exchange_token_ttl_seconds)
 
 
 auth_backend = AuthenticationBackend(

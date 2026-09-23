@@ -15,7 +15,12 @@ export default defineNuxtConfig({
   css: ['~/assets/css/main.css'],
 
   runtimeConfig: {
-    hrmsApiBase: import.meta.env.NUXT_HRMS_API_BASE || 'http://127.0.0.1:8000'
+    hrmsApiBase: import.meta.env.NUXT_HRMS_API_BASE || 'http://127.0.0.1:8000',
+    // Extra origins allowed to send state-changing requests to the BFF (the
+    // request's own host is always accepted). Needed only when the public
+    // origin differs from what the BFF sees, e.g. behind a TLS-terminating
+    // proxy or an additional hostname.
+    hrmsAllowedOrigins: import.meta.env.NUXT_HRMS_ALLOWED_ORIGINS?.split(',').map((entry: string) => entry.trim()).filter(Boolean) || []
   },
 
   compatibilityDate: '2026-06-30',

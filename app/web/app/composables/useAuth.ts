@@ -5,7 +5,7 @@
  * SSR-safe). The user is fetched once per request via the session endpoint
  * (`/api/session/me`) and cached until `force` refresh or logout.
  */
-import type { AccessScope, BusinessRole, CurrentUser, LoginPayload } from '#shared/types/auth'
+import type { AccessScope, BusinessRole, CurrentUser, LoginPayload, LoginResult, MfaEnrollment } from '#shared/types/auth'
 
 export function useAuth() {
   const requestFetch = useRequestFetch()
@@ -49,14 +49,47 @@ export function useAuth() {
     return user.value
   }
 
-  async function login(payload: LoginPayload) {
+  /**
+   * Sign in. Returns the signed-in user, or a second-factor challenge that the
+   * caller must complete with `completeMfa` before the session exists.
+   */
+  async function login(payload: LoginPayload): Promise<LoginResult> {
     loading.value = true
     try {
-      user.value = await requestFetch<CurrentUser>('/api/session/login', { method: 'POST', body: payload })
+      const result = await requestFetch<LoginResult>('/api/session/login', { method: 'POST', body: payload })
+      if ('mfa_required' in result) return result
+      user.value = result
       initialized.value = true
+      return result
     } finally {
       loading.value = false
     }
+  }
+
+  /** Finish a second-factor challenge (or confirm first-time enrolment). */
+  async function completeMfa(credential: { mfa_token: string, code: string, enrollment?: boolean }) {
+    loading.value = true
+    try {
+      user.value = await requestFetch<CurrentUser>('/api/session/mfa', { method: 'POST', body: credential })
+      initialized.value = true
+      return user.value
+    } finally {
+      loading.value = false
+    }
+  }
+
+  /** Reveal a new authenticator secret for a login challenge (shown once). */
+  async function startMfaEnrollment(mfaToken: string) {
+    return await requestFetch<MfaEnrollment>('/api/session/mfa/enroll', { method: 'POST', body: { mfa_token: mfaToken } })
+  }
+
+  /** True while the account is still on a temporary password set by HR/ERP. */
+  const mustChangePassword = computed(() => Boolean(user.value?.must_change_password))
+
+  /** Forget client-side state without calling the API (e.g. after a password change). */
+  function clear() {
+    user.value = null
+    initialized.value = true
   }
 
   async function logout() {
@@ -66,5 +99,21 @@ export function useAuth() {
     await navigateTo('/login')
   }
 
-  return { user, initialized, loading, displayName, initials, hasPermission, businessRole, scopeType, fetchUser, login, logout }
+  return {
+    user,
+    initialized,
+    loading,
+    displayName,
+    initials,
+    hasPermission,
+    businessRole,
+    scopeType,
+    mustChangePassword,
+    fetchUser,
+    login,
+    completeMfa,
+    startMfaEnrollment,
+    logout,
+    clear
+  }
 }

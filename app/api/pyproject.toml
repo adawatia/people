@@ -21,6 +21,12 @@ dependencies = [
     "zxcvbn>=4.5.0",
 ]
 
+[project.optional-dependencies]
+# Shared authentication-throttle store for multi-worker deployments.
+# AUTH_THROTTLE_BACKEND=redis is rejected at startup unless this is installed:
+#   uv sync --extra redis
+redis = ["redis>=5.0"]
+
 [tool.fastapi]
 entrypoint = "main:app"
 

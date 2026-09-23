@@ -1,6 +1,7 @@
 import asyncio
 import os
 import time
+import uuid
 import warnings
 import sys
 from contextlib import asynccontextmanager
@@ -21,7 +22,7 @@ from core.auth import (
     limiter,
     setup_rate_limits,
 )
-from routers import auth_sessions
+from routers import auth_mfa, auth_sessions
 from core.database import check_database_connection
 from core.logging import setup_logging
 from core.settings import get_settings
@@ -31,6 +32,10 @@ APP_START_TIME = time.monotonic()
 settings = get_settings()
 settings.validate_runtime_secrets()
 logger = setup_logging(settings)
+# Non-fatal hardening reminders (per-worker throttling, MFA disabled, ...) so an
+# operator learns about a weakened posture from the logs rather than an incident.
+for _warning in settings.security_warnings():
+    logger.warning("security configuration", extra={"event": "security_config_warning", "detail": _warning})
 
 
 @asynccontextmanager
@@ -76,7 +81,7 @@ app = FastAPI(
         {"name": "auth-employee", "description": "Regular employee login using Indian mobile number and password."},
         {"name": "auth-super-admin", "description": "Technical Super Admin login using username and password only."},
         {"name": "auth-account", "description": "Authenticated account password and username management."},
-        {"name": "auth-session", "description": "Short-lived access tokens and rotating refresh sessions."},
+        {"name": "auth-session", "description": "Short-lived access tokens, rotating refresh sessions and signed-in devices."},
         {"name": "auth-hr", "description": "HR Admin temporary password operations for employee accounts."},
         {"name": "account", "description": "The authenticated account profile and permissions. Employee provisioning is ERP-only."},
         {"name": "employees", "description": "Read and manage employee operational records. Creation and identity provisioning are ERP-only."},
@@ -117,43 +122,34 @@ setup_rate_limits(app)
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     start = time.perf_counter()
-    logger.info(
-        "request_started",
-        extra={
-            "event": "request_started",
-            "method": request.method,
-            "path": request.url.path,
-            "client_ip": request.client.host if request.client else None,
-            "user_agent": request.headers.get("user-agent"),
-        },
-    )
+    # One correlation id per request, reused by the security audit so a support
+    # ticket can be tied back to the exact login/refresh/revocation it describes.
+    # An id supplied by the caller (a gateway, or the BFF) is preserved.
+    correlation_id = request.headers.get("x-request-id", "").strip()[:100] or uuid.uuid4().hex
+    request.state.request_id = correlation_id
+    common = {
+        "method": request.method,
+        "path": request.url.path,
+        "client_ip": request.client.host if request.client else None,
+        "user_agent": request.headers.get("user-agent"),
+        "request_id": correlation_id,
+    }
+    logger.info("request_started", extra={"event": "request_started", **common})
 
     try:
         response = await call_next(request)
     except Exception:
-        logger.exception(
-            "request_failed",
-            extra={
-                "event": "request_failed",
-                "method": request.method,
-                "path": request.url.path,
-                "client_ip": request.client.host if request.client else None,
-                "user_agent": request.headers.get("user-agent"),
-            },
-        )
+        logger.exception("request_failed", extra={"event": "request_failed", **common})
         raise
 
-    process_time_ms = round((time.perf_counter() - start) * 1000, 2)
+    response.headers["X-Request-ID"] = correlation_id
     logger.info(
         "request_completed",
         extra={
             "event": "request_completed",
-            "method": request.method,
-            "path": request.url.path,
+            **common,
             "status_code": response.status_code,
-            "duration_ms": process_time_ms,
-            "client_ip": request.client.host if request.client else None,
-            "user_agent": request.headers.get("user-agent"),
+            "duration_ms": round((time.perf_counter() - start) * 1000, 2),
         },
     )
     return response
@@ -188,6 +184,7 @@ api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(users.router)
 api_router.include_router(notifications.router)
 api_router.include_router(auth_login.router)
+api_router.include_router(auth_mfa.router)
 api_router.include_router(auth_sessions.router)
 api_router.include_router(dashboard.router)
 api_router.include_router(org.router)

@@ -1,35 +1,55 @@
-import { apiUrl, REFRESH_COOKIE, SESSION_COOKIE, upstreamError } from '../../utils/hrms'
+import {
+  apiUrl,
+  clearSessionCookies,
+  REFRESH_COOKIE,
+  refreshSession,
+  SESSION_COOKIE,
+  setAccessCookie,
+  setRefreshCookie,
+  upstreamError,
+  upstreamStatus
+} from '../../utils/hrms'
 
+/**
+ * Authenticated proxy to the HRMS API. The browser never talks to FastAPI
+ * directly and never sees a bearer token: this handler attaches the access token
+ * from its HttpOnly cookie.
+ *
+ * When the access token has expired the request is retried once with a rotated
+ * session. Rotation is single-flight (`refreshSession`), so a page that issues
+ * several calls at once cannot trip the API's replay protection.
+ */
 export default defineEventHandler(async (event) => {
   const path = getRouterParam(event, 'path') || ''
   const method = getMethod(event)
   const query = getQuery(event)
   const body = ['GET', 'HEAD'].includes(method) ? undefined : await readBody(event)
 
-  const request = (token: string) => $fetch(apiUrl(event, path), {
+  const call = (token: string) => $fetch(apiUrl(event, path), {
     method: method as 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
     query,
     body,
     headers: { Authorization: `Bearer ${token}` }
   })
+
   try {
-    return await request(getCookie(event, SESSION_COOKIE) || '')
+    return await call(getCookie(event, SESSION_COOKIE) || '')
   } catch (error) {
-    const status = (error as { statusCode?: number, status?: number }).statusCode || (error as { status?: number }).status
-    if (status === 401 && getCookie(event, REFRESH_COOKIE) && path !== 'auth/session/refresh') {
+    const status = upstreamStatus(error)
+    const refresh = getCookie(event, REFRESH_COOKIE)
+    // The refresh route is itself the recovery path — never recurse into it.
+    if (status === 401 && refresh && path !== 'auth/session/refresh') {
       try {
-        const refreshed = await $fetch<{ access_token: string, refresh_token: string }>(apiUrl(event, 'auth/session/refresh'), {
-          method: 'POST', body: { refresh_token: getCookie(event, REFRESH_COOKIE) }
-        })
-        setCookie(event, SESSION_COOKIE, refreshed.access_token, { httpOnly: true, secure: !import.meta.dev, sameSite: 'lax', path: '/', maxAge: 60 * 15 })
-        setCookie(event, REFRESH_COOKIE, refreshed.refresh_token, { httpOnly: true, secure: !import.meta.dev, sameSite: 'lax', path: '/', maxAge: 60 * 60 * 24 * 30 })
-        return await request(refreshed.access_token)
-      } catch { /* fall through and clear both cookies */ }
+        const refreshed = await refreshSession(event, refresh)
+        setAccessCookie(event, refreshed.access_token, refreshed.expires_in)
+        setRefreshCookie(event, refreshed.refresh_token, refreshed.absolute_expires_at)
+        return await call(refreshed.access_token)
+      } catch {
+        // Refresh failed (expired, revoked, or replay detected): the session is
+        // over, so fall through and clear both cookies.
+      }
     }
-    if (status === 401) {
-      deleteCookie(event, SESSION_COOKIE, { path: '/' })
-      deleteCookie(event, REFRESH_COOKIE, { path: '/' })
-    }
+    if (status === 401) clearSessionCookies(event)
     throw upstreamError(error)
   }
 })

@@ -55,6 +55,66 @@ class Settings(BaseSettings):
     erp_api_key: str = Field(default="", alias="ERP_API_KEY")
     bootstrap_seed_data: bool = Field(default=False, alias="BOOTSTRAP_SEED_DATA")
 
+    # ── Authentication: token and session policy ───────────────────────────────
+    # All TTLs are seconds unless the name says otherwise.  The defaults are the
+    # production-safe values; a deployment may shorten them but never needs to
+    # lengthen them to be secure.
+    access_token_ttl_seconds: int = Field(default=900, ge=60, le=3600, alias="ACCESS_TOKEN_TTL_SECONDS")
+    # Legacy bearer token minted by the password flow (Swagger / non-browser
+    # clients).  It is a *single-purpose* exchange credential now: long enough
+    # for an immediate POST /auth/session, far too short to be a usable session.
+    login_exchange_token_ttl_seconds: int = Field(default=300, ge=30, le=900, alias="LOGIN_EXCHANGE_TOKEN_TTL_SECONDS")
+    refresh_token_ttl_seconds: int = Field(default=30 * 24 * 3600, ge=3600, alias="REFRESH_TOKEN_TTL_SECONDS")
+
+    # Idle/absolute limits bound how long a stolen refresh token stays useful,
+    # independently of its own TTL.  Business sessions get a working day.
+    session_idle_timeout_seconds: int = Field(default=60 * 60, ge=300, alias="SESSION_IDLE_TIMEOUT_SECONDS")
+    session_absolute_timeout_seconds: int = Field(default=12 * 3600, ge=1800, alias="SESSION_ABSOLUTE_TIMEOUT_SECONDS")
+    # Privileged (Super Admin) sessions are deliberately much tighter.
+    privileged_access_token_ttl_seconds: int = Field(default=300, ge=60, le=900, alias="PRIVILEGED_ACCESS_TOKEN_TTL_SECONDS")
+    privileged_idle_timeout_seconds: int = Field(default=15 * 60, ge=120, alias="PRIVILEGED_IDLE_TIMEOUT_SECONDS")
+    privileged_absolute_timeout_seconds: int = Field(default=2 * 3600, ge=600, alias="PRIVILEGED_ABSOLUTE_TIMEOUT_SECONDS")
+
+    # ── Authentication: brute-force protection ────────────────────────────────
+    # failed attempts before a key starts collecting a progressive delay / block.
+    auth_throttle_max_failures: int = Field(default=5, ge=1, alias="AUTH_THROTTLE_MAX_FAILURES")
+    auth_throttle_window_seconds: int = Field(default=900, ge=60, alias="AUTH_THROTTLE_WINDOW_SECONDS")
+    auth_throttle_block_seconds: int = Field(default=60, ge=1, alias="AUTH_THROTTLE_BLOCK_SECONDS")
+    auth_throttle_max_block_seconds: int = Field(default=3600, ge=60, alias="AUTH_THROTTLE_MAX_BLOCK_SECONDS")
+    auth_refresh_max_failures: int = Field(default=20, ge=1, alias="AUTH_REFRESH_MAX_FAILURES")
+    # ``memory`` (single process only) or ``redis`` (required for >1 worker).
+    auth_throttle_backend: str = Field(default="memory", alias="AUTH_THROTTLE_BACKEND")
+    redis_url: str = Field(default="", alias="REDIS_URL")
+    # Only enable behind a proxy you control: any reachable client could forge
+    # X-Forwarded-For and escape per-IP throttling.
+    trust_proxy_headers: bool = Field(default=False, alias="TRUST_PROXY_HEADERS")
+
+    # ── Authentication: MFA ───────────────────────────────────────────────────
+    # Enforcement is opt-in per deployment so enabling it is a deliberate,
+    # communicated rollout (existing operators must enrol first).  A deployed
+    # Super Admin should have MFA_REQUIRED_FOR_SUPER_ADMIN=true; the startup
+    # warning calls that out until it is.
+    mfa_enabled: bool = Field(default=True, alias="MFA_ENABLED")
+    mfa_required_for_super_admin: bool = Field(default=False, alias="MFA_REQUIRED_FOR_SUPER_ADMIN")
+    mfa_issuer: str = Field(default="People HRMS", alias="MFA_ISSUER")
+    mfa_challenge_ttl_seconds: int = Field(default=300, ge=60, le=900, alias="MFA_CHALLENGE_TTL_SECONDS")
+
+    # ── Password policy ───────────────────────────────────────────────────────
+    password_min_length: int = Field(default=12, ge=12, alias="PASSWORD_MIN_LENGTH")
+    # Argon2 has no bcrypt-style truncation, but an unbounded password is a
+    # cheap way to burn server CPU, so keep a generous ceiling.
+    password_max_length: int = Field(default=256, ge=64, alias="PASSWORD_MAX_LENGTH")
+    # ``off`` (default), ``local`` (embedded common-password list), or
+    # ``remote`` (configured HTTP checker).  A breached-password check must never
+    # make sign-in depend on a third party being reachable, so ``remote`` fails
+    # open and logs.
+    password_breach_check: str = Field(default="local", alias="PASSWORD_BREACH_CHECK")
+    password_breach_check_url: str = Field(default="", alias="PASSWORD_BREACH_CHECK_URL")
+
+    @property
+    def is_development(self) -> bool:
+        return self.environment.lower() in {"development", "dev", "test", "local"}
+
     def validate_runtime_secrets(self) -> None:
         """Reject development defaults when the API is started outside development.
 
@@ -62,8 +122,13 @@ class Settings(BaseSettings):
         accepting them in a deployed HR system is not.  This guard is called at
         application startup rather than at import time so Alembic and local tools
         can still load configuration deliberately.
+
+        The development shortcut is keyed on an explicit allow-list of
+        environment names rather than "anything that is not production", so a
+        typo such as ``ENVIRONMENT=Production`` cannot silently disable every
+        hardening check below.
         """
-        if self.environment.lower() in {"development", "dev", "test"}:
+        if self.is_development:
             return
 
         insecure = {
@@ -71,10 +136,36 @@ class Settings(BaseSettings):
             "DATABASE_URL": self.database_url == "postgresql+psycopg://dev:SuperAdmin@localhost:5432/hrms",
             "SUPER_ADMIN_PASSWORD": self.super_admin_password == "SuperAdmin@123",
             "ERP_API_KEY": not self.erp_api_key,
+            "AUTH_THROTTLE_BACKEND": self.auth_throttle_backend != "redis",
+            "REDIS_URL": self.auth_throttle_backend == "redis" and not self.redis_url,
         }
         missing = [name for name, is_insecure in insecure.items() if is_insecure]
         if missing:
-            raise RuntimeError(f"Production configuration requires secure values for: {', '.join(missing)}")
+            raise RuntimeError(
+                "Production configuration requires secure values for: "
+                f"{', '.join(missing)}"
+            )
+
+    def security_warnings(self) -> list[str]:
+        """Non-fatal hardening reminders, logged once at startup."""
+        warnings: list[str] = []
+        if self.auth_throttle_backend != "redis":
+            warnings.append(
+                "AUTH_THROTTLE_BACKEND=memory keeps login throttling per worker; "
+                "configure Redis before running more than one API worker"
+            )
+        if not self.mfa_enabled:
+            warnings.append("MFA_ENABLED=false: privileged sign-in is password-only")
+        elif not self.mfa_required_for_super_admin:
+            warnings.append("MFA_REQUIRED_FOR_SUPER_ADMIN=false: Super Admin MFA is optional")
+        if self.password_breach_check == "remote" and not self.password_breach_check_url:
+            warnings.append("PASSWORD_BREACH_CHECK=remote without PASSWORD_BREACH_CHECK_URL falls back to the local list")
+        if not self.trust_proxy_headers:
+            warnings.append(
+                "TRUST_PROXY_HEADERS=false: every request behind a proxy/BFF shares one "
+                "client IP, so per-IP throttling treats the whole deployment as one source"
+            )
+        return warnings
 
     def resolved_database_url(self) -> str:
         configured_database_url = self.database_url.strip()

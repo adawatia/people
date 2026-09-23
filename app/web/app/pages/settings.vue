@@ -1,68 +1,470 @@
 <script setup lang="ts">
+import type { MfaEnrollment, MfaStatus, SessionSummary } from '#shared/types/auth'
+
 const auth = useAuth()
 const api = useHrmsApi()
 const toast = useToast()
+const route = useRoute()
 const isTechnicalAdmin = computed(() => Boolean(auth.user.value?.is_superuser))
 const pageTitle = computed(() => isTechnicalAdmin.value ? 'System administration' : 'Security settings')
 useSeoMeta({ title: () => pageTitle.value })
+
 const username = ref(auth.user.value?.username || '')
+const usernamePassword = ref('')
 const currentPassword = ref('')
 const newPassword = ref('')
 const savingUsername = ref(false)
 const savingPassword = ref(false)
+/** Set when HR/ERP issued a temporary password, or login redirected here. */
+const passwordChangeRequired = computed(() => auth.mustChangePassword.value || route.query['change-password'] === '1')
+
 const message = (error: unknown) => (error as { data?: { detail?: string, statusMessage?: string } }).data?.detail || (error as { data?: { statusMessage?: string } }).data?.statusMessage || 'Could not save the change.'
 
 async function saveUsername() {
+  if (!usernamePassword.value) {
+    toast.add({ title: 'Enter your current password', description: 'Changing the technical username is a credential change and requires re-verification.', color: 'error' })
+    return
+  }
   savingUsername.value = true
   try {
-    const result = await api.request<{ username: string }>('auth/super-admin/username', { method: 'PATCH', body: { username: username.value.trim() } })
+    const result = await api.request<{ username: string }>('auth/super-admin/username', {
+      method: 'PATCH',
+      body: { username: username.value.trim(), current_password: usernamePassword.value }
+    })
     if (auth.user.value) auth.user.value.username = result.username
+    usernamePassword.value = ''
     toast.add({ title: 'Username updated', color: 'success' })
-  } catch (error) { toast.add({ title: 'Username not updated', description: message(error), color: 'error' }) } finally { savingUsername.value = false }
+  } catch (error) {
+    toast.add({ title: 'Username not updated', description: message(error), color: 'error' })
+  } finally {
+    savingUsername.value = false
+  }
 }
+
+/**
+ * Changing a password ends every session server-side, including this one, so
+ * the only honest next step is a fresh sign-in. (A stolen token cannot survive
+ * the remediation.)
+ */
 async function savePassword() {
   savingPassword.value = true
   try {
     await api.request('auth/change-password', { method: 'POST', body: { current_password: currentPassword.value, new_password: newPassword.value } })
-    currentPassword.value = ''; newPassword.value = ''
-    toast.add({ title: 'Password updated', description: 'Use the new password next time you sign in.', color: 'success' })
-  } catch (error) { toast.add({ title: 'Password not updated', description: message(error), color: 'error' }) } finally { savingPassword.value = false }
+    currentPassword.value = ''
+    newPassword.value = ''
+    auth.clear()
+    await navigateTo('/login?notice=password-changed')
+  } catch (error) {
+    toast.add({ title: 'Password not updated', description: message(error), color: 'error' })
+  } finally { savingPassword.value = false }
 }
+
+// ── MFA ──────────────────────────────────────────────────────────────────────
+const mfaStatus = ref<MfaStatus | null>(null)
+const mfaPassword = ref('')
+const mfaCode = ref('')
+const pendingEnrollment = ref<MfaEnrollment | null>(null)
+const busyMfa = ref(false)
+
+async function loadMfaStatus() {
+  try {
+    mfaStatus.value = await api.request<MfaStatus>('auth/mfa/status')
+  } catch { /* status is advisory only */ }
+}
+
+/** Step 1 of enrolment: issue a secret (password re-verified server-side). */
+async function startEnrollment() {
+  busyMfa.value = true
+  try {
+    pendingEnrollment.value = await api.request<MfaEnrollment>('auth/mfa/reset', {
+      method: 'POST',
+      body: { current_password: mfaPassword.value }
+    })
+    mfaCode.value = ''
+  } catch (error) {
+    toast.add({ title: 'Could not start setup', description: message(error), color: 'error' })
+  } finally {
+    busyMfa.value = false
+  }
+}
+
+/** Step 2: prove possession of the secret — only then is MFA enabled. */
+async function confirmEnrollment() {
+  busyMfa.value = true
+  try {
+    mfaStatus.value = await api.request<MfaStatus>('auth/mfa/confirm', {
+      method: 'POST',
+      body: { current_password: mfaPassword.value, code: mfaCode.value.trim() }
+    })
+    pendingEnrollment.value = null
+    mfaPassword.value = ''
+    mfaCode.value = ''
+    toast.add({ title: 'Two-step verification enabled', description: 'Store your recovery codes: they are shown only while setting up.', color: 'success' })
+  } catch (error) {
+    toast.add({ title: 'Code not accepted', description: message(error), color: 'error' })
+  } finally {
+    busyMfa.value = false
+  }
+}
+
+async function disableMfa() {
+  busyMfa.value = true
+  try {
+    await api.request('auth/mfa/disable', { method: 'POST', body: { current_password: mfaPassword.value } })
+    mfaPassword.value = ''
+    await loadMfaStatus()
+    toast.add({ title: 'Authenticator removed', color: 'success' })
+  } catch (error) {
+    toast.add({ title: 'Could not remove authenticator', description: message(error), color: 'error' })
+  } finally {
+    busyMfa.value = false
+  }
+}
+
+// ── Signed-in devices ────────────────────────────────────────────────────────
+const sessions = ref<SessionSummary[]>([])
+
+async function loadSessions() {
+  try {
+    sessions.value = await api.request<SessionSummary[]>('auth/sessions')
+  } catch { /* the list is informational */ }
+}
+
+async function revokeSession(id: number) {
+  try {
+    await api.request(`auth/sessions/${id}`, { method: 'DELETE' })
+    await loadSessions()
+    toast.add({ title: 'Device signed out', color: 'success' })
+  } catch (error) { toast.add({ title: 'Could not sign that device out', description: message(error), color: 'error' }) }
+}
+
+async function revokeAllSessions() {
+  try {
+    await api.request('auth/sessions', { method: 'DELETE' })
+    auth.clear()
+    await navigateTo('/login')
+  } catch (error) { toast.add({ title: 'Could not sign out everywhere', description: message(error), color: 'error' }) }
+}
+
+const deviceLabel = (session: SessionSummary) => session.user_agent?.split(')')[0]?.replace(/^Mozilla\/5\.0 \(/, '') || 'Unknown device'
+const shortTime = (value: string | null | undefined) => value ? new Date(value).toLocaleString() : '—'
+
+onMounted(async () => {
+  await loadSessions()
+  await loadMfaStatus()
+})
 </script>
 
 <template>
   <div class="max-w-3xl space-y-6">
     <div>
-      <p class="text-sm font-medium text-primary">{{ isTechnicalAdmin ? 'Technical access' : 'Account security' }}</p>
-      <h2 class="mt-1 text-2xl font-semibold tracking-tight">{{ pageTitle }}</h2>
+      <p class="text-sm font-medium text-primary">
+        {{ isTechnicalAdmin ? 'Technical access' : 'Account security' }}
+      </p>
+      <h2 class="mt-1 text-2xl font-semibold tracking-tight">
+        {{ pageTitle }}
+      </h2>
       <p class="mt-2 text-sm text-muted">
         {{ isTechnicalAdmin ? 'Manage the technical login and the operational controls available to this installation.' : 'Keep your People account secure by updating your own password.' }}
       </p>
     </div>
-    <UAlert v-if="isTechnicalAdmin" color="info" variant="soft" icon="i-lucide-shield-check" title="Technical account" description="This account is separate from employee records. Use it for system setup, integrations, access configuration and operational support." />
-    <section v-if="isTechnicalAdmin" class="people-card space-y-5 p-5 sm:p-6">
-      <div><h3 class="font-semibold">Username</h3><p class="mt-1 text-sm text-muted">This is the only identifier used for technical sign-in.</p></div>
-      <UFormField label="Username" name="username" hint="3–50 characters; letters, numbers, dots, dashes or underscores">
-        <UInput v-model="username" class="w-full max-w-md" icon="i-lucide-user-round-cog" placeholder="Enter username" autocomplete="username" />
+    <UAlert
+      v-if="passwordChangeRequired"
+      color="warning"
+      variant="soft"
+      icon="i-lucide-key-round"
+      title="Set a new password to continue"
+      description="Your account is using a temporary password. Choose your own password below to finish activating it."
+    />
+    <UAlert
+      v-if="isTechnicalAdmin"
+      color="info"
+      variant="soft"
+      icon="i-lucide-shield-check"
+      title="Technical account"
+      description="This account is separate from employee records. Use it for system setup, integrations, access configuration and operational support."
+    />
+
+    <section
+      v-if="isTechnicalAdmin"
+      class="people-card space-y-5 p-5 sm:p-6"
+    >
+      <div>
+        <h3 class="font-semibold">
+          Username
+        </h3><p class="mt-1 text-sm text-muted">
+          This is the only identifier used for technical sign-in. Changing it requires your current password.
+        </p>
+      </div>
+      <UFormField
+        label="Username"
+        name="username"
+        hint="3–50 characters; letters, numbers, dots, dashes or underscores"
+      >
+        <UInput
+          v-model="username"
+          class="w-full max-w-md"
+          icon="i-lucide-user-round-cog"
+          placeholder="Enter username"
+          autocomplete="username"
+        />
       </UFormField>
-      <UButton :loading="savingUsername" icon="i-lucide-save" @click="saveUsername">Save username</UButton>
+      <UFormField
+        label="Current password"
+        name="username-password"
+      >
+        <UInput
+          v-model="usernamePassword"
+          class="w-full max-w-md"
+          type="password"
+          icon="i-lucide-lock-keyhole"
+          autocomplete="current-password"
+          placeholder="Confirm with your password"
+        />
+      </UFormField>
+      <UButton
+        :loading="savingUsername"
+        icon="i-lucide-save"
+        @click="saveUsername"
+      >
+        Save username
+      </UButton>
     </section>
+
     <section class="people-card space-y-5 p-5 sm:p-6">
-      <div><h3 class="font-semibold">Password</h3><p class="mt-1 text-sm text-muted">Choose a strong password for your own account. Your current password is required.</p></div>
+      <div>
+        <h3 class="font-semibold">
+          Password
+        </h3><p class="mt-1 text-sm text-muted">
+          Choose a strong password for your own account. Your current password is required.
+        </p>
+      </div>
       <div class="grid gap-5 sm:grid-cols-2">
         <div>
-          <label for="current-password" class="text-sm font-medium">Current password</label>
-          <UInput id="current-password" v-model="currentPassword" class="mt-2 w-full" type="password" icon="i-lucide-lock-keyhole" autocomplete="current-password" />
+          <label
+            for="current-password"
+            class="text-sm font-medium"
+          >Current password</label>
+          <UInput
+            id="current-password"
+            v-model="currentPassword"
+            class="mt-2 w-full"
+            type="password"
+            icon="i-lucide-lock-keyhole"
+            autocomplete="current-password"
+          />
         </div>
         <div>
-          <label for="new-password" class="text-sm font-medium">New password</label>
-          <UInput id="new-password" v-model="newPassword" class="mt-2 w-full" type="password" icon="i-lucide-key-round" autocomplete="new-password" aria-describedby="new-password-help" />
-          <p id="new-password-help" class="mt-2 text-xs leading-5 text-muted">
-            At least 12 characters with upper, lower, number and symbol.
+          <label
+            for="new-password"
+            class="text-sm font-medium"
+          >New password</label>
+          <UInput
+            id="new-password"
+            v-model="newPassword"
+            class="mt-2 w-full"
+            type="password"
+            icon="i-lucide-key-round"
+            autocomplete="new-password"
+            aria-describedby="new-password-help"
+          />
+          <p
+            id="new-password-help"
+            class="mt-2 text-xs leading-5 text-muted"
+          >
+            At least 12 characters. A passphrase is ideal. Avoid your name, email or username, and passwords known to have appeared in breaches.
           </p>
         </div>
       </div>
-      <UButton :loading="savingPassword" icon="i-lucide-key-round" @click="savePassword">Change password</UButton>
+      <UAlert
+        color="info"
+        variant="soft"
+        icon="i-lucide-info"
+        description="Changing your password signs out every device, including this one. You will sign in again with the new password."
+      />
+      <UButton
+        :loading="savingPassword"
+        icon="i-lucide-key-round"
+        @click="savePassword"
+      >
+        Change password
+      </UButton>
+    </section>
+
+    <section class="people-card space-y-5 p-5 sm:p-6">
+      <div>
+        <h3 class="font-semibold">
+          Two-step verification
+        </h3>
+        <p class="mt-1 text-sm text-muted">
+          An authenticator app code is required in addition to the password. Privileged accounts should always have this enabled.
+        </p>
+      </div>
+      <UAlert
+        :color="mfaStatus?.enabled ? 'success' : 'warning'"
+        variant="soft"
+        :icon="mfaStatus?.enabled ? 'i-lucide-shield-check' : 'i-lucide-triangle-alert'"
+        :title="mfaStatus?.enabled ? 'Enabled' : 'Not set up'"
+        :description="mfaStatus?.enabled
+          ? `Enrolled ${shortTime(mfaStatus.enrolled_at)} · ${mfaStatus.recovery_codes_remaining} recovery codes left`
+          : 'Anyone with the password alone can currently sign in to this account.'"
+      />
+
+      <template v-if="pendingEnrollment">
+        <div class="space-y-3 rounded-xl border border-[var(--people-border)] p-4">
+          <div>
+            <p class="text-xs font-medium uppercase tracking-wide text-muted">
+              Secret key
+            </p>
+            <p class="mt-1 break-all font-mono text-sm">
+              {{ pendingEnrollment.secret }}
+            </p>
+          </div>
+          <div>
+            <p class="text-xs font-medium uppercase tracking-wide text-muted">
+              Setup link
+            </p>
+            <p class="mt-1 break-all font-mono text-xs text-muted">
+              {{ pendingEnrollment.otpauth_uri }}
+            </p>
+          </div>
+          <div>
+            <p class="text-xs font-medium uppercase tracking-wide text-muted">
+              Recovery codes (shown once)
+            </p>
+            <div class="mt-2 grid grid-cols-2 gap-1 font-mono text-xs">
+              <span
+                v-for="recovery in pendingEnrollment.recovery_codes"
+                :key="recovery"
+              >{{ recovery }}</span>
+            </div>
+          </div>
+        </div>
+        <UFormField
+          label="Code from the app"
+          name="mfa-code"
+        >
+          <UInput
+            v-model="mfaCode"
+            class="w-full max-w-xs"
+            inputmode="numeric"
+            autocomplete="one-time-code"
+            placeholder="123456"
+          />
+        </UFormField>
+        <div class="flex gap-3">
+          <UButton
+            :loading="busyMfa"
+            icon="i-lucide-check"
+            @click="confirmEnrollment"
+          >
+            Confirm and enable
+          </UButton>
+          <UButton
+            variant="ghost"
+            @click="pendingEnrollment = null"
+          >
+            Cancel
+          </UButton>
+        </div>
+      </template>
+
+      <template v-else>
+        <UFormField
+          label="Current password"
+          name="mfa-password"
+        >
+          <UInput
+            v-model="mfaPassword"
+            class="w-full max-w-md"
+            type="password"
+            icon="i-lucide-lock-keyhole"
+            autocomplete="current-password"
+            placeholder="Confirm with your password"
+          />
+        </UFormField>
+        <div class="flex flex-wrap gap-3">
+          <UButton
+            :loading="busyMfa"
+            icon="i-lucide-shield-plus"
+            @click="startEnrollment"
+          >
+            {{ mfaStatus?.enabled ? 'Issue a new secret' : 'Set up authenticator' }}
+          </UButton>
+          <UButton
+            v-if="mfaStatus?.enabled"
+            color="error"
+            variant="soft"
+            :loading="busyMfa"
+            icon="i-lucide-shield-off"
+            @click="disableMfa"
+          >
+            Remove authenticator
+          </UButton>
+        </div>
+      </template>
+    </section>
+
+    <section class="people-card space-y-4 p-5 sm:p-6">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 class="font-semibold">
+            Signed-in devices
+          </h3>
+          <p class="mt-1 text-sm text-muted">
+            Sessions currently able to act as you. Revoke anything you do not recognise.
+          </p>
+        </div>
+        <UButton
+          v-if="sessions.length > 1"
+          color="error"
+          variant="soft"
+          size="sm"
+          icon="i-lucide-log-out"
+          @click="revokeAllSessions"
+        >
+          Sign out everywhere
+        </UButton>
+      </div>
+      <ul class="divide-y divide-[var(--people-border)]">
+        <li
+          v-for="device in sessions"
+          :key="device.id"
+          class="flex flex-wrap items-center justify-between gap-3 py-3"
+        >
+          <div class="min-w-0">
+            <p class="truncate text-sm font-medium">
+              {{ deviceLabel(device) }}
+              <UBadge
+                v-if="device.is_current"
+                size="sm"
+                variant="soft"
+                class="ml-2"
+              >
+                This device
+              </UBadge>
+            </p>
+            <p class="mt-1 text-xs text-muted">
+              Last used {{ shortTime(device.last_used_at || device.created_at) }} · {{ device.ip_address || 'unknown address' }}
+            </p>
+          </div>
+          <UButton
+            v-if="!device.is_current"
+            size="sm"
+            variant="ghost"
+            color="error"
+            @click="revokeSession(device.id)"
+          >
+            Revoke
+          </UButton>
+        </li>
+        <li
+          v-if="!sessions.length"
+          class="py-3 text-sm text-muted"
+        >
+          No active sessions found.
+        </li>
+      </ul>
     </section>
   </div>
 </template>

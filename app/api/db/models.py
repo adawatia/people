@@ -40,6 +40,15 @@ class User(SQLAlchemyBaseUserTable[int], Base):
     invitation_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     invitation_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    # Multi-factor authentication (TOTP + single-use recovery codes).  The seed
+    # is a secret: it is never returned after enrolment and never logged.
+    mfa_secret: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    mfa_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="false")
+    mfa_enrolled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # JSON array of SHA-256 hashes of the recovery codes.
+    mfa_recovery_code_hashes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_mfa_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     @property
     def is_super_admin(self) -> bool:
         """Technical administrator flag; business roles are stored on Employee."""
@@ -47,21 +56,40 @@ class User(SQLAlchemyBaseUserTable[int], Base):
 
 
 class AuthSession(Base):
-    """Server-side refresh session; raw refresh tokens are never stored."""
+    """Server-side refresh session; raw refresh tokens are never stored.
+
+    Lifecycle (see ``services/auth_service.py``): ACTIVE → ROTATED (a refresh
+    replaced it) or REVOKED (logout, password change/reset, admin action) or
+    EXPIRED (idle, absolute, or refresh TTL).  ``absolute_expires_at`` is fixed at
+    creation and never slides, so a chain of rotations cannot live forever.
+    """
 
     __tablename__ = "auth_sessions"
+    __table_args__ = {"comment": "Rotating opaque refresh sessions (hash-only storage, hash-only lookup)"}
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True)
     token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    absolute_expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_ist, nullable=False)
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    replaced_by_id: Mapped[int | None] = mapped_column(ForeignKey("auth_sessions.id", ondelete="SET NULL"), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    revoked_reason: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    replaced_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("auth_sessions.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    # Session context, for the signed-in-device list and security audit.  Stored
+    # as coarse values only (no fingerprinting).
+    ip_address: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     user: Mapped[User] = relationship("User")
     replaced_by: Mapped[AuthSession | None] = relationship("AuthSession", remote_side=[id], uselist=False)
+
+    @property
+    def is_active(self) -> bool:
+        return self.revoked_at is None
 
 
 class Notification(Base):

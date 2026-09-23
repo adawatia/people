@@ -60,11 +60,16 @@ async def _structure(session, suffix: str):
 
 
 async def _audit_actions(session, employee_id: int) -> list[str]:
+    # Ordered by id: without it PostgreSQL may return these rows in any physical
+    # order, which made the sequence assertions flaky once other suites had
+    # written to the audit table.
     rows = await session.execute(
-        select(AuditLog.action).where(
+        select(AuditLog.action)
+        .where(
             AuditLog.entity_type == "employee",
             AuditLog.entity_id == str(employee_id),
         )
+        .order_by(AuditLog.id.asc())
     )
     return [row[0] for row in rows]
 

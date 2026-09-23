@@ -1,0 +1,294 @@
+"""Unit-level checks of the authentication security primitives.
+
+These run without a database: the crypto helpers, the TOTP implementation, the
+password policy and the throttling policy are all pure functions of their inputs
+(plus an injectable store), which is exactly why the policy lives in ``core``.
+
+HTTP-level consequences are covered in ``test_auth_hardening_http.py``.
+"""
+
+from __future__ import annotations
+
+import importlib.util
+from datetime import timedelta
+
+import jwt
+import pytest
+
+from core.auth_throttle import AuthThrottle, InMemoryThrottleStore, build_store
+from core.password_policy import (
+    LocalBreachChecker,
+    NullBreachChecker,
+    PasswordCheckContext,
+    PasswordPolicyError,
+    RemoteBreachChecker,
+    build_breach_checker,
+    validate_password_policy,
+)
+from core.settings import Settings
+from core.tokens import (
+    ACCESS_TOKEN_AUDIENCE,
+    MFA_CHALLENGE_AUDIENCE,
+    create_access_token,
+    create_mfa_challenge_token,
+    decode_token,
+    generate_refresh_token,
+    hash_refresh_token,
+    token_fingerprint,
+)
+from core.totp import generate_secret, totp_at, verify_totp
+from db.models import now_ist
+from tests.auth_helpers import PASSWORD, run_async
+
+# ── tokens ────────────────────────────────────────────────────────────────────
+
+
+def test_refresh_tokens_are_long_random_and_stored_only_as_hashes():
+    first, second = generate_refresh_token(), generate_refresh_token()
+    assert first != second
+    assert len(first) >= 60  # 384 bits of entropy, URL-safe encoded
+
+    digest = hash_refresh_token(first)
+    assert digest != first
+    assert len(digest) == 64
+    assert hash_refresh_token(first) == digest  # deterministic, index-friendly
+    assert token_fingerprint(first) == digest[:12]
+    assert first not in token_fingerprint(first)
+
+
+def test_access_token_carries_the_service_audience_and_never_a_challenge_one():
+    now = now_ist()
+    token = create_access_token(subject=7, secret="test-secret", ttl_seconds=900, now=now, session_id=3)
+    payload = decode_token(token, secret="test-secret", audience=ACCESS_TOKEN_AUDIENCE)
+    assert payload["sub"] == "7"
+    assert payload["sid"] == 3
+    assert payload["typ"] == "access"
+
+    # An MFA challenge is signed with the same key but a different audience, so
+    # presenting it as a bearer token must fail.
+    challenge = create_mfa_challenge_token(
+        subject=7, secret="test-secret", ttl_seconds=300, now=now, enrollment_required=True
+    )
+    with pytest.raises(jwt.InvalidAudienceError):
+        decode_token(challenge, secret="test-secret", audience=ACCESS_TOKEN_AUDIENCE)
+    assert decode_token(challenge, secret="test-secret", audience=MFA_CHALLENGE_AUDIENCE)["enrol"] is True
+
+
+def test_expired_access_tokens_are_rejected():
+    stale = create_access_token(subject=1, secret="test-secret", ttl_seconds=1, now=now_ist() - timedelta(minutes=5))
+    with pytest.raises(jwt.ExpiredSignatureError):
+        decode_token(stale, secret="test-secret")
+
+
+def test_a_token_signed_with_another_key_is_rejected():
+    token = create_access_token(subject=1, secret="test-secret", ttl_seconds=900, now=now_ist())
+    with pytest.raises(jwt.InvalidSignatureError):
+        decode_token(token, secret="different-secret")
+
+
+# ── TOTP ──────────────────────────────────────────────────────────────────────
+
+
+def test_totp_accepts_the_current_code_and_tolerates_one_step_of_drift():
+    secret = generate_secret()
+    now = now_ist()
+    assert verify_totp(totp_at(secret, now), secret, now)
+    assert verify_totp(totp_at(secret, now - timedelta(seconds=30)), secret, now)
+    assert not verify_totp(totp_at(secret, now - timedelta(minutes=5)), secret, now)
+
+
+def test_totp_rejects_malformed_codes_and_other_secrets():
+    secret, other = generate_secret(), generate_secret()
+    now = now_ist()
+    assert not verify_totp("", secret, now)
+    assert not verify_totp("abcdef", secret, now)
+    assert not verify_totp("12345", secret, now)  # wrong length
+    assert not verify_totp(totp_at(other, now), secret, now)
+
+
+# ── password policy ───────────────────────────────────────────────────────────
+
+
+def _check(password: str, **context: str) -> None:
+    run_async(validate_password_policy(password, context=PasswordCheckContext(**context)))
+
+
+@pytest.mark.parametrize(
+    "password",
+    [
+        "Short1!",  # under the minimum length
+        "alllowercaseletters",  # no uppercase/digit/symbol
+        "NOLOWERCASE123!",  # no lowercase
+        "NoDigitsOrSymbols",  # no digit/symbol
+        "Password@123456",  # on the common-password list
+        "Qwerty12345!",  # keyboard run, caught by the local checker
+    ],
+)
+def test_weak_passwords_are_rejected(password):
+    with pytest.raises(PasswordPolicyError):
+        _check(password)
+
+
+def test_password_must_not_contain_personal_information():
+    with pytest.raises(PasswordPolicyError, match="name, email, or username"):
+        _check("Quartz-Warmcomet-9!", username="warmcomet")
+    # Separating the user's own name with punctuation is not an escape hatch.
+    with pytest.raises(PasswordPolicyError, match="name, email, or username"):
+        _check("Warm.Comet-Quartz9!", username="warmcomet")
+
+
+def test_a_strong_passphrase_is_accepted_and_long_passwords_are_allowed():
+    _check(PASSWORD)
+    # Passphrases and password-manager output are welcome: the ceiling is 256.
+    _check("gT7#vQ2$mL9!zR4&wK1^")
+    with pytest.raises(PasswordPolicyError, match="at most"):
+        _check("Quartz-Meadow-9!" + "x" * 300)
+
+
+def test_breach_checker_selection_and_fail_open_behaviour():
+    assert isinstance(build_breach_checker(Settings(password_breach_check="off")), NullBreachChecker)
+    assert isinstance(build_breach_checker(Settings(password_breach_check="local")), LocalBreachChecker)
+    remote = build_breach_checker(
+        Settings(password_breach_check="remote", password_breach_check_url="https://example.invalid/range")
+    )
+    assert isinstance(remote, RemoteBreachChecker)
+
+    # An unreachable checker must admit the password rather than lock the user out.
+    unreachable = RemoteBreachChecker("http://127.0.0.1:9/range", timeout_seconds=0.2)
+    assert run_async(unreachable.is_breached("Quartz-Meadow-9!")) is False
+
+    local = LocalBreachChecker()
+    assert run_async(local.is_breached("welcome@123")) is True
+    assert run_async(local.is_breached("Qwertyuiop")) is True
+    assert run_async(local.is_breached("Quartz-Meadow-9!")) is False
+
+
+# ── throttling policy ─────────────────────────────────────────────────────────
+
+SMALL = Settings(
+    auth_throttle_max_failures=3,
+    auth_throttle_window_seconds=900,
+    auth_throttle_block_seconds=10,
+    auth_throttle_max_block_seconds=60,
+    auth_refresh_max_failures=4,
+)
+
+
+def _throttle(settings: Settings = SMALL) -> AuthThrottle:
+    return AuthThrottle(settings, store=InMemoryThrottleStore())
+
+
+def test_repeated_failures_from_one_ip_and_account_block_that_pair():
+    throttle = _throttle()
+    decisions = [
+        run_async(throttle.record_failure(ip="10.0.0.1", account="acct-a", scope="login")) for _ in range(3)
+    ]
+    assert [decision.allowed for decision in decisions[:2]] == [True, True]
+    assert decisions[-1].allowed is False
+    assert decisions[-1].retry_after_seconds == 10
+    assert decisions[-1].kind == "ip_account"
+
+    # While blocked, even the *correct* password is refused — that is the point
+    # of the block — so the caller sees a 429 before any work happens.
+    assert run_async(throttle.check(ip="10.0.0.1", account="acct-a", scope="login")).allowed is False
+
+
+def test_blocks_grow_geometrically_and_are_capped_never_permanent():
+    throttle = _throttle()
+    block_lengths = []
+    for _ in range(6):
+        decision = run_async(throttle.record_failure(ip="10.0.0.9", account="acct-b", scope="login"))
+        block_lengths.append(decision.retry_after_seconds if not decision.allowed else 0)
+    assert block_lengths[2:] == [10, 20, 40, 60]  # doubling, capped at max_block_seconds
+    assert max(block_lengths) <= SMALL.auth_throttle_max_block_seconds
+
+
+def test_a_typo_costs_a_short_delay_not_a_block():
+    settings = Settings(
+        auth_throttle_max_failures=6,
+        auth_throttle_block_seconds=10,
+        auth_throttle_max_block_seconds=60,
+    )
+    throttle = _throttle(settings)
+    delays = []
+    for _ in range(5):
+        decision = run_async(throttle.record_failure(ip="10.0.0.2", account="acct-c", scope="login"))
+        assert decision.allowed is True  # below the budget: never blocked
+        delays.append(decision.delay_seconds)
+    assert delays[0] == 0.0  # first few attempts are free
+    assert delays[-1] > 0  # sustained failures slow the attacker down
+
+
+def test_one_employee_cannot_lock_out_others_behind_a_shared_corporate_ip():
+    throttle = _throttle()
+    # Five different accounts, one office NAT address: no account is blocked and
+    # the shared IP has not reached its (much larger) budget.
+    for index in range(5):
+        decision = run_async(throttle.record_failure(ip="203.0.113.7", account=f"acct-{index}", scope="login"))
+        assert decision.allowed is True
+    # The same account attacked from many addresses is still stopped, on the
+    # account key, because no single pair counter is high enough on its own.
+    for index in range(6):
+        run_async(throttle.record_failure(ip=f"198.51.100.{index}", account="target", scope="login"))
+    verdict = run_async(throttle.check(ip="192.0.2.55", account="target", scope="login"))
+    assert verdict.allowed is False
+    assert verdict.kind == "account"
+    # ...while an unrelated employee behind that same address is unaffected.
+    assert run_async(throttle.check(ip="192.0.2.55", account="bystander", scope="login")).allowed is True
+
+
+def test_successful_sign_in_clears_every_counter():
+    throttle = _throttle()
+    for _ in range(2):
+        run_async(throttle.record_failure(ip="10.0.0.3", account="acct-d", scope="login"))
+    run_async(throttle.record_success(ip="10.0.0.3", account="acct-d", scope="login"))
+    verdict = run_async(throttle.check(ip="10.0.0.3", account="acct-d", scope="login"))
+    assert verdict.allowed is True
+    assert verdict.delay_seconds == 0.0
+    assert run_async(throttle.store.count("pair:10.0.0.3:acct-d", window_seconds=900)) == 0
+
+
+def test_refresh_attempts_get_their_own_budget():
+    throttle = _throttle()
+    for _ in range(3):
+        decision = run_async(throttle.record_failure(ip="10.0.0.4", account="token-fp", scope="refresh"))
+        assert decision.allowed is True  # refresh budget is 4, not 3
+    assert run_async(throttle.record_failure(ip="10.0.0.4", account="token-fp", scope="refresh")).allowed is False
+
+
+def test_account_keys_are_normalised_and_never_stored_raw():
+    assert AuthThrottle.account_key(" Alice@Example.com ") == AuthThrottle.account_key("alice@example.com")
+    assert "alice" not in AuthThrottle.account_key("alice@example.com")
+
+
+def test_store_backend_selection_fails_loudly_on_misconfiguration():
+    assert isinstance(build_store(Settings(auth_throttle_backend="memory")), InMemoryThrottleStore)
+    # An unknown value must not silently disable throttling.
+    assert build_store(Settings(auth_throttle_backend="carrier-pigeon")).describe() == "memory"
+
+    with pytest.raises(RuntimeError, match="REDIS_URL"):
+        build_store(Settings(auth_throttle_backend="redis", redis_url=""))
+
+    if importlib.util.find_spec("redis") is not None:
+        assert build_store(Settings(auth_throttle_backend="redis", redis_url="redis://localhost:6379/0")).describe() == "redis"
+    else:
+        # Multi-worker deployments need a shared store; asking for one without
+        # the client installed must be an error, not per-worker limits.
+        with pytest.raises(RuntimeError, match="redis"):
+            build_store(Settings(auth_throttle_backend="redis", redis_url="redis://localhost:6379/0"))
+
+
+def test_in_memory_store_expires_counters_and_blocks():
+    store = InMemoryThrottleStore()
+    key = "pair:1.2.3.4:acct"
+    assert run_async(store.increment(key, window_seconds=900)) == 1
+    assert run_async(store.increment(key, window_seconds=900)) == 2
+    assert run_async(store.count(key, window_seconds=900)) == 2
+
+    run_async(store.block(key, seconds=30))
+    assert run_async(store.blocked_for(key)) > 0
+    assert run_async(store.blocked_for(key)) <= 31
+
+    run_async(store.clear(key))
+    assert run_async(store.count(key, window_seconds=900)) == 0
+    assert run_async(store.blocked_for(key)) == 0

@@ -119,7 +119,18 @@ Module inventory:
 | File | Purpose / notable content |
 |---|---|
 | `main.py` | App factory, lifespan, routers, CORS, middleware, custom OpenAPI security schemes, `/`, `/health`, `/db-health` |
-| `core/auth.py` | fastapi-users wiring, `UserManager` (password policy, 3-way login lookup), JWT strategy (8 h), `BASE_EMPLOYEE_PERMISSIONS` + `ROLE_PERMISSIONS` + `effective_permissions`, the compatibility `FIXED_ROLE_PERMISSIONS` view, `require_permission`, ERP API-key check, rate limiter |
+| `core/auth.py` | fastapi-users wiring, `UserManager` (password policy, 3-way login lookup, dummy hash for unknown users), JWT strategy, `BASE_EMPLOYEE_PERMISSIONS` + `ROLE_PERMISSIONS` + `effective_permissions`, the compatibility `FIXED_ROLE_PERMISSIONS` view, `require_permission`, ERP API-key check, generic rate limiter |
+| `core/tokens.py` | The only place credentials are minted/hashed: opaque refresh secrets (`token_urlsafe(48)`), SHA-256 storage hash, short-lived access JWT, **separate-audience** MFA challenge token |
+| `core/session_policy.py` | `SessionPolicy` + `policy_for(privileged=…)`: access/refresh TTL, idle timeout, absolute lifetime, whether MFA is mandated. Two profiles: `business` and `privileged` |
+| `core/auth_throttle.py` | `AuthThrottle` + pluggable `ThrottleStore` (`memory` / `redis`): per-IP, per-account and per-(IP+account) failure budgets with progressive delay and capped blocks |
+| `core/password_policy.py` | Length/composition, separator-insensitive personal-information check, `zxcvbn` scoring, pluggable breached-password checker (`off` / `local` / `remote`, fail-open) |
+| `core/totp.py` | RFC 6238 TOTP (stdlib only) + recovery codes; verification is constant-time with a ±1 step window |
+| `core/request_context.py` | `client_ip` (proxy-aware only when `TRUST_PROXY_HEADERS=true`), `user_agent`, `request_id` — one shape of context for every auth event and throttle key |
+| `schemas/auth.py` | Request/response contracts for login, sessions and MFA |
+| `services/auth_service.py` | The session/MFA **state machine**: create, rotate, revoke, idle/absolute expiry, replay handling, password-change consequences, MFA orchestration, security audit events |
+| `repositories/auth_session_repo.py` | `auth_sessions` primitives; `rotate()` is a single conditional `UPDATE … WHERE revoked_at IS NULL` so the database, not Python, decides a rotation race |
+| `routers/auth_sessions.py` | Session endpoints + the login/refresh throttle guards |
+| `routers/auth_mfa.py` | MFA challenge/enrol/activate/verify (unauthenticated, challenge-token only) and management endpoints (authenticated + password step-up) |
 | `core/business_roles.py` | Elevated business-role + access-scope vocabulary and the *only* definition of scope defaults: `resolve_business_role`, `resolve_business_access`, `role_columns`, `merge_role_columns`, `ROLE_SCOPE_TYPES` |
 | `core/rbac.py` | `DASHBOARD_WIDGETS` + `get_visible_widgets` (permission-filtered widget keys) |
 | `core/employee_access.py` | `EmployeeAccessScope`, `scope_for_employee`, `get_employee_scope`, `get_permission_scope`, `require_employee_access` — **row-level** visibility. This is the only place a business role is translated into which rows are visible |
@@ -150,8 +161,8 @@ Module inventory:
 
 Notes that matter operationally:
 
-* **Rate limiter is in-process memory.** Multiple API workers ⇒ per-worker limits. Move to Redis before horizontal scale.
-* **JWTs are stateless and last 8 hours** for the login token, while browser sessions issue **15-minute** access tokens (§2.5.3). Revoking a refresh session does not invalidate an outstanding 8 h bearer token.
+* **Rate limiter is in-process memory.** Multiple API workers ⇒ per-worker limits. Move to Redis before horizontal scale. Login/refresh carry an *additional*, auth-specific throttle whose state lives in `AUTH_THROTTLE_BACKEND` (`memory` = per worker, `redis` = shared).
+* **Access tokens are stateless JWTs** (15 min business, 5 min privileged) and carry no permissions. Revoking a session ends its **refresh** chain immediately, but an already-issued access token stays valid until it expires — that is the reason its lifetime is short (§2.5.3). Authorization (role, permission, scope) is re-resolved from the database on every request, so a role change applies at once.
 * Custom OpenAPI adds a `SuperAdminOAuth2` password flow and mirrors it onto every bearer-protected operation so Swagger can authorize both account types.
 
 ### 2.3 Configuration & startup
@@ -170,10 +181,27 @@ Notes that matter operationally:
 | `CORS_ORIGINS` | localhost:5173, 8081, 3000, 19006 | Expo/mobile origins included |
 | `LOG_*` | stdout console, file appender opt-in | keep `LOG_TO_FILE=false` in dev (watcher loop) |
 | `TIMEZONE` (documented) | `Asia/Kolkata` | code uses `ZoneInfo("Asia/Kolkata")` via `now_ist()` |
+| `ACCESS_TOKEN_TTL_SECONDS` | `900` | business access token (60–3600) |
+| `PRIVILEGED_ACCESS_TOKEN_TTL_SECONDS` | `300` | Super Admin access token |
+| `REFRESH_TOKEN_TTL_SECONDS` | `2592000` (30 d) | outer bound of a refresh chain |
+| `SESSION_IDLE_TIMEOUT_SECONDS` | `3600` | business idle timeout; checked on every refresh |
+| `SESSION_ABSOLUTE_TIMEOUT_SECONDS` | `43200` (12 h) | hard end of a business session, never extended by refreshing |
+| `PRIVILEGED_IDLE_TIMEOUT_SECONDS` | `900` | Super Admin idle timeout |
+| `PRIVILEGED_ABSOLUTE_TIMEOUT_SECONDS` | `7200` (2 h) | Super Admin hard end |
+| `AUTH_THROTTLE_MAX_FAILURES` | `5` | failures before the IP+account pair is blocked (login) |
+| `AUTH_THROTTLE_WINDOW_SECONDS` | `900` | sliding window for the counters |
+| `AUTH_THROTTLE_BLOCK_SECONDS` / `_MAX_BLOCK_SECONDS` | `60` / `3600` | first block length and the cap it doubles towards |
+| `AUTH_REFRESH_MAX_FAILURES` | `20` | budget for the refresh scope (looser: the token is unguessable) |
+| `AUTH_THROTTLE_BACKEND` / `REDIS_URL` | `memory` / `""` | `redis` is **required** for more than one worker; asking for it without `REDIS_URL` (or without the `redis` package) fails loudly |
+| `TRUST_PROXY_HEADERS` | `false` | honour `X-Forwarded-For`; only enable behind a proxy you control |
+| `MFA_ENABLED` / `MFA_REQUIRED_FOR_SUPER_ADMIN` | `true` / `false` | opt-in enforcement so an existing operator can enrol first; startup logs a warning while it is off |
+| `MFA_ISSUER` / `MFA_CHALLENGE_TTL_SECONDS` | `People HRMS` / `300` | authenticator label and challenge-token lifetime |
+| `PASSWORD_MIN_LENGTH` / `PASSWORD_MAX_LENGTH` | `12` / `256` | floors/ceilings are validated, so they cannot be lowered accidentally |
+| `PASSWORD_BREACH_CHECK` / `_URL` | `local` / `""` | `off` \| `local` \| `remote` (k-anonymity, fail-open) |
 
 **Lifespan (`main.py`)** — in order: log start → `create_db_and_tables()` **only in development** → `ensure_seed_data()` in dev or when `BOOTSTRAP_SEED_DATA=true` → start `notification_cleanup_loop()` as a task → on shutdown cancel the task cleanly.
 
-`validate_runtime_secrets()` runs at import-time startup of `main.py` and raises `RuntimeError` outside development if `JWT_SECRET`, `DATABASE_URL`, `SUPER_ADMIN_PASSWORD` are still defaults, or `ERP_API_KEY` is empty.
+`validate_runtime_secrets()` runs at import-time startup of `main.py` and raises `RuntimeError` outside development if `JWT_SECRET`, `DATABASE_URL` or `SUPER_ADMIN_PASSWORD` are still defaults, `ERP_API_KEY` is empty, or throttling is configured with `AUTH_THROTTLE_BACKEND` ≠ `redis` / with a missing `REDIS_URL` — i.e. an auth-throttle setup that would silently be per worker is a *startup error* in production. The development shortcut is keyed on an explicit allow-list of environment names, so a typo such as `ENVIRONMENT=Production` cannot disable the checks. `settings.security_warnings()` then logs the non-fatal reminders (per-worker throttling, MFA not yet enforced, remote breach check without a URL, proxy headers not trusted).
 
 **Schema management:** Alembic (`app/api/alembic/versions/`, 8 migrations). `create_all` is a development convenience only. Production releases must run `alembic upgrade head` first.
 
@@ -184,8 +212,8 @@ Notes that matter operationally:
 **Identity & access**
 | Table | Key points |
 |---|---|
-| `users` | `user_id` PK, unique `username`, unique nullable `mobile_number` (E.164), `must_change_password`, `created_by`, invitation metadata (hash, sent/expires/used), fastapi-users fields (`is_active`, `is_verified`, `is_superuser`) |
-| `auth_sessions` | Only the **SHA-256 hash** of the refresh token; `expires_at` (30 d), `last_used_at`, `revoked_at`, `replaced_by_id` (rotation chain) |
+| `users` | `user_id` PK, unique `username`, unique nullable `mobile_number` (E.164), `must_change_password`, `created_by`, invitation metadata (hash, sent/expires/used), fastapi-users fields (`is_active`, `is_verified`, `is_superuser`), MFA columns (`mfa_enabled`, `mfa_secret`, `mfa_enrolled_at`, `last_mfa_verified_at`, `mfa_recovery_code_hashes` — hashes only) |
+| `auth_sessions` | Only the **SHA-256 hash** of the refresh token; `expires_at` (30 d outer bound), `absolute_expires_at` (hard end of the chain), `last_used_at` (idle timeout), `revoked_at` + `revoked_reason` (`rotated`, `logout`, `logout_all`, `password_changed`, `password_reset:*`, `reuse_detected`, `idle_timeout`, `account_inactive`), `replaced_by_id` (rotation chain), `ip_address`, `user_agent` (device list) |
 | `audit_logs` | Append-only: actor, action, entity, `filters_json`, `request_id`, `ip_address` |
 
 **Org structure (ERP-owned)**
@@ -218,40 +246,115 @@ Conventions: all timestamps are `DateTime(timezone=True)` defaulted by `now_ist(
 
 ### 2.5 Authentication architecture
 
-#### 2.5.1 Two login doors (same users table)
+Three authentication **domains**, one users table:
+
+```
+                    ┌─ business users  → /login        (all workforce roles)
+PEOPLE HRMS auth ───┼─ Super Admin     → /admin/login   (password + MFA, stricter session policy)
+                    └─ ERP machines   → /api/v1/integrations/erp/**  (X-API-Key)
+```
+
+Authentication answers *who you are*; a business role never selects a login endpoint, and permissions/scope are resolved only afterwards (§2.6).
+
+#### 2.5.1 Two human login doors (same users table)
 
 | Endpoint | Tag | Identity accepted | Extra rule |
 |---|---|---|---|
-| `POST /api/v1/auth/employee/login` | `auth-employee` | Indian mobile (any input is normalized to E.164) or email or username | **must** have a linked `Employee`, else `403 "This account is not linked to an employee"` |
-| `POST /api/v1/auth/super-admin/login` | `auth-super-admin` | username **only** (rejects `@`, digits, `+`) | must have `is_superuser`, else `403` |
+| `POST /api/v1/auth/employee/login` | `auth-employee` | Indian mobile (any input is normalized to E.164) or email or username | **must** have a linked `Employee`, else `403 "This account is a technical account. Use the technical sign-in."` — reachable only with a *correct* password, so it cannot be used to probe for accounts |
+| `POST /api/v1/auth/super-admin/login` | `auth-super-admin` | username **only** (rejects `@`, digits, `+` → `400`) | must have `is_superuser`; otherwise the same generic `401 "Invalid login credentials"` as a wrong password |
 
-Both are OAuth2 password-form endpoints and both return `{access_token, token_type, must_change_password}`. `UserManager.authenticate()` is overridden to resolve `email → username → normalized mobile`, and it performs a **dummy hash** for unknown users to flatten timing differences.
+Both are OAuth2 password-form endpoints and **both issue a session directly** — there is no intermediate long-lived bearer token any more (§2.5.3). Response shape:
 
-#### 2.5.2 Password policy (enforced on register, change, and HR/ERP temporary-password set)
+```json
+// session issued
+{"access_token": "…", "refresh_token": "…", "expires_in": 900, "session_id": 42,
+ "refresh_expires_at": "…", "absolute_expires_at": "…", "must_change_password": false}
+// second factor required instead
+{"mfa_required": true, "mfa_enrollment_required": false, "mfa_token": "…", "mfa_expires_in": 300}
+```
 
-1. ≥ 12 characters
-2. must contain upper, lower, digit, special character
-3. must not contain the user's email local part / username / first / last name (≥ 3 chars)
-4. `zxcvbn` score ≥ 3 with those personal inputs supplied
-Failure raises `InvalidPasswordException`; routers convert it to `400 {"detail": "…reason…"}`.
+`UserManager.authenticate()` resolves `email → username → normalized mobile` and performs a **dummy hash** for unknown users so the timing of a failed lookup resembles a failed password check (§2.5.7).
+
+#### 2.5.2 Login and refresh throttling
+
+The generic per-IP limiter is not a login defence (a whole office shares one NAT address), so authentication has its own budget, evaluated against three keys — the *strictest* verdict wins:
+
+| Key | Budget | Why it exists |
+|---|---|---|
+| `ip+account` | `AUTH_THROTTLE_MAX_FAILURES` (5) | an attack on a specific account; cannot deny service to anyone else |
+| `account` | 2× the base, longer block | protects a known employee from a distributed attack; engages later because it is the one key an outsider could weaponise |
+| `ip` | 20× the base | catches extreme spraying from one address without punishing shared NAT |
+
+Below the budget a failure collects a small progressive delay; at the budget the key is blocked for `AUTH_THROTTLE_BLOCK_SECONDS`, doubling per further failure up to `AUTH_THROTTLE_MAX_BLOCK_SECONDS`. **No rule blocks permanently**, a successful sign-in clears all three counters, and `POST /auth/session/refresh` uses the same machinery with a looser budget (`AUTH_REFRESH_MAX_FAILURES`) keyed by the presented token's fingerprint — so spraying invalid tokens cannot deny a real user's refresh. State lives behind `ThrottleStore` (in-process by default; `AUTH_THROTTLE_BACKEND=redis` shares it across workers, which production requires — see §2.3).
 
 #### 2.5.3 Token & session model
 
 | Artifact | TTL | Stored where | Notes |
 |---|---|---|---|
-| Login bearer token (JWT, `HS256`, aud `fastapi-users:auth`) | 8 h | returned to client only | stateless; used once by the BFF to create a session |
-| Session access token | 15 min | BFF cookie `people_session` | minted by `/auth/session` |
-| Refresh token (opaque, `token_urlsafe(48)`) | 30 d | SHA-256 hash in `auth_sessions`; raw in BFF cookie `people_refresh` | rotated on every use |
+| Access token (JWT `HS256`, aud `fastapi-users:auth`, `sid`) | 15 min business / 5 min privileged | BFF cookie `people_session` (HttpOnly) | stateless; **no** permissions embedded |
+| Refresh token (opaque, `token_urlsafe(48)`) | 30 d outer bound, bounded by `absolute_expires_at` | SHA-256 hash in `auth_sessions`; raw in BFF cookie `people_refresh` (HttpOnly) | rotated on every use |
+| MFA challenge token (JWT, aud `hrms:mfa`, `typ=mfa`) | 5 min | never stored | cannot be replayed as an access token (wrong audience) |
 
-`POST /auth/session` (create) · `POST /auth/session/refresh` (rotate) · `DELETE /auth/session` (revoke).
+Endpoints: `POST /auth/session` (issue for an already-authenticated caller) · `POST /auth/session/refresh` (rotate) · `DELETE /auth/session` (revoke, idempotent) · `GET /auth/sessions`, `DELETE /auth/sessions/{id}`, `DELETE /auth/sessions` (device management) · `GET /auth/session` (describe current).
 
-**Rotation & replay defence:** presenting an already-rotated (revoked) refresh token is treated as theft — **all** of that user's live sessions are revoked and `401 "Refresh token reuse detected"` is returned. The new session is linked via `replaced_by_id`.
+**Lifetimes are checked on every refresh**, in order: revoked → rotation state → refresh expiry → idle deadline (`last_used_at + SESSION_IDLE_TIMEOUT_SECONDS`) → absolute deadline. A rotation inherits the chain's `absolute_expires_at`, so refreshing can never extend a session beyond its hard end. Every decision lives in `services/auth_service.py`; routers only translate it into HTTP.
 
-**Bulk revocation:** setting an HR/ERP temporary password revokes every active `AuthSession` for that user (`_reset_password`) and sets `must_change_password = true`.
+**Rotation & replay defence:** presenting an already-rotated (revoked, `replaced_by_id IS NOT NULL`) refresh token is treated as theft — **all** of that user's live sessions are revoked (`revoked_reason="reuse_detected"`), an `AUTH_REFRESH_REUSE_DETECTED` audit row is written and `401 "Refresh token reuse detected"` is returned.
 
-#### 2.5.4 ERP machine authentication
+**Concurrency:** rotation is a single conditional `UPDATE … WHERE id = :id AND revoked_at IS NULL`; the loser of a race sees `rowcount == 0`, rolls its own replacement back and is handled as a replay. Two concurrent uses of one token therefore never both mint a descendant (covered by a dedicated test).
 
-`X-API-Key` header validated with `secrets.compare_digest` against `settings.erp_api_key`; empty/mismatched ⇒ `403 Could not validate API KEY`. There is **no** fallback key outside development, and the key must never reach a browser.
+**Bulk revocation:** an HR/ERP temporary-password reset (`_reset_password`) and a self-service `POST /auth/change-password` both revoke every live session for the account (`password_reset:*` / `password_changed`). A password change deliberately **does not** mint a replacement session: the user signs in again, which is the required behaviour for privileged accounts. Because an access token cannot be revoked before it expires, the exposure window after a change is one access-token TTL — the reason that TTL is minutes, and the reason permissions are never cached in the token.
+
+#### 2.5.4 Super Admin MFA (TOTP)
+
+Split so a stolen password alone can never replace an existing factor:
+
+* **Challenge endpoints** (unauthenticated, require the short-lived challenge token issued *after* a correct password): `POST /auth/mfa/enroll` (first-time only — returns the secret, `otpauth://` URI and 10 single-use recovery codes, shown once), `POST /auth/mfa/activate` (confirm the new secret and sign in), `POST /auth/mfa/verify` (TOTP or recovery code).
+* **Management endpoints** (authenticated **and** password re-verified): `POST /auth/mfa/reset` (new secret), `POST /auth/mfa/confirm` (activate from an existing session), `POST /auth/mfa/disable`, `GET /auth/mfa/status`.
+
+A second factor is requested when the account's *policy* mandates it **or** the account has already enrolled — an enrolled authenticator is always used, otherwise opting in from account settings would protect nothing. `MFA_REQUIRED_FOR_SUPER_ADMIN` defaults to `false` so enabling it is a deliberate, communicated rollout; `MFA_ENABLED=false` disables the feature. Verification is constant-time with a ±1 step (30 s) drift window, and recovery codes are stored as SHA-256 hashes like refresh tokens. Enrolled already? `disable` is refused while policy requires MFA.
+
+#### 2.5.5 Password policy (enforced on register, change, and HR/ERP temporary-password set)
+
+1. ≥ 12 characters, ≤ 256 (passphrases and password-manager output are welcome)
+2. must contain upper, lower, digit, special character (kept deliberately: removing an existing control would be a silent weakening)
+3. must not contain the user's email local part / username / first / last name (≥ 3 chars) — matched **after stripping separators**, so `Warm.Comet` cannot pad past the check
+4. `zxcvbn` score ≥ 3 with those personal inputs supplied
+5. not in the embedded common-password list (also catches `Welcome@2026`-style padding and keyboard/sequential runs) and not in a breached corpus if `PASSWORD_BREACH_CHECK` is set to `remote` — the breach check is pluggable and **fails open**, so password changes never depend on a third party being reachable
+
+Failure raises `PasswordPolicyError` → `InvalidPasswordException` → `400 {"detail": "…reason…"}`.
+
+#### 2.5.6 Step-up re-verification
+
+Password re-verification is required for the sensitive operations that can lock an owner out of their own account: Super Admin username change, MFA reset/confirm/disable, and MFA-dependent policy changes. Ordinary business operations never ask again — step-up is applied by the endpoint that owns the sensitive transition, not by a global gate.
+
+#### 2.5.7 Enumeration resistance
+
+Unknown accounts get a dummy hash instead of a fast `return None`, all credential failures share one generic message (`"Invalid login credentials"`), an unprivileged account hitting the Super Admin door gets the *same* body as an unknown username, and every failed attempt is counted by the throttle. The specific reason (`invalid_credentials`, `not_privileged`, `no_employee_profile`, `mfa_failed`, …) is recorded in `audit_logs` for operators, never returned to the caller.
+
+#### 2.5.8 Security audit events
+
+`services/auth_service.py` writes to the existing append-only `audit_logs` table (no second audit framework): `AUTH_LOGIN_SUCCESS` / `AUTH_LOGIN_FAILED`, `SUPER_ADMIN_LOGIN_SUCCESS` / `_FAILED`, `AUTH_LOGOUT`, `AUTH_SESSION_CREATED`, `AUTH_SESSION_REFRESHED`, `AUTH_REFRESH_FAILED`, `AUTH_REFRESH_REUSE_DETECTED`, `AUTH_SESSION_REVOKED`, `AUTH_ALL_SESSIONS_REVOKED`, `AUTH_PASSWORD_CHANGED`, `AUTH_PASSWORD_RESET`, `AUTH_USERNAME_CHANGED`, `AUTH_MFA_CHALLENGE` / `_ENROLLED` / `_SUCCESS` / `_FAILED`. Records carry `user_id` (when known), session id, `request_id`, IP, user agent and a reason category. The correlation id is minted by the request-logging middleware (an inbound `X-Request-ID` / `X-Correlation-ID` is preserved), stored on `request.state` and echoed on the response as `X-Request-ID`, so one id ties a user-visible failure to the API log line *and* the audit rows it produced. **Never** logged: passwords, raw access/refresh tokens, TOTP secrets or recovery codes — identities in failure events are stored as truncated hashes.
+
+#### 2.5.9 Session lifecycle (state machine)
+
+```
+              issue                refresh                logout / password change / reset
+  (none) ─────────▶ ACTIVE ─────────────▶ ROTATED   ACTIVE ─────────────▶ REVOKED
+                     │  ▲                                        │
+                     │  └── rotation is atomic; one descendant  │
+                     ▼                                          ▼
+              idle / absolute deadline                    ROTATED token reused
+                     ▼                                          ▼
+                  EXPIRED  ◀───────────────────────────  COMPROMISE DETECTED
+                                                          (all live sessions revoked)
+```
+
+EXPIRED and REVOKED are both represented by `revoked_at` + `revoked_reason`; reuse is the only transition that cascades to *other* sessions.
+
+#### 2.5.10 ERP machine authentication
+
+`X-API-Key` header validated with `secrets.compare_digest` against `settings.erp_api_key`; empty/mismatched ⇒ `403 Could not validate API KEY`. There is **no** fallback key outside development, and the key must never reach a browser. ERP credentials are a **static shared key** today: adequate for a single trusted integration on a private network, and the documented upgrade path is per-client credentials + rotation (optionally signed requests or mTLS) — not something to introduce without a product requirement. ERP is never routed through human sessions.
 
 ### 2.6 Authorization: identity, permissions, scope, and domain rules
 
@@ -456,13 +559,20 @@ Every tag below is also an OpenAPI tag declared in `main.py`. Auth column: **E**
 |---|---|---|---|
 | **account** | `GET /users/me` | Any | returns permissions + employee_id/code + resolved `business_role` / `scope_type` (the scope id is not exposed) |
 | | `GET /users/me/permissions` | Any | — |
-| **auth** | `POST /auth/employee/login` | public | mobile/email/username |
-| | `POST /auth/super-admin/login` | public | username only |
-| | `POST /auth/change-password` | Any | clears `must_change_password` |
-| | `PATCH /auth/super-admin/username` | SA | conflict-checked |
-| | `POST /auth/hr/employees/{id}/password-reset` | perm(`user.update`) + row scope | revokes sessions |
+| **auth** | `POST /auth/employee/login` | public, throttled | mobile/email/username → session (or MFA challenge) |
+| | `POST /auth/super-admin/login` | public, throttled | username only → session (or MFA challenge) |
+| | `POST /auth/change-password` | Any | clears `must_change_password` **and revokes every session** (`reauthentication_required: true`) |
+| | `PATCH /auth/super-admin/username` | SA + password step-up | conflict-checked |
+| | `POST /auth/hr/employees/{id}/password-reset` | perm(`user.update`) + row scope | revokes sessions, sets `must_change_password` |
 | | `GET /auth/invitation/validate`, `POST /auth/invitation/set-password` | public | 48 h, single-use token |
-| **auth-session** | `POST /auth/session`, `POST /auth/session/refresh`, `DELETE /auth/session` | Any / public / public | refresh rotation + replay kill |
+| **auth-session** | `POST /auth/session` | Any | issues another chain for an authenticated caller |
+| | `POST /auth/session/refresh` | public (token is the credential), throttled | rotation + replay kill; no access token required |
+| | `DELETE /auth/session` | public (token is the credential) | logout; idempotent |
+| | `GET /auth/sessions`, `GET /auth/session` | Any | signed-in devices / describe current |
+| | `DELETE /auth/sessions/{id}`, `DELETE /auth/sessions` | Any | sign one device out / sign out everywhere |
+| **auth-mfa** | `POST /auth/mfa/enroll`, `/activate`, `/verify` | challenge token only | first-time enrolment, confirm-and-sign-in, TOTP or recovery code |
+| | `GET /auth/mfa/status` | Any | enrolment state, recovery codes left |
+| | `POST /auth/mfa/reset`, `/confirm`, `/disable` | Any + password step-up | issue/activate/remove an authenticator |
 | **dashboard** | `GET /dashboard/metrics` | Any | self metrics; unit/dept/org metrics when the caller has team-review permissions, filtered by their resolved scope |
 | | `GET /dashboard/widgets` | Any | permission-filtered keys |
 |  | `GET /dashboard/technical-metrics` | SA | counts only; no audit row is written |
@@ -508,49 +618,62 @@ app/web
 │  ├─ assets/css/main.css             # People design tokens (--people-*)
 │  ├─ layouts/auth.vue                # split-screen unauthenticated shell (currently unused: login.vue sets layout:false)
 │  ├─ layouts/default.vue             # sidebar + topbar + bottom mobile nav + nav gating
-│  ├─ middleware/auth.global.ts       # route guard (session required, public paths)
-│  ├─ composables/useAuth.ts          # shared auth state, permissions, login/logout
+│  ├─ middleware/auth.global.ts       # route guard (session required, public paths incl. /admin/login)
+│  ├─ composables/useAuth.ts          # shared auth state, permissions, login/logout/MFA
 │  ├─ composables/useHrmsApi.ts       # typed wrapper over /api/hrms/** (+ 401 → /login)
+│  ├─ components/AuthMfaChallenge.vue # shared second-factor panel (login + admin login)
 │  ├─ components/dashboard/OwnerDashboard.vue
 │  ├─ components/attendance/AttendanceStatusBadge.vue
 │  └─ pages/…                         # see §3.5
 ├─ server/
-│  ├─ api/session/login.post.ts       # login → cookies → /users/me
-│  ├─ api/session/me.get.ts           # current user
+│  ├─ middleware/csrf.ts              # reject state-changing requests from an unexpected origin
+│  ├─ api/session/login.post.ts       # login → cookies → /users/me (or an MFA challenge)
+│  ├─ api/session/mfa.post.ts         # verify/activate a challenge → cookies → /users/me
+│  ├─ api/session/mfa/enroll.post.ts  # reveal a new authenticator secret (challenge token only)
+│  ├─ api/session/me.get.ts           # current user (refreshes once if the access token expired)
 │  ├─ api/session/index.delete.ts     # revoke + clear cookies
-│  ├─ api/hrms/[...path].ts           # single BFF proxy with transparent refresh
-│  └─ utils/hrms.ts                   # apiUrl, SESSION_COOKIE, REFRESH_COOKIE, upstreamError
-└─ shared/types/*.ts                  # 11 type modules shared by app & server
+│  ├─ api/hrms/[...path].ts           # single BFF proxy with single-flight transparent refresh
+│  └─ utils/hrms.ts                   # cookie names/options, session cookie helpers, refreshSession, upstreamError
+│  └─ utils/origin.ts                 # pure Origin/Referer validation used by the CSRF middleware
+└─ shared/types/*.ts                  # type modules shared by app & server
 ```
 
 ### 3.2 The BFF session proxy (why the browser never sees a token)
 
-Cookies (all `httpOnly`, `sameSite=lax`, `secure` outside dev):
+Cookies (all `httpOnly`, `sameSite=lax`, `secure` and `__Host-`-prefixed outside dev; tokens are never in `localStorage`, sessionStorage, Pinia or JS-readable cookies):
 
 | Cookie | TTL | Content |
 |---|---|---|
-| `people_session` | 15 min (8 h only between login and session creation) | access JWT |
-| `people_refresh` | 30 days | opaque refresh token |
+| `people_session` (prod: `__Host-people_session`) | access-token TTL from the API (15 min business / 5 min privileged) | access JWT |
+| `people_refresh` (prod: `__Host-people_refresh`) | until the session's `absolute_expires_at` — never longer | opaque refresh token |
+
+Browser cookie expiry is a transport detail only: revocation is always server-side, and the cookie lifetime is derived from the session deadlines the API returns.
 
 **Login** (`POST /api/session/login`):
 ```
 browser ──▶ Nitro: POST /api/session/login {identity, password, accountType}
    Nitro ──▶ FastAPI POST /auth/(employee|super-admin)/login   (form-urlencoded)
-   Nitro ──▶ FastAPI POST /auth/session  (Bearer login token)  → access 15 m + refresh 30 d
+             ↳ returns the session directly (access + rotating refresh) — no intermediate
+               long-lived bearer token is minted or exchanged
    Nitro ──▶ FastAPI GET  /users/me      (Bearer access)
    Nitro ──▶ browser: Set-Cookie people_session + people_refresh, body = CurrentUser
 ```
+If the API answers with an MFA challenge instead, the BFF passes `{mfa_required, mfa_token, enrollment_required, expires_in}` to the browser and stores **no** cookie; the page then posts the code to `/api/session/mfa` (or fetches the new secret from `/api/session/mfa/enroll` for first-time enrolment) and only then receives cookies.
 
 **Any business call** (`/api/hrms/<path>`):
 ```
 1. forward method/query/body with Authorization: Bearer <people_session>
 2. on 401 and a refresh cookie exists (and path ≠ auth/session/refresh):
-     POST /auth/session/refresh → rotate cookies → retry the original request once
+     single-flight POST /auth/session/refresh → rotate cookies → retry the original request once
 3. still 401 → delete both cookies and surface the upstream error
 ```
+`refreshSession()` de-duplicates concurrent rotations by keyed promise: a page that fires several calls at once performs **one** rotation (the API would otherwise treat the second use as replay and revoke the chain) and every caller applies the same new cookies.
+
 This means **token refresh is transparent to every page**: a 15-minute access token never logs a user out during a working session, and a replayed refresh token (rotation violation) does — correctly — kill the session.
 
-**Logout** (`DELETE /api/session`): revoke server-side refresh, clear cookies, `204`.
+**Logout** (`DELETE /api/session`): revoke the server-side refresh session, clear both cookies, `204`. Cookies are cleared even if the API call fails, and logging out twice is not an error.
+
+**CSRF / origin protection** (`server/middleware/csrf.ts`): every state-changing request (`POST`/`PUT`/`PATCH`/`DELETE`) must carry an `Origin` (or `Referer`) that matches the request's own host — or an entry in `NUXT_HRMS_ALLOWED_ORIGINS` — otherwise it is rejected with `403` before any handler runs. A request with neither header is treated as a non-browser client (mobile app, CLI, health probe) and allowed, because a browser always sends `Origin` on a cross-site state-changing request and a cookieless client holds no ambient authority to forge. `SameSite=Lax` is defence in depth here, not the whole strategy, and API CORS remains a separate concern on the FastAPI side.
 
 **Error translation** (`server/utils/hrms.ts → upstreamError`): FastAPI `detail` (string or `{reason}`) becomes the Nitro `statusMessage`, so pages can display `error.data.statusMessage` verbatim. Default status when upstream status is unknown: `502`.
 
@@ -565,10 +688,14 @@ This means **token refresh is transparent to every page**: a 15-minute access to
 | `businessRole` | the resolved elevated business role (or `null`) — for role-specific experiences such as the Organization Owner dashboard |
 | `scopeType` | `SELF` \| `DEPARTMENT` \| `UNIT` \| `ORGANIZATION`, used to adapt copy and layout; the scope *identifier* stays server-side |
 | `fetchUser(force = false)` | one `GET /api/session/me` per request; errors ⇒ signed-out state (never throws) |
-| `login(payload)` | posts to the BFF, sets the user, exposed `loading` |
+| `login(payload)` | posts to the BFF; returns the user, **or** an `MfaChallenge` the caller must complete before a session exists |
+| `completeMfa({mfa_token, code, enrollment})` | verifies/activates the second factor, sets the user |
+| `startMfaEnrollment(mfaToken)` | reveals the new authenticator secret + recovery codes (shown once) |
+| `mustChangePassword` | true while the account is on an HR/ERP temporary password; drives the "set a new password" prompt |
 | `logout()` | revokes session, clears state, `navigateTo('/login')` |
+| `clear()` | forgets client state without calling the API (used after a password change, which has already killed every session) |
 
-`middleware/auth.global.ts` runs on every navigation: `await fetchUser()` → unauthenticated and not a public path ⇒ `/login?redirect=<fullPath>`; authenticated visiting `/login` ⇒ `/`. Public paths: `/login`, `/forgot-password`, `/reset-password`, `/invitation`, `/verify-email`, `/auth/invitation` (only the first exists as a page today).
+`middleware/auth.global.ts` runs on every navigation: `await fetchUser()` → unauthenticated and not a public path ⇒ `/login?redirect=<fullPath>`; authenticated visiting a sign-in page ⇒ `/`. Public paths: `/login`, `/admin/login`, `/forgot-password`, `/reset-password`, `/invitation`, `/verify-email`, `/auth/invitation`.
 
 `useHrmsApi().request()` additionally hard-handles `401` mid-session: clears `auth-user` and redirects to `/login?redirect=<current>`, then rethrows.
 
@@ -603,7 +730,8 @@ Mobile: the 4 first non-dashboard visible items become the bottom bar, plus Prof
 
 | Page | Primary endpoint(s) | Key UI capabilities | Broken/limited (see §8) |
 |---|---|---|---|
-| `pages/login.vue` | `POST /api/session/login` | employee⇄super-admin toggle, password reveal, `redirect` honouring, inline error text | no forgot-password page (copy says "Password reset: contact HR") |
+| `pages/login.vue` | `POST /api/session/login`, `/api/session/mfa` | **workforce sign-in only** (mobile / email / username), password reveal, second-factor step, `redirect` honouring, inline error text; a temporary-password account is sent to `/settings?change-password=1` | link to `/admin/login`; no forgot-password page (copy says "Password reset: contact HR") |
+| `pages/admin/login.vue` | `POST /api/session/login` (`accountType: 'super_admin'`), `/api/session/mfa` | separate technical entry point (username only), visually distinct, MFA step with first-time enrolment | business accounts are rejected by the API |
 | `pages/index.vue` | `dashboard/metrics`, `dashboard/technical-metrics` (SA only), `dashboard/owner` via component | role-specific hero copy, 4 KPI cards, shift + today's attendance cards, pending-approvals list (managers), owner analytics branch | ignores `/dashboard/widgets` |
 | `pages/employees/index.vue` | `employees/`, `org/units`, `org/departments`, `designations/` | paginated directory, filters, activate/deactivate, delete | PATCH/DELETE endpoints **do not exist** → 405 |
 | `pages/employees/[id].vue` | `employees/{id}`, `employees/{id}/work-history` | profile, org placement, work history | — |
@@ -618,7 +746,7 @@ Mobile: the 4 first non-dashboard visible items become the bottom bar, plus Prof
 | `pages/reports/index.vue` | `reports/attendance-matrix`, `reports/leave-summary` | month picker, attendance matrix, leave summary; tabs gated by permission | — |
 | `pages/notifications.vue` | `notifications`, `notifications/{id}/read`, `notifications/mark-all-read` | list, read, mark-all | — |
 | `pages/profile.vue` | `users/me` (via composable) | identity, role label, employee code | — |
-| `pages/settings.vue` | `auth/change-password`, `auth/super-admin/username` | password change for everyone; username change for superuser only | — |
+| `pages/settings.vue` | `auth/change-password`, `auth/super-admin/username`, `auth/mfa/*`, `auth/sessions` | password change (ends every session → back to `/login`), username change with password step-up, two-step verification setup/removal, signed-in device list with per-device and global sign-out | MFA and username sections are technical-account oriented; the device list is for everyone |
 
 ### 3.6 Design system & responsive rules
 
@@ -649,12 +777,12 @@ Every page load and navigation runs the same preamble:
 5. Nitro returns CurrentUser → useState('auth-user') → nav + page permission gates resolve
 6. Page then fires its own /api/hrms/** calls (SSR `useAsyncData`), each subject to transparent refresh
 ```
-Failure modes: no cookie → `401` → `/login?redirect=…` · access expired + refresh valid → silent rotate (one retry) · refresh replayed → all sessions revoked → `401` → login.
+Failure modes: no cookie → `401` → `/login?redirect=…` · access expired + refresh valid → silent rotate (one retry) · refresh replayed, revoked, idle-timed-out or past its absolute deadline → `401` → login · password changed/reset → every chain revoked → login.
 
 ### 4.1 F1 — EMPLOYEE (self-service day)
 
-**Login.** `/login`, employee tab, mobile `9876543210` + password.
-`POST /api/session/login` → FastAPI normalizes to `+919876543210` → `UserManager.authenticate` → `Employee` link check → JWT → `POST /auth/session` → `GET /users/me`.
+**Login.** `/login`, mobile `9876543210` + password.
+`POST /api/session/login` → FastAPI normalizes to `+919876543210` → throttle check → `UserManager.authenticate` → dummy hash if unknown → `Employee` link check → **session issued directly** (access + rotating refresh) → `GET /users/me` → cookies set. An account with an enrolled authenticator is instead answered with an MFA challenge, completed in the same page.
 Result: role `EMPLOYEE`, permissions = self-service set (`employee.view_self`, `attendance.view_self`, `leave.apply`, `leave.view_self`, `leave.cancel`, `work_arrangement.*` self-service, `shift.view_self`, `overtime.view_self`).
 
 **Dashboard (`/`).** `GET /dashboard/metrics`:
@@ -682,7 +810,7 @@ On approval, each day becomes `WORK_FROM_HOME` in attendance, so the calendar st
 
 **Notifications (`/notifications`).** `GET /notifications` (user + role broadcasts), `PATCH …/{id}/read`, `POST …/mark-all-read`; server prunes with the retention rules in §2.7.9.
 
-**Security (`/settings`).** `POST /auth/change-password` → policy validated → hash replaced, `must_change_password = false`. Note: existing 8 h/session tokens are *not* revoked on password change (§8.3).
+**Security (`/settings`).** `POST /auth/change-password` → policy validated → hash replaced, `must_change_password = false`, **every session revoked** (`password_changed`) → the page clears client state and returns to `/login?notice=password-changed`. An access token already issued stays valid for at most one access-token TTL (§2.5.3). The same page lists signed-in devices and can sign one out or all of them out.
 
 ### 4.2 F2 — DEPARTMENT_MANAGER (approve & report for one department)
 
@@ -812,15 +940,22 @@ OvertimeRecord  PENDING ──approve/reject──▶ (service only; no HTTP sur
 
 ## 7. Testing & verification
 
-`uv run pytest` in `app/api` — 15 modules, mostly async end-to-end service/API tests against a real (test) database.
+`uv run pytest` in `app/api` — 22 modules (~164 tests), mostly async end-to-end service/API tests against a real (test) database.
 
 | Test module | Covers |
 |---|---|
 | `test_main.py` | root + health endpoints |
 | `test_auth_setup.py` | limiter wiring, user schemas, OWNER permission boundary, invalid-login robustness, CORS preflight |
+| `test_auth_primitives.py` | token/crypto primitives (refresh entropy + hash-only storage, audience separation, expiry, wrong key), TOTP accept/reject, password policy (weak, personal-info, passphrase, breach-checker selection + fail-open), and the throttle rules: per-pair blocking, geometric growth with a cap, short delay for a typo, one employee cannot lock out colleagues, success clears counters, separate refresh budget, key normalisation, store-backend misconfiguration, counter expiry |
+| `test_auth_sessions.py` | session lifecycle over HTTP: direct session issuance at login, rotation + old-token rejection, replay of a logged-out token not destroying sibling sessions, logout-everywhere, device listing, idle timeout, absolute timeout that refreshing cannot extend, refresh-TTL expiry, the concurrent-refresh race (exactly one winner), audited reuse detection, malformed tokens |
+| `test_auth_hardening_http.py` | every workforce role through one business endpoint, technical↔business door separation, no account enumeration, secret-free auth audit events, login throttling + recovery, refresh-abuse throttling, password change ending all sessions, access token surviving until expiry, HR temporary-password reset revocation + forced change, must-change-password clearing, Super Admin MFA challenge completion, challenge token not usable as an access token, employee MFA opt-in |
+| `test_business_role_authorization.py` | the authorization matrix: base permissions for everyone, manager/unit-HR/org-HR/owner/super-admin reach, HR bundle identical across scopes, org scope not conferring owner analytics |
+| `test_business_role_provisioning.py` | role assignment/transfer reconciliation (a moved unit HR cannot keep the old unit's scope), legacy-only rows repaired on write, explicit `null` beating a stale legacy `role`, audited role changes |
+| `test_permission_grants.py` | static guard: every permission code in the catalog is granted, and every role bundle key is a real role |
+| `test_employee_access.py` | permission scope from fixed role, org scope, self-access, out-of-scope rejection |
+| `test_attendance_corrections_http.py` | corrections over HTTP, including unit-bounded HR reach and the ERP-confirmation contract |
 | `test_invitation_flow.py` | invitation token creation/hashing/validation, password policy (`None` guard) |
 | `test_email_service.py` | MIME construction, STARTTLS, reset/invitation/verification/email-changed templates |
-| `test_employee_access.py` | permission scope from fixed role, org scope, self-access, out-of-scope rejection |
 | `test_milestone_1.py` | designation CRUD, employee profile + hierarchy |
 | `test_milestone_2.py` | shifts (night shift), assignment overlap, cross-midnight window, holiday lists/weekly offs, punch ingest + dedupe |
 | `test_milestone_3.py` | attendance processing: full day, late/early exit, half-day/absent thresholds, missed punch, unpunched weekly-off/leave/absent, correction workflow |
@@ -832,7 +967,9 @@ OvertimeRecord  PENDING ──approve/reject──▶ (service only; no HTTP sur
 | `test_shift_schedule_batching.py` | batched schedule context equals per-date resolution, fallback outside context, upcoming search + schema, single-query employee shift listing |
 | `test_migration_setup.py` | Postgres config + Alembic files present |
 
-Frontend: `pnpm typecheck` + `pnpm lint` only (no component/E2E framework yet — a stated gap in `AGENTS.md`).
+`tests/auth_helpers.py` holds the shared fixtures those auth suites build on (account/session factories, TOTP code generation, throttle reset).
+
+Frontend: `pnpm typecheck` + `pnpm lint` only (no component/E2E framework yet — a stated gap in `AGENTS.md`). The CSRF/origin checker is pure and was additionally exercised case-by-case end-to-end (cross-origin `POST /api/session/login` → `403` from the BFF middleware; same-origin → upstream), and the whole login → `/users/me` → refresh-rotation → replay-revocation → logout path was driven through a real browser and `curl` against live dev servers.
 
 ---
 
@@ -866,13 +1003,13 @@ These are verified against the current code and are the highest-value item in th
 
 ### 8.3 Security & correctness notes
 
-* **Session vs token TTL mismatch.** A logged-in browser holds a 15-minute access token (good), but the login-issued JWT is 8 h and remains valid even after logout/refresh revocation, because JWT validation is stateless (`core/auth.py`) — the only compensating control is that clients never see it (BFF). Treat any leaked bearer token as valid for up to 8 h.
-* **Password change does not revoke sessions** (`auth_login.change_password`): other refresh sessions keep working.
-* **Refresh endpoint is unauthenticated by design** and protected only by the opaque token hash; brute force is infeasible, but there is no per-IP rate limit tighter than the global 200/min.
-* **Super Admin has organization-wide read scope** via `get_permission_scope`; production posture depends on keeping that account break-glass only.
+* **Stateless access tokens bound the revocation window.** A password change or "sign out everywhere" ends every refresh chain immediately, but an access token already issued stays valid until it expires (15 min business, 5 min privileged) because JWT validation cannot consult the session row. This is deliberate (no per-request session lookup, no cached permissions) and the reason the TTL is minutes — see §2.5.3. A denylist/`jti` check is the upgrade path if that window is ever judged too wide (D7).
+* **Super Admin has organization-wide read scope** via `get_permission_scope`; production posture depends on keeping that account break-glass only. Set `MFA_REQUIRED_FOR_SUPER_ADMIN=true` and enrol before going live — the API logs a startup warning while it is off.
+* **Throttling is only as shared as its store.** `AUTH_THROTTLE_BACKEND=memory` (the default) means each worker counts separately; production validates against this at startup (D9), but a single-worker deployment still has a single point of failure for the counters.
+* **A throttled login tells the user *that* they must wait, not *how long*.** The API returns a correct `429` with `Retry-After: <seconds>`, but the BFF's `upstreamError` rebuilds the error from the body, so the countdown is dropped and the sign-in toast can only show the generic message. Forwarding the header (and rendering it in the login page) is a small, self-contained follow-up if the countdown is wanted.
 * **Anonymous `/health`** leaks DB reachability + uptime (rate-limited to 10/min).
 * `ensure_permission(email, path, method)` in `core/auth.py` returns `bool(email)` for everything — dead/placeholder authorization helper; do not build on it.
-* Seed defaults (`SuperAdmin@123`, dev JWT secret) are guarded by `validate_runtime_secrets()` **only** when `ENVIRONMENT` is not development — a mis-set `ENVIRONMENT` silently accepts them.
+* Seed defaults (`SuperAdmin@123`, dev JWT secret) are guarded by `validate_runtime_secrets()`; the development shortcut is an explicit allow-list of environment names, so a typo such as `ENVIRONMENT=Production` no longer disables the checks.
 
 ---
 
@@ -886,9 +1023,9 @@ These are verified against the current code and are the highest-value item in th
 | D4 | **Notifications on workflow events** | (a) emit on apply/approve/reject/cancel to the actor + approver + employee; (b) keep polling dashboards | (a) — `create_notification` already exists; wire it in the four services and reuse `link`/`reference_id` |
 | D5 | **Approver routing** | (a) keep role+scope routing; (b) use `department_approvers` | Decide before exposing more approval types; today the table is misleading |
 | ~~D6~~ | ~~**`attendance.approve_correction`**~~ **Settled** | — | Resolved by removing the code and the approve/reject routes, and gating corrections on `attendance.correct` + row scope (§2.6.2). No dead-end permission code remains |
-| D7 | **Access-token TTL policy** | (a) keep 8 h login JWT + 15 min session access; (b) shorten the login JWT to 15 min and issue sessions from it; (c) add a JWT denylist/jti check on logout | (b) or (c) to close the §8.3 revocation gap |
+| ~~D7~~ | ~~**Access-token TTL policy**~~ **Settled** | — | Resolved: login issues the session directly (no intermediate 8 h bearer token at all), access tokens are 15 min / 5 min privileged, and refresh chains are revoked on logout, password change, reset, idle and absolute deadlines. The residual window is one access-token TTL and is documented in §2.5.3/§8.3 |
 | D8 | **Scheduler** | (a) external cron calling `/attendance/process`; (b) in-process loop like notifications cleanup; (c) Celery/APScheduler | (b) for now (one fewer moving part, matches existing precedent), (c) before horizontal scale |
-| D9 | **Rate limiting & sessions at scale** | (a) in-memory limiter + DB sessions (today); (b) Redis for both | (b) is required the moment you run more than one API worker |
+| D9 | **Rate limiting & sessions at scale** | (a) in-memory limiter + DB sessions (today); (b) Redis for both | Authentication throttling already has a Redis backend (`AUTH_THROTTLE_BACKEND=redis`, validated at startup) — **enable it before running more than one worker**. The generic API limiter is still in-process memory and should move next |
 | D10 | **Frontend test strategy** | (a) keep lint/typecheck only; (b) add component tests for the approval queue + login; (c) Playwright E2E over the BFF proxy | (b) now, (c) when D1/D2 stabilise the action surface |
 | D11 | **Invitations** | (a) finish the invitation UX (page + send on ERP create, replacing temporary passwords); (b) drop the invitation code path | (a) — templates and token lifecycle are already built and tested |
 | D12 | **Docs ownership** | Keep §2.9/§3.5/§8 tables updated in the PR template | Assign a reviewer per area (backend/frontend lead) |

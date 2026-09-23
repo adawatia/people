@@ -1,7 +1,30 @@
-import type { CurrentUser, LoginPayload } from '#shared/types/auth'
-import { apiUrl, REFRESH_COOKIE, SESSION_COOKIE, upstreamError } from '../../utils/hrms'
+import type { CurrentUser, LoginPayload, LoginResult, MfaChallenge } from '#shared/types/auth'
+import { apiUrl, setAccessCookie, setRefreshCookie, upstreamError } from '../../utils/hrms'
 
-export default defineEventHandler(async (event) => {
+/** Mirror of the API's `LoginResponse`: either a session or an MFA challenge. */
+interface UpstreamLoginResponse {
+  access_token?: string | null
+  refresh_token?: string | null
+  expires_in?: number | null
+  absolute_expires_at?: string | null
+  must_change_password?: boolean
+  mfa_required?: boolean
+  mfa_enrollment_required?: boolean
+  mfa_token?: string | null
+  mfa_expires_in?: number | null
+}
+
+/**
+ * Sign in. Passwords are verified by the API; this handler only decides which
+ * authentication domain the request belongs to and stores the returned session
+ * in HttpOnly cookies.
+ *
+ * `accountType` selects the *domain* (workforce vs technical), never a business
+ * role: every workforce role — employee, manager, unit HR, organization HR,
+ * organization owner — uses the business login, and permissions/scope are
+ * resolved afterwards from `/users/me`.
+ */
+export default defineEventHandler(async (event): Promise<LoginResult> => {
   const payload = await readBody<LoginPayload>(event)
   if (!payload.identity?.trim() || !payload.password) {
     throw createError({ statusCode: 400, statusMessage: 'Enter your mobile number or username and password.' })
@@ -10,26 +33,35 @@ export default defineEventHandler(async (event) => {
   try {
     const form = new URLSearchParams({ username: payload.identity.trim(), password: payload.password })
     const loginPath = payload.accountType === 'super_admin' ? 'auth/super-admin/login' : 'auth/employee/login'
-    const auth = await $fetch<{ access_token: string, token_type: string, must_change_password: boolean }>(apiUrl(event, loginPath), {
+    const auth = await $fetch<UpstreamLoginResponse>(apiUrl(event, loginPath), {
       method: 'POST',
       body: form,
       headers: { 'content-type': 'application/x-www-form-urlencoded' }
     })
-    setCookie(event, SESSION_COOKIE, auth.access_token, {
-      httpOnly: true,
-      secure: !import.meta.dev,
-      sameSite: 'lax',
-      path: '/',
-      maxAge: 60 * 60 * 8
-    })
-    const session = await $fetch<{ access_token: string, refresh_token: string }>(apiUrl(event, 'auth/session'), {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${auth.access_token}` }
-    })
-    setCookie(event, SESSION_COOKIE, session.access_token, { httpOnly: true, secure: !import.meta.dev, sameSite: 'lax', path: '/', maxAge: 60 * 15 })
-    setCookie(event, REFRESH_COOKIE, session.refresh_token, { httpOnly: true, secure: !import.meta.dev, sameSite: 'lax', path: '/', maxAge: 60 * 60 * 24 * 30 })
+
+    if (auth.mfa_required) {
+      if (!auth.mfa_token) {
+        throw createError({ statusCode: 502, statusMessage: 'The HRMS service returned an invalid MFA challenge.' })
+      }
+      const challenge: MfaChallenge = {
+        mfa_required: true,
+        mfa_token: auth.mfa_token,
+        enrollment_required: Boolean(auth.mfa_enrollment_required),
+        expires_in: auth.mfa_expires_in ?? 300
+      }
+      return challenge
+    }
+
+    if (!auth.access_token) {
+      throw createError({ statusCode: 502, statusMessage: 'The HRMS service did not return a session.' })
+    }
+    // The session is issued directly by login: there is no intermediate
+    // long-lived bearer token to exchange (and therefore none to steal).
+    setAccessCookie(event, auth.access_token, auth.expires_in)
+    if (auth.refresh_token) setRefreshCookie(event, auth.refresh_token, auth.absolute_expires_at)
+
     return await $fetch<CurrentUser>(apiUrl(event, 'users/me'), {
-      headers: { Authorization: `Bearer ${session.access_token}` }
+      headers: { Authorization: `Bearer ${auth.access_token}` }
     })
   } catch (error) {
     throw upstreamError(error)
