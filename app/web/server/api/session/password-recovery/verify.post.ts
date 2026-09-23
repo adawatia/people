@@ -1,4 +1,4 @@
-import { apiUrl, upstreamError } from '../../../../utils/hrms'
+import { apiUrl, upstreamError } from '../../../utils/hrms'
 
 export default defineEventHandler(async (event) => {
   const payload = await readBody<{ recovery_token?: string, code?: string }>(event)
