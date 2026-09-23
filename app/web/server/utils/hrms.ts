@@ -51,7 +51,7 @@ function baseCookieOptions() {
 export function setAccessCookie(event: H3Event, token: string, expiresInSeconds?: number | null) {
   setCookie(event, SESSION_COOKIE, token, {
     ...baseCookieOptions(),
-    maxAge: Math.max(60, Math.floor(expiresInSeconds ?? 900))
+    maxAge: Math.max(0, Math.floor(expiresInSeconds ?? 900))
   })
 }
 
@@ -63,7 +63,7 @@ export function setAccessCookie(event: H3Event, token: string, expiresInSeconds?
 export function setRefreshCookie(event: H3Event, token: string, absoluteExpiresAt?: string | null) {
   const deadline = absoluteExpiresAt ? Date.parse(absoluteExpiresAt) : Number.NaN
   const maxAge = Number.isFinite(deadline)
-    ? Math.max(60, Math.floor((deadline - Date.now()) / 1000))
+    ? Math.max(0, Math.floor((deadline - Date.now()) / 1000))
     : 60 * 60 * 24 * 30
   setCookie(event, REFRESH_COOKIE, token, { ...baseCookieOptions(), maxAge })
 }
