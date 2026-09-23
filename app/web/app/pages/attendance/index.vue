@@ -11,9 +11,9 @@ const monthCursor = ref(new Date(new Date().getFullYear(), new Date().getMonth()
 const correctionRecord = ref<AttendanceRecord | null>(null)
 const correction = reactive({ requested_punch_in: '', requested_punch_out: '', reason: '' })
 const correctionLoading = ref(false)
-// Only HR can raise a correction (the API enforces the same rule), and employees
-// are not linked to an employee profile anyway.
-const canRequestCorrection = computed(() => Boolean(auth.user.value?.is_superuser) || auth.user.value?.role === 'HR_ADMIN')
+// Only HR can raise a correction: the API gates this on the attendance.correct
+// permission plus the caller's row scope.
+const canRequestCorrection = computed(() => auth.hasPermission('attendance.correct'))
 
 function dateKey(value: Date) {
   const year = value.getFullYear()

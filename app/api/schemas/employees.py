@@ -3,7 +3,14 @@ from decimal import Decimal
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, EmailStr
 
+# Elevated business roles (``Employee.role`` remains the compatibility mirror of
+# this value; "EMPLOYEE" means "no elevation").
 BusinessRole = Literal["EMPLOYEE", "DEPARTMENT_MANAGER", "HR_ADMIN", "ORGANIZATION_OWNER"]
+
+# Where a business role applies. HR admins are configured as either UNIT
+# (default) or ORGANIZATION; managers are DEPARTMENT; organization owners are
+# always ORGANIZATION.
+AccessScope = Literal["SELF", "DEPARTMENT", "UNIT", "ORGANIZATION"]
 
 
 class ShiftRead(BaseModel):
@@ -67,6 +74,11 @@ class EmployeeCreate(EmployeeBase):
     shift_id: int | None = None
     reporting_manager_id: int | None = None
     monthly_salary: float | None = None
+    # Optional explicit authorization assignment. When omitted, ``role`` drives
+    # the defaults (unit HR, department manager, organization owner).
+    business_role: BusinessRole | None = None
+    access_scope: AccessScope | None = None
+    access_scope_id: int | None = None
 
 
 class EmployeeOnboardingCreate(EmployeeCreate):
@@ -92,6 +104,11 @@ class EmployeeOnboardingCreate(EmployeeCreate):
 
 class EmployeeUpdate(BaseModel):
     role: BusinessRole | None = None
+    # Explicit authorization assignment, used by the ERP integration to grant a
+    # business role and to place HR at unit or organization scope.
+    business_role: BusinessRole | None = None
+    access_scope: AccessScope | None = None
+    access_scope_id: int | None = None
     first_name: str | None = None
     last_name: str | None = None
     official_email: str | None = None
@@ -207,6 +224,11 @@ class EmployeeRead(EmployeeBase):
     exit_reason: str | None = None
     created_at: datetime
     updated_at: datetime | None = None
+
+    # Resolved authorization identity (ERP/integration facing).
+    business_role: BusinessRole | None = None
+    access_scope: AccessScope = "SELF"
+    access_scope_id: int | None = None
 
     # Nested / derived readable names
     full_name: str | None = None

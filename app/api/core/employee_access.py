@@ -1,15 +1,17 @@
 """
 core/employee_access.py — Row-level access scoping for employees.
 
-Permissions answer *what* a user may do; this module answers *which
-employees* the action applies to. The hierarchy is:
+Permissions answer *what* a user may do (``core.auth``); this module answers
+*which employees* the action applies to, by translating the employee's
+business role + access scope (``core.business_roles``) into a row scope:
 
-    organization  (Super Admin / HR_ADMIN fallback)
-      └── unit              (HR_ADMIN sees their unit)
-            └── department  (DEPARTMENT_MANAGER sees their department)
+    SELF          → only the caller's own employee record
+    DEPARTMENT    → {access_scope_id or department_id}
+    UNIT          → {access_scope_id or unit_id}      (unit HR)
+    ORGANIZATION  → every employee (org HR, Organization Owner, Super Admin)
 
-`EmployeeAccessScope` is the resulting view: either the whole
-organization, or a set of unit/department IDs.
+`EmployeeAccessScope` is the resulting view.  Scope resolution stays
+centralized here: routers never re-derive it from ``Employee.role``.
 """
 
 from dataclasses import dataclass, field
@@ -18,6 +20,13 @@ from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import get_user_permissions
+from core.business_roles import (
+    SCOPE_DEPARTMENT,
+    SCOPE_ORGANIZATION,
+    SCOPE_UNIT,
+    BusinessAccess,
+    resolve_business_access,
+)
 from db.models import Employee, User
 from repositories.employee_repo import EmployeeRepository
 
@@ -26,30 +35,47 @@ from repositories.employee_repo import EmployeeRepository
 class EmployeeAccessScope:
     """The slice of the organization a user is allowed to see.
 
-    `organization=True` grants everything. Otherwise access is limited to
-    the listed unit and department IDs (either may be empty).
+    `organization=True` grants everything. Otherwise access is limited to the
+    listed employee, unit and department IDs (any may be empty);
+    ``employee_ids`` carries SELF scope — the caller's own record.
     """
 
     organization: bool = False
     unit_ids: set[int] = field(default_factory=set)
     department_ids: set[int] = field(default_factory=set)
+    employee_ids: set[int] = field(default_factory=set)
 
     def include(self, other: "EmployeeAccessScope") -> None:
         """Merge `other` into this scope (used when a route accepts several permissions)."""
         self.organization = self.organization or other.organization
         self.unit_ids.update(other.unit_ids)
         self.department_ids.update(other.department_ids)
+        self.employee_ids.update(other.employee_ids)
 
     def allows(self, employee: Employee) -> bool:
-        """Is this employee visible within the scope?"""
+        """Is this employee visible within the scope?
+
+        Read defensively so the check also works on a lightweight stand-in
+        (a projection or a test double) that only carries the three ids.
+        """
+        employee_id = getattr(employee, "id", None)
+        unit_id = getattr(employee, "unit_id", None)
+        department_id = getattr(employee, "department_id", None)
         return (
             self.organization
-            or (employee.unit_id is not None and employee.unit_id in self.unit_ids)
-            or (
-                employee.department_id is not None
-                and employee.department_id in self.department_ids
-            )
+            or (employee_id is not None and employee_id in self.employee_ids)
+            or (unit_id is not None and unit_id in self.unit_ids)
+            or (department_id is not None and department_id in self.department_ids)
         )
+
+    @property
+    def self_only(self) -> bool:
+        """True when the scope grants no organization/unit/department reach.
+
+        List endpoints read this as "restrict the query to the caller's own
+        employee_id", which is also how a bare employee is handled.
+        """
+        return not (self.organization or self.unit_ids or self.department_ids)
 
 
 async def get_current_employee(user: User, session: AsyncSession) -> Employee:
@@ -63,17 +89,46 @@ async def get_current_employee(user: User, session: AsyncSession) -> Employee:
     return employee
 
 
+def scope_for_employee(employee: Employee) -> EmployeeAccessScope:
+    """Translate an employee's business role + access scope into a row scope.
+
+    This is the only place scope is derived from a role, so unit HR,
+    organization HR, department managers and organization owners all resolve
+    through the same rules.
+    """
+    access: BusinessAccess = resolve_business_access(employee)
+    if access.scope_type == SCOPE_ORGANIZATION:
+        return EmployeeAccessScope(organization=True)
+    if access.scope_type == SCOPE_UNIT:
+        return EmployeeAccessScope(unit_ids={access.scope_id} if access.scope_id else set())
+    if access.scope_type == SCOPE_DEPARTMENT:
+        return EmployeeAccessScope(department_ids={access.scope_id} if access.scope_id else set())
+    return EmployeeAccessScope(employee_ids={employee.id})
+
+
+async def get_employee_scope(user: User, session: AsyncSession) -> EmployeeAccessScope:
+    """Row scope for the caller's business role, without a permission gate.
+
+    Use this when the route already established the *permission* (for example
+    with ``require_permission``) and only needs to know which records the
+    caller may touch.  Super Admin keeps the break-glass organization scope.
+    """
+    if user.is_superuser:
+        return EmployeeAccessScope(organization=True)
+    return scope_for_employee(await get_current_employee(user, session))
+
+
 async def get_permission_scope(
     user: User,
     permission_code: str,
     session: AsyncSession,
 ) -> EmployeeAccessScope:
-    """Translate a user's role into a concrete visibility scope.
+    """Row scope for a user *for one permission code*.
 
-    - Super Admin and ORGANIZATION_OWNER → whole organization.
-    - HR_ADMIN → their own unit.
-    - DEPARTMENT_MANAGER → their own department.
-    - Anyone lacking the permission entirely → an empty scope.
+    - Super Admin → whole organization.
+    - Anyone lacking the permission → an empty scope (no access at all).
+    - Otherwise the scope of their business role: SELF, DEPARTMENT, UNIT or
+      ORGANIZATION (an HR admin's scope follows the assigned access scope).
 
     The returned scope is *not* merged with other permissions; callers that
     accept multiple permission codes merge scopes themselves via `include`.
@@ -81,18 +136,20 @@ async def get_permission_scope(
     if user.is_superuser:
         return EmployeeAccessScope(organization=True)
     employee = await get_current_employee(user, session)
-    permissions = set(await get_user_permissions(user, session))
-    requested = {permission_code} if isinstance(permission_code, str) else set(permission_code)
-    if not permissions.intersection(requested):
+    if not await _holds_permission(user, permission_code, session):
         return EmployeeAccessScope()
-    role = employee.role
-    if role == "ORGANIZATION_OWNER":
-        return EmployeeAccessScope(organization=True)
-    if role == "HR_ADMIN":
-        return EmployeeAccessScope(unit_ids={employee.unit_id} if employee.unit_id else set())
-    if role == "DEPARTMENT_MANAGER":
-        return EmployeeAccessScope(department_ids={employee.department_id} if employee.department_id else set())
-    return EmployeeAccessScope()
+    return scope_for_employee(employee)
+
+
+async def _holds_permission(
+    user: User,
+    permission_code: str | tuple[str, ...],
+    session: AsyncSession,
+) -> bool:
+    """Does the user hold at least one of the requested permission codes?"""
+    requested = {permission_code} if isinstance(permission_code, str) else set(permission_code)
+    permissions = set(await get_user_permissions(user, session))
+    return bool(permissions.intersection(requested))
 
 
 async def require_employee_access(

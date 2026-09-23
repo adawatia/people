@@ -203,7 +203,19 @@ class Employee(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int | None] = mapped_column(ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True, unique=True, index=True)
     employee_code: Mapped[str] = mapped_column(String(30), unique=True, nullable=False, index=True)
+    # Compatibility mirror of the elevated role ("EMPLOYEE" = none). Still the
+    # field ERP integrations write; business_role is the authorization source
+    # of truth once set (see core/business_roles.py).
     role: Mapped[str] = mapped_column(String(30), default="EMPLOYEE", nullable=False, index=True)
+    # Optional elevated business role: DEPARTMENT_MANAGER | HR_ADMIN |
+    # ORGANIZATION_OWNER. NULL = plain employee with base self-service access.
+    business_role: Mapped[str | None] = mapped_column(String(30), nullable=True, index=True)
+    # Where the business role applies: SELF | DEPARTMENT | UNIT | ORGANIZATION.
+    access_scope: Mapped[str] = mapped_column(String(20), default="SELF", server_default="SELF", nullable=False)
+    # Scope identifier: unit_id for UNIT scope, department_id for DEPARTMENT
+    # scope, NULL for SELF and ORGANIZATION. NULL for a scoped role resolves to
+    # the employee's own unit/department.
+    access_scope_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # Basic Profile
     first_name: Mapped[str] = mapped_column(String(100), default="", nullable=False)

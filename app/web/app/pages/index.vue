@@ -5,20 +5,23 @@ useSeoMeta({ title: 'Dashboard' })
 const auth = useAuth()
 const api = useHrmsApi()
 const isTechnicalAdmin = computed(() => Boolean(auth.user.value?.is_superuser))
-const role = computed(() => auth.user.value?.role || 'EMPLOYEE')
-const isOrganizationOwner = computed(() => role.value === 'ORGANIZATION_OWNER')
-const isManager = computed(() => role.value === 'DEPARTMENT_MANAGER' || role.value === 'HR_ADMIN')
-const dashboardTitle = computed(() => role.value === 'ORGANIZATION_OWNER' ? 'Organization operations at a glance.' : role.value === 'HR_ADMIN' ? 'Unit operations at a glance.' : role.value === 'DEPARTMENT_MANAGER' ? 'Your department at a glance.' : 'Here’s your workday at a glance.')
-const dashboardSubtitle = computed(() => role.value === 'ORGANIZATION_OWNER' ? 'Monitor company-wide attendance, workforce exceptions, leave and overtime.' : role.value === 'HR_ADMIN' ? 'Monitor unit attendance and handle requests that need HR attention.' : role.value === 'DEPARTMENT_MANAGER' ? 'Review your department attendance, leave and approval workload.' : 'Review your attendance, leave balance and work schedule.')
+// The Organization Owner dashboard is a genuinely role-specific experience;
+// everything else here follows the scope the API will actually apply.
+const isOrganizationOwner = computed(() => auth.businessRole.value === 'ORGANIZATION_OWNER')
+const scopeType = computed(() => auth.scopeType.value)
+const hasTeamScope = computed(() => scopeType.value !== 'SELF')
+const teamLabel = computed(() => scopeType.value === 'ORGANIZATION' ? 'Organization members' : scopeType.value === 'UNIT' ? 'Unit members' : scopeType.value === 'DEPARTMENT' ? 'Department members' : 'Employees')
+const dashboardTitle = computed(() => isOrganizationOwner.value ? 'Organization operations at a glance.' : scopeType.value === 'ORGANIZATION' ? 'Organization operations at a glance.' : scopeType.value === 'UNIT' ? 'Unit operations at a glance.' : scopeType.value === 'DEPARTMENT' ? 'Your department at a glance.' : 'Here’s your workday at a glance.')
+const dashboardSubtitle = computed(() => isOrganizationOwner.value ? 'Monitor company-wide attendance, workforce exceptions, leave and overtime.' : scopeType.value === 'ORGANIZATION' ? 'Monitor organization-wide attendance and handle requests that need HR attention.' : scopeType.value === 'UNIT' ? 'Monitor unit attendance and handle requests that need HR attention.' : scopeType.value === 'DEPARTMENT' ? 'Review your department attendance, leave and approval workload.' : 'Review your attendance, leave balance and work schedule.')
 const greeting = computed(() => {
   const hour = new Date().getHours()
   return hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
 })
 const { data, pending, error, refresh } = await useAsyncData('dashboard-metrics', () => api.request<DashboardMetrics>('dashboard/metrics'))
 const { data: technicalMetrics } = await useAsyncData('technical-admin-metrics', () => api.request<{ users: number, employees: number, units: number, departments: number, designations: number }>('dashboard/technical-metrics'), { immediate: isTechnicalAdmin.value })
-const stats = computed(() => isManager.value
+const stats = computed(() => hasTeamScope.value
   ? [
-      { label: role.value === 'HR_ADMIN' ? 'Unit members' : 'Department members', value: data.value?.unitMetrics.totalHeadcount ?? 0, icon: 'i-lucide-users-round', tone: 'var(--people-blue)', ink: 'var(--people-blue-ink)' },
+      { label: teamLabel.value, value: data.value?.unitMetrics.totalHeadcount ?? 0, icon: 'i-lucide-users-round', tone: 'var(--people-blue)', ink: 'var(--people-blue-ink)' },
       { label: 'Present today', value: data.value?.unitMetrics.presentCount ?? 0, icon: 'i-lucide-circle-check-big', tone: 'var(--people-mint)', ink: 'var(--people-mint-ink)' },
       { label: 'On leave', value: data.value?.unitMetrics.leaveCount ?? 0, icon: 'i-lucide-calendar-heart', tone: 'var(--people-lavender)', ink: 'var(--people-lavender-ink)' },
       { label: 'Needs attention', value: (data.value?.unitMetrics.pendingLeaves ?? 0) + (data.value?.unitMetrics.pendingCorrections ?? 0), icon: 'i-lucide-inbox', tone: 'var(--people-peach)', ink: 'var(--people-peach-ink)' }
@@ -196,7 +199,7 @@ const shiftTimeRange = (shift?: EmployeeDashboardShift | null) => shift
 
       <div
         class="mt-6 grid gap-6"
-        :class="isManager ? 'xl:grid-cols-[1.15fr_0.85fr]' : 'xl:grid-cols-2'"
+        :class="hasTeamScope ? 'xl:grid-cols-[1.15fr_0.85fr]' : 'xl:grid-cols-2'"
       >
         <UCard>
           <div class="flex items-start gap-3">
@@ -283,7 +286,7 @@ const shiftTimeRange = (shift?: EmployeeDashboardShift | null) => shift
           </div>
         </UCard>
 
-        <UCard v-if="isManager">
+        <UCard v-if="hasTeamScope">
           <div class="flex items-center justify-between">
             <div>
               <h3 class="font-semibold">

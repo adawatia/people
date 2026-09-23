@@ -180,14 +180,21 @@ def test_schedule_upcoming_search_and_schedule_schema(unique_suffix):
                                       effective_to=None)
             )
 
-            schedule = await service.get_employee_shift_schedule(emp.id)
+            # Pin "now" to midday: the upcoming search looks for the next shift
+            # *start* after now, so with an unpinned clock this assertion is
+            # wrong for anyone running the suite before 09:00 IST (today's
+            # window would legitimately be the upcoming one).
+            noon = now_ist().replace(hour=12, minute=0, second=0, microsecond=0)
+            schedule = await service.get_employee_shift_schedule(emp.id, for_timestamp=noon)
             assert schedule.assigned_shift is not None
             assert schedule.assigned_shift.shift_id == day_shift.id
             # previous_shift is the shift scheduled on yesterday's date.
             assert schedule.previous_shift is not None
             assert schedule.previous_shift.shift_id == day_shift.id
+            # upcoming_shift is tomorrow's start, because today's already began.
             assert schedule.upcoming_shift is not None
             assert schedule.upcoming_shift.shift_start > schedule.assigned_shift.shift_start
+            assert schedule.upcoming_shift.shift_start.date() == today() + timedelta(days=1)
 
     run_async(_test())
 

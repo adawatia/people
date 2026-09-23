@@ -10,6 +10,13 @@ from core.mobile import normalize_indian_mobile
 
 # User schemas. Business role and scope are ERP-owned fields on Employee.
 
+# Elevated business role and the scope it applies to. The frontend uses these
+# for role-specific experiences and scope-aware copy; authorization itself
+# always comes from ``permissions`` plus the server-side row scope.
+BusinessRoleName = Literal["DEPARTMENT_MANAGER", "HR_ADMIN", "ORGANIZATION_OWNER"]
+AccessScopeName = Literal["SELF", "DEPARTMENT", "UNIT", "ORGANIZATION"]
+
+
 class UserPermissionsResponse(BaseModel):
     permissions: list[str] = Field(default_factory=list, description="List of granted permission codes")
 
@@ -28,6 +35,12 @@ class UserRead(BaseUser[int]):
     employee_id: int | None = Field(default=None, description="Linked Employee ID if profile exists")
     employee_code: str | None = Field(default=None, description="Linked Employee Code if profile exists")
     role: Literal["EMPLOYEE", "DEPARTMENT_MANAGER", "HR_ADMIN", "ORGANIZATION_OWNER", "SUPER_ADMIN"] = "EMPLOYEE"
+    business_role: BusinessRoleName | None = Field(
+        default=None, description="Elevated business role; null means base employee access"
+    )
+    scope_type: AccessScopeName = Field(
+        default="SELF", description="Where the business role applies (scope identifier is intentionally not exposed)"
+    )
 
     @property
     def is_invitation_pending(self) -> bool:

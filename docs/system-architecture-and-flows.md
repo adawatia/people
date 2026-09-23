@@ -119,11 +119,11 @@ Module inventory:
 | File | Purpose / notable content |
 |---|---|
 | `main.py` | App factory, lifespan, routers, CORS, middleware, custom OpenAPI security schemes, `/`, `/health`, `/db-health` |
-| `core/auth.py` | fastapi-users wiring, `UserManager` (password policy, 3-way login lookup), JWT strategy (8 h), `FIXED_ROLE_PERMISSIONS`, `require_permission`, ERP API-key check, rate limiter |
+| `core/auth.py` | fastapi-users wiring, `UserManager` (password policy, 3-way login lookup), JWT strategy (8 h), `BASE_EMPLOYEE_PERMISSIONS` + `ROLE_PERMISSIONS` + `effective_permissions`, the compatibility `FIXED_ROLE_PERMISSIONS` view, `require_permission`, ERP API-key check, rate limiter |
+| `core/business_roles.py` | Elevated business-role + access-scope vocabulary and the *only* definition of scope defaults: `resolve_business_role`, `resolve_business_access`, `role_columns`, `merge_role_columns`, `ROLE_SCOPE_TYPES` |
 | `core/rbac.py` | `DASHBOARD_WIDGETS` + `get_visible_widgets` (permission-filtered widget keys) |
-| `core/employee_access.py` | `EmployeeAccessScope`, `get_permission_scope`, `require_employee_access` — **row-level** visibility |
-| `core/attendance_access.py` | `require_hr_admin` (role-based, not permission-based), `require_hr_unit_access` |
-| `core/audit.py` | `record_audit_event` → append-only `audit_logs` |
+| `core/employee_access.py` | `EmployeeAccessScope`, `scope_for_employee`, `get_employee_scope`, `get_permission_scope`, `require_employee_access` — **row-level** visibility. This is the only place a business role is translated into which rows are visible |
+| `core/audit.py` | `add_audit_event` (stages a row in the caller's transaction) and `record_audit_event` (stages + commits) → append-only `audit_logs` |
 | `core/invitation.py` | 48 h invitation tokens, SHA-256 hashed at rest, single-use |
 | `core/mobile.py` | `normalize_indian_mobile` → E.164 `+91…` (login identity + ERP ingest) |
 | `core/pagination.py` | `PaginatedResponse[T]` |
@@ -192,7 +192,7 @@ Notes that matter operationally:
 `organizations` (single row enforced by unique `singleton_key`), `units`, `departments`, `designations`, `department_approvers` (`approver_type`: LEAVE / SHIFT / EXPENSE / WORK_ARRANGEMENT).
 
 **Workforce**
-`employees` — the operational core. Role lives here (`role`: `EMPLOYEE` | `DEPARTMENT_MANAGER` | `HR_ADMIN` | `ORGANIZATION_OWNER`), plus `user_id` (login), `unit_id`, `department_id`, `designation_id` + cached `designation` string, `reporting_manager_id` (self-FK), `shift_id` (ERP default shift), `status` (`ACTIVE`/…), `overtime_eligible`, `monthly_salary`, exit fields.
+`employees` — the operational core. Authorization identity lives here: `business_role` (`NULL` = plain employee | `DEPARTMENT_MANAGER` | `HR_ADMIN` | `ORGANIZATION_OWNER`), `access_scope` (`SELF` | `DEPARTMENT` | `UNIT` | `ORGANIZATION`, default `SELF`) and `access_scope_id` (unit or department id, `NULL` for `SELF`/`ORGANIZATION`). `role` is kept as the compatibility mirror the ERP writes (`"EMPLOYEE"` = no elevation). Plus `user_id` (login), `unit_id`, `department_id`, `designation_id` + cached `designation` string, `reporting_manager_id` (self-FK), `shift_id` (ERP default shift), `status` (`ACTIVE`/…), `overtime_eligible`, `monthly_salary`, exit fields.
 `employee_work_histories` — transfers/promotions history.
 
 **Scheduling**
@@ -253,65 +253,77 @@ Failure raises `InvalidPasswordException`; routers convert it to `400 {"detail":
 
 `X-API-Key` header validated with `secrets.compare_digest` against `settings.erp_api_key`; empty/mismatched ⇒ `403 Could not validate API KEY`. There is **no** fallback key outside development, and the key must never reach a browser.
 
-### 2.6 Authorization: roles, permissions, and row scope
+### 2.6 Authorization: identity, permissions, scope, and domain rules
 
-Two orthogonal mechanisms — get this right or you will mis-scope a feature:
+Four orthogonal concepts — get this right or you will mis-scope a feature:
 
-| Mechanism | Question it answers | Implemented in |
+| Concept | Question it answers | Implemented in |
 |---|---|---|
-| **Permission** (`require_permission`, `hasPermission`) | *May this user perform this kind of action at all?* | `core/auth.py` → `FIXED_ROLE_PERMISSIONS` |
-| **Scope** (`EmployeeAccessScope`, `get_permission_scope`, `require_employee_access`) | *Which employees/rows does it apply to?* | `core/employee_access.py` |
+| **Employee** | *Who is this person?* | `Employee` row linked to the login; base self-service is implicit |
+| **Business role** | *What extra responsibility do they carry?* | `Employee.business_role` (optional, at most one per employee), vocabulary in `core/business_roles.py` |
+| **Permission** (`require_permission`, `hasPermission`) | *May this user perform this kind of action at all?* | `core/auth.py` → `BASE_EMPLOYEE_PERMISSIONS` + `ROLE_PERMISSIONS` via `effective_permissions` |
+| **Scope** (`EmployeeAccessScope`, `get_permission_scope`, `get_employee_scope`, `require_employee_access`) | *Which employees/rows does it apply to?* | `core/employee_access.py` (resolved from the business role + access scope) |
+| **Domain rule** | *Is this specific transition valid, for this resource, right now?* | Services (no self-approval, valid leave-state transitions, overlap checks, ERP-owned read-only) |
 
-#### 2.6.1 Role → scope resolution
+There are no role-assignment tables, per-user permissions, deny overrides or policy languages: an employee holds **at most one** elevated business role, and their permissions are the base set plus that role's bundle.
 
 ```
-user.is_superuser            → organization scope (and full HR_ADMIN permission set)
-role ORGANIZATION_OWNER      → organization scope
-role HR_ADMIN                → unit scope        ({their unit_id})
-role DEPARTMENT_MANAGER      → department scope  ({their department_id})
-role EMPLOYEE (or no profile)→ empty scope
-                               …except allow_self=True short-circuits when
+authenticate → resolve employee → resolve effective permissions → check required permission
+            → resolve scope → check the resource is inside scope → apply domain rules → service
+```
+
+#### 2.6.1 The permission set
+
+`BASE_EMPLOYEE_PERMISSIONS` is implicit for **every** employee, so it is never duplicated into a role bundle:
+
+```
+permissions = set(BASE_EMPLOYEE_PERMISSIONS)
+if employee.business_role:
+    permissions |= ROLE_PERMISSIONS[employee.business_role]
+```
+
+`ROLE_PERMISSIONS` therefore lists only what a role *adds*, and `core/auth.py` asserts its keys are exactly the three elevated roles. `FIXED_ROLE_PERMISSIONS` survives as a read-only compatibility view (`base + bundle` per role, including `"EMPLOYEE"`).
+
+| Bundle | Meaning |
+|---|---|
+| `BASE_EMPLOYEE_PERMISSIONS` | self-service: `employee.view_self`, `attendance.view_self`, `leave.apply` / `view_self` / `cancel`, `work_arrangement.apply` / `view_self` / `cancel`, `overtime.view_self`, `shift.view_self` |
+| `DEPARTMENT_MANAGER` | `employee.view`, `attendance.view_department`, `leave.approve` / `reject`, `work_arrangement.approve` / `reject`, `overtime.view_department` / `approve`, `reports.attendance` / `reports.leave` |
+| `HR_ADMIN` | user + employee administration, designation CRUD, `attendance.view` / `view_unit` / `view_department` / `process` / `correct`, `leave.manage` / `approve` / `reject`, `work_arrangement.manage` / `approve` / `reject`, `shift.assign` / `update`, `overtime.approve` / `view_department`, all `reports.*`, `system.configure`, `audit.view`, `salary_cost.view_unit` / `view_department` |
+| `ORGANIZATION_OWNER` | read/analytics only: `employee.view`, `attendance.view` / `view_unit` / `view_department`, `overtime.view` / `view_department`, `reports.view` / `attendance` / `leave` / `overtime`, `dashboard.view_organization` |
+
+**Unit HR and organization HR receive the same `HR_ADMIN` bundle** — only the scope differs (§2.6.2). The Organization Owner is deliberately *not* a superset of HR: it has organization-wide visibility and no operational HR or manager approval capability. Roles are not hierarchical.
+
+#### 2.6.2 Business role → scope resolution
+
+Scope lives in three columns on `employees`: `business_role`, `access_scope` (`SELF` | `DEPARTMENT` | `UNIT` | `ORGANIZATION`) and `access_scope_id` (unit or department id; `NULL` for `SELF`/`ORGANIZATION`). `core/business_roles.resolve_business_access()` is the single resolver, and `scope_for_employee()` turns its result into an `EmployeeAccessScope`:
+
+```
+user.is_superuser            → organization scope (and the HR_ADMIN permission set)
+business_role HR_ADMIN       → access_scope ORGANIZATION → organization scope
+                               access_scope UNIT (+ id)  → unit scope {scope_id or unit_id}
+business_role DEPARTMENT_MANAGER → department scope {scope_id or department_id}
+business_role ORGANIZATION_OWNER → organization scope (the role *is* org-wide)
+no business role             → SELF scope: {the caller's own employee_id}
+                               …except allow_self=True still short-circuits when
                                employee.user_id == user.id
 ```
 
-`require_employee_access(user, employee, code_or_tuple, session, allow_self=…)` merges the scope of several permission codes, so `("attendance.view_self", "attendance.view_unit")` grants access if *any* code covers the row. Routes commonly fall back to "if the caller has no management scope, restrict the query to their own employee_id" (`leaves`, `attendance`, `work-arrangements`, `overtime`, `shifts`).
+Defaults make legacy rows behave exactly as before: an HR admin with no explicit scope resolves to `UNIT` on their own `unit_id`, a manager to `DEPARTMENT` on their own `department_id`, and an owner to `ORGANIZATION`. A scope that is illegal for the role (e.g. `ORGANIZATION` on a department manager) falls back to the role default rather than widening access, and **organization HR must be explicit** — a blank `unit_id` never means "whole organization". Provisions are written through `role_columns` / `merge_role_columns`, which keep `Employee.role` as a compatibility mirror of the business role (`"EMPLOYEE"` = no elevation). A **transfer moves a `UNIT`/`DEPARTMENT` scope with the employee** — a unit HR admin moved to another unit is re-scoped to the new unit (and audited as `EMPLOYEE_ROLE_CHANGED`) instead of silently keeping reach over the unit they left; passing `access_scope_id` explicitly pins a scope that intentionally differs from the employee's own unit/department.
 
-#### 2.6.2 Fixed role → permission matrix (source of truth: `core/auth.py`)
+`require_employee_access(user, employee, code_or_tuple, session, allow_self=…)` merges the scope of several permission codes, so `("attendance.view_self", "attendance.view_unit")` grants access if *any* code covers the row. `get_employee_scope(user, session)` returns the caller's scope *without* a permission gate, for routes that already used `require_permission`. Routes commonly fall back to "if the caller has no unit/department scope, restrict the query to their own employee_id" (`leaves`, `attendance`, `work-arrangements`, `overtime`, `shifts`); `get_permission_scope` returns an **empty** scope when the caller lacks the code entirely.
 
-| Permission | EMPLOYEE | DEPT MANAGER | HR ADMIN | ORG OWNER |
-|---|:--:|:--:|:--:|:--:|
-| `employee.view_self` | ✅ | ✅ | — | — |
-| `employee.view` | — | ✅ | ✅ | ✅ |
-| `employee.create` / `employee.update` / `employee.deactivate` | — | — | ✅ | — |
-| `attendance.view_self` | ✅ | ✅ | — | — |
-| `attendance.view` / `view_unit` / `view_department` | — | department | ✅ all + unit + dept | ✅ all + unit + dept |
-| `attendance.process` / `attendance.correct` | — | — | ✅ | — |
-| `leave.apply` / `leave.view_self` / `leave.cancel` | ✅ | ✅ | ✅ (cancel) | — |
-| `leave.approve` / `leave.reject` / `leave.manage` | — | approve/reject | ✅ all | — |
-| `work_arrangement.apply` / `view_self` / `cancel` | ✅ | ✅ | cancel | — |
-| `work_arrangement.approve` / `reject` | — | ✅ | ✅ | — |
-| `work_arrangement.manage` | — | — | ✅ | — |
-| `overtime.view_self` | ✅ | ✅ | — | — |
-| `overtime.view_department` / `overtime.approve` | — | ✅ | approve + dept | view + dept |
-| `overtime.view` | — | — | — | ✅ |
-| `shift.view_self` | ✅ | ✅ | — | — |
-| `shift.assign` / `shift.update` | — | — | ✅ | — |
-| `designation.view` | — | — | ✅ | — |
-| `designation.create/update/delete` | — | — | ✅ | — |
-| `reports.attendance` / `reports.leave` | — | ✅ | ✅ | ✅ |
-| `reports.view` / `reports.overtime` / `reports.salary_cost` | — | — | ✅ | view + overtime |
-| `salary_cost.view_unit` / `view_department` | — | — | ✅ | — |
-| `system.configure` / `audit.view` | — | — | ✅ | — |
-| `dashboard.view_organization` | — | — | — | ✅ |
-| `user.view/create/update/deactivate` | — | — | ✅ | — |
+Serving routes therefore read like ``require_permission("attendance.correct") + require_employee_access(...)`` instead of a role check. `core/attendance_access.py` (`require_hr_admin`, `require_hr_unit_access`) **no longer exists**; the only surviving role usage is deliberately narrow: `routers/shifts.py` limits a *plain* employee to their own schedule, and `routers/dashboard.py` chooses the owner analytics panel.
 
-**Caveat:** several granted codes are never enforced by the API — `employee.view_self`, `attendance.view_self`, `attendance.correct`, `leave.view_self`, `overtime.view_self`, `overtime.approve`, `shift.view_self`, `shift.assign`, `shift.update`, `reports.view`, `reports.overtime`, `reports.salary_cost`, `salary_cost.*`, `audit.view`, `user.*`, `employee.update`, `employee.deactivate`. They are forward-compatible vocabulary today; only the codes referenced in §2.9 gate real behaviour (full list in Appendix A).
+Auditability: granting or changing an elevated role writes `EMPLOYEE_ROLE_GRANTED` / `EMPLOYEE_ROLE_CHANGED` to `audit_logs` with the previous and new `business_role` / scope, so "HR moved from UNIT to ORGANIZATION" is traceable through the existing mechanism.
+
+**Caveat:** several granted codes are never enforced by the API — `employee.view_self`, `attendance.view_self`, `leave.view_self`, `overtime.view_self`, `shift.view_self`, `reports.view`, `reports.overtime`, `reports.salary_cost`, `salary_cost.*`, `audit.view`, `user.*`, `employee.update`, `employee.deactivate`, `overtime.view`. They are forward-compatible vocabulary today; only the codes referenced in §2.9 gate real behaviour (full list in Appendix A).
 
 Derived rules worth remembering:
 
-* **Super Admin ⇒ exactly the HR_ADMIN permission set** (`get_user_permissions` short-circuits). There is no superuser-only permission.
-* **A user with no `Employee` row ⇒ EMPLOYEE permission set.** Safe default; also means a "technical" account that is not a superuser sees only self-service.
-* Permissions are **read from the DB on every request** (`get_user_permissions` queries the employee row) — changing `Employee.role` takes effect on the next call, but the *client's cached permission list* is only refreshed on `/users/me`.
+* **Super Admin ⇒ exactly the HR_ADMIN permission set plus organization scope** (`get_user_permissions` / `get_employee_scope` short-circuit). There is no superuser-only permission.
+* **A user with no `Employee` row ⇒ base employee set.** Safe default; also means a "technical" account that is not a superuser sees only self-service.
+* Permissions are **read from the DB on every request** (`get_user_permissions` queries the employee row) — changing `Employee.business_role` or the access scope takes effect on the next call, but the *client's cached permission list* is only refreshed on `/users/me`.
+* Elevated bundles must not repeat base codes, and every enforced code must be granted somewhere: both are asserted by `tests/test_permission_grants.py`.
 
 #### 2.6.3 Dashboard widget gating
 
@@ -339,7 +351,7 @@ Derived rules worth remembering:
   3. Compute `worked_minutes` minus `break_minutes`; derive `late_minutes` (beyond `late_entry_grace_minutes`) and `early_exit_minutes`.
   4. Apply thresholds: `< absent_threshold_hours` → `ABSENT`; `< half_day_threshold_hours` → `HALF_DAY`; otherwise `PRESENT`. A single missing punch → `MISSED_PUNCH`. Unpunched day → `WEEKLY_OFF` / `ON_LEAVE` / `ABSENT` as applicable.
   5. Overtime minutes beyond shift end feed `overtime_records`.
-* **Corrections**: `POST /attendance/corrections` requires the **HR_ADMIN role** (`require_hr_admin`, plus `require_hr_unit_access` unit check) and always writes `sync_status = PENDING_ERP_RECONCILIATION`. Approve/reject endpoints exist but return **403 "ERP confirmation is the attendance correction approval"** — HRMS raised the request, ERP confirms it.
+* **Corrections**: `POST /attendance/corrections` requires the `attendance.correct` permission **plus** row scope (`require_employee_access`): unit HR may correct their own unit, organization HR any unit. It always writes `sync_status = PENDING_ERP_RECONCILIATION`. Approve/reject endpoints do not exist — ERP confirmation is the approval.
 * **Reads**: `GET /attendance/`, `/records/{id}`, `/employee/{id}/calendar`, `/employee/{id}/summary`, `/corrections` — all scoped through `ATTENDANCE_READ_PERMISSIONS = (attendance.view, attendance.view_unit, attendance.view_department)` with `allow_self=True`.
 
 #### 2.7.2 Leave engine (`services/leave_service.py`, 730 lines — the largest service)
@@ -396,7 +408,7 @@ Config: `create_period`, `create_type`, `update_type`, `allocate_leaves` (writes
 
 #### 2.7.7 Reports (`services/report_service.py`)
 
-* `GET /reports/attendance-matrix?year&month` → day-by-day matrix + aggregates, scoped: OWNER = whole org, HR_ADMIN = forced to own unit, DEPARTMENT_MANAGER = forced to own department.
+* `GET /reports/attendance-matrix?year&month` → day-by-day matrix + aggregates, scoped by `_scoped_report_filters`: organization scope = caller's own filters, UNIT scope = forced to that unit, DEPARTMENT scope = forced to that department; a caller with no usable scope gets 403.
 * `GET /reports/leave-summary?year` → allocated/used/pending/available per employee, same scoping rule.
 
 #### 2.7.8 Notifications & audit
@@ -438,34 +450,34 @@ Config: `create_period`, `create_type`, `update_type`, `allocate_leaves` (writes
 
 ### 2.9 Public API index (grouped by tag)
 
-Every tag below is also an OpenAPI tag declared in `main.py`. Auth column: **E** = employee login, **SA** = super admin, **Any** = any active user, **perm(x)** = `require_permission`, **role:HR** = `require_hr_admin`, **ERP** = API key.
+Every tag below is also an OpenAPI tag declared in `main.py`. Auth column: **E** = employee login, **SA** = super admin, **Any** = any active user, **perm(x)** = `require_permission`, **ERP** = API key. There is no `role:X` auth column any more: capability comes from permissions, reach comes from the caller's access scope (§2.6).
 
 | Group | Endpoint | Auth | Scope rule |
 |---|---|---|---|
-| **account** | `GET /users/me` | Any | returns permissions + employee_id/code + role |
+| **account** | `GET /users/me` | Any | returns permissions + employee_id/code + resolved `business_role` / `scope_type` (the scope id is not exposed) |
 | | `GET /users/me/permissions` | Any | — |
 | **auth** | `POST /auth/employee/login` | public | mobile/email/username |
 | | `POST /auth/super-admin/login` | public | username only |
 | | `POST /auth/change-password` | Any | clears `must_change_password` |
 | | `PATCH /auth/super-admin/username` | SA | conflict-checked |
-| | `POST /auth/hr/employees/{id}/password-reset` | role:HR + unit check | revokes sessions |
+| | `POST /auth/hr/employees/{id}/password-reset` | perm(`user.update`) + row scope | revokes sessions |
 | | `GET /auth/invitation/validate`, `POST /auth/invitation/set-password` | public | 48 h, single-use token |
 | **auth-session** | `POST /auth/session`, `POST /auth/session/refresh`, `DELETE /auth/session` | Any / public / public | refresh rotation + replay kill |
-| **dashboard** | `GET /dashboard/metrics` | Any | self metrics; unit/dept metrics when the caller has `leave.approve`/`attendance.approve_correction`/`employee.view` |
+| **dashboard** | `GET /dashboard/metrics` | Any | self metrics; unit/dept/org metrics when the caller has team-review permissions, filtered by their resolved scope |
 | | `GET /dashboard/widgets` | Any | permission-filtered keys |
 |  | `GET /dashboard/technical-metrics` | SA | counts only; no audit row is written |
 | | `GET /dashboard/owner`, `/owner/exceptions` | perm(`dashboard.view_organization`) | organization-wide + audit row |
-| **employees** | `GET /employees/` | Any | OWNER all · HR unit · DM department · EMPLOYEE self only |
+| **employees** | `GET /employees/` | Any | organization scope = all · UNIT scope = that unit · DEPARTMENT scope = that department · SELF = own record only |
 | | `GET /employees/{id}`, `/work-history` | Any | `employee.view` + `allow_self` |
 | | `POST /employees/onboard` | perm(`employee.create`) | **returns 410** (ERP-only) |
 | **designations / org / units / departments** | `GET` list + detail | Any | read-only mirrors |
 | **holidays** | `GET /holidays/lists`, `GET /holidays/lists/{id}` | Any | read-only |
-| **shifts** | `GET /shifts/`, `/assignments`, `/assignments/{id}`, `/employee/{id}/schedule`, `/{id}` | Any | EMPLOYEE is forced to self; HR/owner see all |
+| **shifts** | `GET /shifts/`, `/assignments`, `/assignments/{id}`, `/employee/{id}/schedule`, `/{id}` | Any | a plain employee (no business role) is forced to self; elevated roles see the management views |
 | **attendance** | `GET /attendance/`, `/records/{id}`, `/employee/{id}/calendar`, `/employee/{id}/summary`, `/checkins`, `/corrections` | Any | read-permission scope + `allow_self` |
 | | `POST /attendance/checkins`, `/checkins/bulk` | — | **403 — ERP supplied** |
 | | `POST /attendance/process` | perm(`attendance.process`) | HR unit scope |
-| | `POST /attendance/corrections` | role:HR + unit | → `PENDING_ERP_RECONCILIATION` |
-|  | `PATCH /attendance/corrections/{id}/approve\|reject` | perm(`attendance.approve_correction`) | **403 — ERP confirms** |
+| | `POST /attendance/corrections` | perm(`attendance.correct`) + row scope | → `PENDING_ERP_RECONCILIATION` |
+|  | `PATCH /attendance/corrections/{id}/approve\|reject` | — | **route removed — ERP confirms** |
 | **leaves** | `GET /leaves/periods`, `/types`, `/types/{id}`, `/balance/employee/{id}`, `/`, `/{id}` | Any | self-service via `leave.apply`/`allow_self`; management scope otherwise |
 | | `POST /leaves/`, `PATCH /leaves/{id}/cancel` | Any | self via `leave.apply`/`leave.cancel` |
 | | `POST /leaves/periods`, `/types`, `PATCH /types/{id}` | perm(`leave.manage`) | HR |
@@ -474,8 +486,8 @@ Every tag below is also an OpenAPI tag declared in `main.py`. Auth column: **E**
 | **work-arrangements** | `GET /` , `GET /{id}` | Any | management scope else self |
 | | `POST /`, `PATCH /{id}/cancel` | Any | self via apply/cancel |
 |  | `PATCH /{id}/approve\|reject` | perm(`work_arrangement.approve`/`reject`) | scope + no self-approval |
-| **overtime** | `GET /overtime/`, `/{id}`, `/employee/{id}/summary` | Any | OWNER/DM/HR scope, self fallback |
-| **reports** | `GET /reports/attendance-matrix`, `/leave-summary` | perm(`reports.attendance`/`reports.leave`) | role-forced scope inside the route |
+| **overtime** | `GET /overtime/`, `/{id}`, `/employee/{id}/summary` | Any | business-role scope, self fallback |
+| **reports** | `GET /reports/attendance-matrix`, `/leave-summary` | perm(`reports.attendance`/`reports.leave`) | scope-forced filters inside the route (org scope may choose unit/department) |
 | **notifications** | `GET /notifications`, `/unread-count`, `PATCH /{id}/read`, `POST /mark-all-read` | Any | user + role broadcasts |
 | **health** | `GET /health` (10/min), `GET /db-health`, `GET /` | public | DB probe + uptime |
 
@@ -550,7 +562,8 @@ This means **token refresh is transparent to every page**: a 15-minute access to
 |---|---|
 | `displayName`, `initials` | display helpers |
 | `hasPermission(code)` | true when `is_superuser` **or** `permissions` contains the code |
-| `hasRole(role)` | true when `is_superuser` **or** `user.role === role` |
+| `businessRole` | the resolved elevated business role (or `null`) — for role-specific experiences such as the Organization Owner dashboard |
+| `scopeType` | `SELF` \| `DEPARTMENT` \| `UNIT` \| `ORGANIZATION`, used to adapt copy and layout; the scope *identifier* stays server-side |
 | `fetchUser(force = false)` | one `GET /api/session/me` per request; errors ⇒ signed-out state (never throws) |
 | `login(payload)` | posts to the BFF, sets the user, exposed `loading` |
 | `logout()` | revokes session, clears state, `navigateTo('/login')` |
@@ -559,24 +572,26 @@ This means **token refresh is transparent to every page**: a 15-minute access to
 
 `useHrmsApi().request()` additionally hard-handles `401` mid-session: clears `auth-user` and redirects to `/login?redirect=<current>`, then rethrows.
 
-### 3.4 Navigation & visibility — the two-gate model
+### 3.4 Navigation & visibility — one permission gate
 
-`layouts/default.vue` builds `navItems`, and each item may declare **both** `roles` and `permissions`. An item is visible when the **role gate passes AND at least one permission in the list is held** (when specified):
+`layouts/default.vue` builds `navItems`, and each item may declare `permissions` (any-of). An item is visible when it holds **at least one** of them; items with no list are self-service and visible to everyone. The former `roles` gate is gone — a role is not a visibility primitive, and every capability it used to imply now corresponds to a permission.
 
-| Nav item | roles | permissions (any-of) | Effective audience |
-|---|---|---|---|
-| Dashboard | — | — | everyone |
-| Employees | DM, HR, OWNER | `employee.view` | DM, HR, OWNER |
-| Attendance | — | — | everyone (self-scoped by the API) |
-| Leave | — | — | everyone |
-| Work arrangements | — | — | everyone |
-| Overtime | — | — | everyone |
-| Approvals | DM, HR | `leave.approve`, `attendance.approve_correction`, `work_arrangement.approve` | DM, HR |
-| Shifts | HR | `shift.assign`, `shift.update` | HR |
-| Holidays | — | — | everyone |
-| Organization | HR | `system.configure`, `designation.view`, `employee.view` | HR |
-| Reports | DM, HR, OWNER | `reports.attendance`, `reports.leave` | DM, HR, OWNER |
-| System administration (link) | superuser only | — | Super Admin |
+| Nav item | permissions (any-of) | Effective audience |
+|---|---|---|
+| Dashboard | — | everyone |
+| Employees | `employee.view` | DM, HR, OWNER |
+| Attendance | — | everyone (self-scoped by the API) |
+| Leave | — | everyone |
+| Work arrangements | — | everyone |
+| Overtime | — | everyone |
+| Approvals | `leave.approve`, `work_arrangement.approve` | DM, HR |
+| Shifts | `shift.assign`, `shift.update` | HR |
+| Holidays | — | everyone |
+| Organization | `designation.view` | HR |
+| Reports | `reports.attendance`, `reports.leave` | DM, HR, OWNER |
+| System administration (link) | superuser only | Super Admin |
+
+Action and dialog visibility follows the same rule: `pages/attendance/index.vue` gates the correction dialog on `hasPermission('attendance.correct')` rather than on the `HR_ADMIN` role, and `pages/profile.vue` derives its display label from `business_role` + `scope_type` (so unit HR and organization HR are distinguishable). Role branching survives only where the experience itself is role-specific (`pages/index.vue`'s Owner dashboard branch).
 
 Super Admin gets **only** Dashboard + System administration — the business nav is replaced, because master data lives in ERP.
 
@@ -627,8 +642,10 @@ Every page load and navigation runs the same preamble:
 1. middleware/auth.global.ts → useAuth().fetchUser()
 2. GET /api/session/me → Nitro reads people_session cookie → GET /users/me (Bearer)
 3. FastAPI: current_user(active=True) → User row
-4. GET /users/me also: get_user_permissions(user)  [Employee.role → FIXED_ROLE_PERMISSIONS]
-                       + employee lookup → employee_id, employee_code, role
+4. GET /users/me also: get_user_permissions(user)  [Employee.business_role (+ legacy role)
+                                                    → BASE_EMPLOYEE_PERMISSIONS | ROLE_PERMISSIONS]
+                       + employee lookup → employee_id, employee_code, role,
+                         resolved business_role + scope_type (scope id stays server-side)
 5. Nitro returns CurrentUser → useState('auth-user') → nav + page permission gates resolve
 6. Page then fires its own /api/hrms/** calls (SSR `useAsyncData`), each subject to transparent refresh
 ```
@@ -670,10 +687,10 @@ On approval, each day becomes `WORK_FROM_HOME` in attendance, so the calendar st
 ### 4.2 F2 — DEPARTMENT_MANAGER (approve & report for one department)
 
 **Login/Dashboard.** Same door; `hasPermission('leave.approve')` and `employee.view` make it a "manager".
-`GET /dashboard/metrics` → `has_mgr_access = true`; scope = **their department** (`emp.role == DEPARTMENT_MANAGER` ⇒ `dept_scope_ids`), thus: headcount, today's attendance breakdown, attendance rate, today/month OT hours, pending leave + correction counts (excluding self), and up to 5 items *each* from leave, correction, overtime and work-arrangement queues merged into `pendingApprovals` with `type`, employee name/code, department, detail, `timeAgo`.
+`GET /dashboard/metrics` → `has_mgr_access = true`; scope = **their department** (`get_employee_scope` ⇒ `dept_scope_ids`), thus: headcount, today's attendance breakdown, attendance rate, today/month OT hours, pending leave + correction counts (excluding self), and up to 5 items *each* from leave, correction, overtime and work-arrangement queues merged into `pendingApprovals` with `type`, employee name/code, department, detail, `timeAgo`.
 UI: 4 KPI cards (department members, present, on leave, needs attention) + *Pending approvals* card linking to `/approvals`.
 
-**Approvals (`/approvals`).** Tabs are permission-driven: `attendance.approve_correction` (see gap), `leave.approve` (+`leave.reject` for the reject button), `work_arrangement.approve`.
+**Approvals (`/approvals`).** Tabs are permission-driven: `leave.approve` (+`leave.reject` for the reject button) and `work_arrangement.approve`; the attendance tab is a read-only queue (ERP confirms corrections).
 * Leave queue loads `PENDING` **and** `CANCELLATION_PENDING` in parallel and picks the right endpoint per row (`/approve` vs `/cancellation/approve`).
 * Approve ⇒ attendance rows become `ON_LEAVE`/`HALF_DAY`, ledger debit, `erp_event_id` queued for ERP, balance `pending → used`.
 * Reject ⇒ modal with mandatory reason → `PATCH …/reject` → `pending` released.
@@ -683,13 +700,15 @@ UI: 4 KPI cards (department members, present, on leave, needs attention) + *Pend
 
 **People.** `GET /employees/` is silently limited to their department (route logic), and `GET /employees/{id}` outside the department returns `403 "You do not have access to this employee"`.
 
-### 4.3 F3 — HR_ADMIN (unit operations)
+### 4.3 F3 — HR_ADMIN (unit operations, or organization-wide when scoped so)
 
 **Dashboard.** Scope = **their unit** (`unit_scope_ids`). KPI labels switch to "Unit members"; same 4 cards, but `pendingApprovals` includes unit-wide leave/correction/overtime/WFH items minus their own.
 
 **Employees (`/employees`).** Unit-limited directory with search/filters, pagination (`page_size` ≤ 100), detail page with work history. Provisioning is ERP-only: `POST /employees/onboard` returns `410`, and the page's own activate/deactivate/delete buttons hit non-existent routes (§8.1 A1).
 
-**Attendance (`/attendance`).** Read scope covers `attendance.view`, `view_unit`, `view_department`; can run the engine with `POST /attendance/process` (`attendance.process`) for an authorized unit/employee, and can raise corrections for records inside their unit (`require_hr_admin` + `require_hr_unit_access` → `403 "Employee is outside your unit"` otherwise).
+**Attendance (`/attendance`).** Read scope covers `attendance.view`, `view_unit`, `view_department`; can run the engine with `POST /attendance/process` (`attendance.process`) for an authorized unit/employee, and can raise corrections for records inside their scope (`attendance.correct` + `require_employee_access` → 403 `"You do not have access to this employee"` otherwise).
+
+**Unit HR vs organization HR.** Both hold the identical `HR_ADMIN` permission bundle; only the access scope differs (`UNIT` + `access_scope_id`, or `ORGANIZATION`). A unit HR admin sees their unit and is refused on another unit's records; organization HR (`access_scope = ORGANIZATION`, no `access_scope_id`) reaches every unit, and their dashboard KPI label reads "Organization members". Organization HR is still *not* an Organization Owner: it has no `dashboard.view_organization` and therefore no owner analytics panel.
 
 **Shifts (`/shifts`).** Definitions + assignments are read from HRMS; creating them is ERP-only, so the "New shift"/"Assign shift" buttons currently 405 (§8.1 A4). Employees' schedules come from ERP assignments, so this page is effectively a viewer today.
 
@@ -697,7 +716,7 @@ UI: 4 KPI cards (department members, present, on leave, needs attention) + *Pend
 
 **Organization (`/organization`) / Holidays (`/holidays`).** Viewer-only by design; writes live under `/integrations/erp/**`.
 
-**Reports.** Attendance matrix and leave summary forced to their unit; HR is the only role with `salary_cost.*`, `reports.overtime`, `system.configure`, `audit.view`.
+**Reports.** Attendance matrix and leave summary forced to the caller's unit (or, for organization HR, honouring the requested unit/department filter); HR is the only role with `salary_cost.*`, `reports.overtime`, `system.configure`, `audit.view`.
 
 ### 4.4 F4 — ORGANIZATION_OWNER (analytics only)
 
@@ -827,13 +846,13 @@ These are verified against the current code and are the highest-value item in th
 |---|---|---|---|---|
 | **A1** | Employees page "activate/deactivate" and "delete" fail | `routers/employees.py` exposes only `GET /`, `POST /onboard` (410), `GET /{id}`, `GET /{id}/work-history`. Lifecycle writes exist only at `/integrations/erp/employees/{id}/deactivate` and `…/activate`. Delete exists only in `EmployeeService.delete_employee` (unused by any router) | High | Backend + Frontend lead |
 | **A2** | Overtime can never be approved in the product | `OvertimeService.approve_overtime/reject_overtime` are unreachable: `routers/overtime.py` is read-only and the Approvals page has no overtime tab even though DM/HR hold `overtime.approve` | High | Product + Backend lead |
-| **A3** | "Request correction" in Attendance fails for employees; Approvals → Attendance approve always fails | `POST /attendance/corrections` requires the **HR_ADMIN role**; the `approve` and `reject` endpoints return `403 "ERP confirmation is the attendance correction approval"`. The Approvals UI still calls them and shows a success toast path | High | Product (governance) + Frontend lead |
+| **A3** | "Request correction" in Attendance fails for employees | Intentional: `POST /attendance/corrections` requires `attendance.correct` plus row scope, so a plain employee gets 403 and the attendance page hides the dialog for them. The Approvals → Attendance approve/reject endpoints have been removed entirely, because ERP confirmation is the approval | Low | Product (governance) + Frontend lead |
 | **A4** | Shifts page create/assign fail | `routers/shifts.py` is read-only; writes live at `/integrations/erp/shifts/**` | Medium | Backend lead |
 | **A5** | Organization page enable/disable/delete fail | `org/units`, `org/departments` and `designations/` routers expose GET only; writes are ERP-only | Medium | Frontend lead |
 | **A6** | Holidays create/add buttons | Hidden by `canManage = false` (correct today) — the code remains and will 405 if ever enabled | Low | Frontend lead |
-| **A7** | `attendance.approve_correction` is **held by nobody** | The code is referenced by the attendance router, the Approvals page, and the nav gate but is absent from every role set in `FIXED_ROLE_PERMISSIONS` — so even Super Admin (HR_ADMIN set) cannot satisfy it | High | Architecture lead |
+| **A7** | ~~`attendance.approve_correction` is held by nobody~~ **Fixed** | The correction surfaces now gate on `attendance.correct` (which HR holds) and the approve/reject routes were removed, so `tests/test_permission_grants.py` passes with no dead-end code | Resolved | Architecture lead |
 | **A8** | `POST /attendance/checkins` + `/checkins/bulk` are 403 stubs | Intentional (ERP supplies punches) but the punch ingestion path is therefore untested through HTTP; publishing them for ERP would be cleaner than a separate ERP route | Low/Medium | Architecture lead |
-| **A9** | Dashboard widget API is unused | `GET /dashboard/widgets` exists and is permission-aware while `pages/index.vue` hard-codes role branches, duplicating the gating logic in two places | Medium | Frontend lead |
+| **A9** | Dashboard widget API is unused | `GET /dashboard/widgets` exists and is permission-aware, while `pages/index.vue` still decides its own layout from `scope_type` (plus the genuinely role-specific Owner branch) — the widget API remains the single place to consolidate that | Medium | Frontend lead |
 | **A10** | Invitation UI missing | `/auth/invitation/*` + email templates exist, `middleware` lists `/invitation` and `/auth/invitation` as public, but no page/route exists and no router calls `create_invitation_for_user` | Medium | Product + Frontend lead |
 
 ### 8.2 Functional gaps (backend behaviour)
@@ -866,7 +885,7 @@ These are verified against the current code and are the highest-value item in th
 | D3 | **Overtime approval surface** | (a) add `PATCH /overtime/{id}/approve` and `/reject` + an Approvals tab + notifications; (b) leave overtime read-only | (a) — the service, permissions, and months of summary UI already exist; it is the cheapest complete workflow |
 | D4 | **Notifications on workflow events** | (a) emit on apply/approve/reject/cancel to the actor + approver + employee; (b) keep polling dashboards | (a) — `create_notification` already exists; wire it in the four services and reuse `link`/`reference_id` |
 | D5 | **Approver routing** | (a) keep role+scope routing; (b) use `department_approvers` | Decide before exposing more approval types; today the table is misleading |
-| D6 | **`attendance.approve_correction`** | (a) add it to DEPARTMENT_MANAGER + HR_ADMIN; (b) remove the code and gate everything on `attendance.correct` + role checks | Whichever you choose, remove the current impossible state in §8.1 A7 |
+| ~~D6~~ | ~~**`attendance.approve_correction`**~~ **Settled** | — | Resolved by removing the code and the approve/reject routes, and gating corrections on `attendance.correct` + row scope (§2.6.2). No dead-end permission code remains |
 | D7 | **Access-token TTL policy** | (a) keep 8 h login JWT + 15 min session access; (b) shorten the login JWT to 15 min and issue sessions from it; (c) add a JWT denylist/jti check on logout | (b) or (c) to close the §8.3 revocation gap |
 | D8 | **Scheduler** | (a) external cron calling `/attendance/process`; (b) in-process loop like notifications cleanup; (c) Celery/APScheduler | (b) for now (one fewer moving part, matches existing precedent), (c) before horizontal scale |
 | D9 | **Rate limiting & sessions at scale** | (a) in-memory limiter + DB sessions (today); (b) Redis for both | (b) is required the moment you run more than one API worker |
@@ -878,7 +897,9 @@ These are verified against the current code and are the highest-value item in th
 
 ## 10. Appendices
 
-### A. Permission catalog (48 codes in `FIXED_ROLE_PERMISSIONS` — EMPLOYEE 10, DEPT MANAGER 20, HR ADMIN 38, ORG OWNER 11)
+### A. Permission catalog (48 codes — base employee 10, DEPARTMENT_MANAGER 20 effective, HR_ADMIN 46 effective, ORGANIZATION_OWNER 21 effective)
+
+`BASE_EMPLOYEE_PERMISSIONS` (10, implicit for every employee) plus each role's additive bundle. `FIXED_ROLE_PERMISSIONS` exposes the `base + bundle` view per role.
 
 `employee.view_self`, `employee.view`, `employee.create`, `employee.update`, `employee.deactivate`,
 `user.view`, `user.create`, `user.update`, `user.deactivate`,
@@ -892,14 +913,16 @@ These are verified against the current code and are the highest-value item in th
 `salary_cost.view_unit`, `salary_cost.view_department`,
 `system.configure`, `audit.view`, `dashboard.view_organization`
 
-**Checked in the API but granted to no role:** `attendance.approve_correction` (§8.1 A7) — the only dead-end code.
+**Checked in the API but granted to no role:** none — `tests/test_permission_grants.py` asserts both directions (no enforced code is ungranted; no role bundle repeats a base code).
 
 **Granted to some role but never enforced in the API** (safe to keep as forward-compatible vocabulary, hazardous to treat as a security control):
-`user.view`, `user.create`, `user.update`, `user.deactivate`, `employee.update`, `employee.deactivate`, `employee.view_self`, `attendance.view_self` *(docstring mention only)*, `attendance.correct`, `leave.view_self`, `overtime.view_self`, `overtime.approve`, `shift.view_self`, `shift.assign`, `shift.update`, `reports.view`, `reports.overtime`, `reports.salary_cost`, `salary_cost.view_unit`, `salary_cost.view_department`, `audit.view`.
+`user.view`, `user.create`, `user.deactivate`, `employee.update`, `employee.deactivate`, `employee.view_self`, `attendance.view_self`, `designation.view/create/update/delete`, `leave.view_self`, `overtime.view_self`, `overtime.approve`, `shift.view_self`, `shift.assign`, `shift.update`, `reports.view`, `reports.overtime`, `reports.salary_cost`, `salary_cost.view_unit`, `salary_cost.view_department`, `audit.view`, `work_arrangement.apply`, `work_arrangement.view_self`.
 
-*Frontend-only gates:* `shift.assign` (nav + Shifts page) is not checked by any route — which is why the Shifts page renders create buttons whose endpoints do not exist (§8.1 A4).
+*Derived by `tests/test_permission_grants.py` (`granted − enforced`), so this list cannot drift silently.*
 
-*Enforced today:* `employee.view`, `employee.create`, `attendance.view/view_unit/view_department`, `attendance.process`, `leave.apply/approve/reject/cancel/manage`, `work_arrangement.apply/view_self/approve/reject/cancel/manage`, `overtime.view/view_department`, `reports.attendance/reports.leave`, `dashboard.view_organization`, `system.configure` (dashboard widget gating).
+*Frontend-only gates:* `shift.assign` / `shift.update` (nav + Shifts page) are not checked by any route — which is why the Shifts page renders create buttons whose endpoints do not exist (§8.1 A4). `attendance.correct` gates the correction dialog, and the API enforces it as well.
+
+*Enforced today (23):* `employee.view`, `employee.create`, `attendance.view` / `view_unit` / `view_department` / `process` / `correct`, `leave.apply` / `approve` / `reject` / `cancel` / `manage`, `work_arrangement.approve` / `reject` / `cancel` / `manage`, `overtime.view` / `view_department`, `reports.attendance` / `reports.leave`, `dashboard.view_organization`, `system.configure` (dashboard widget gating), `user.update` (HR password reset).
 
 ### B. Database tables (28)
 

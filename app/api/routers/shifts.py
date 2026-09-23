@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import fastapi_users
+from core.business_roles import resolve_business_access
 from core.database import get_async_session
 from core.employee_access import get_current_employee
 from db.models import User
@@ -18,16 +19,17 @@ router = APIRouter(prefix="/shifts", tags=["shifts"])
 
 
 async def _employee_self_scope(user: User, session: AsyncSession):
-    """Return the employee profile only for an individual employee login.
+    """Return the employee profile only for a plain employee login.
 
-    Shift management remains available to HR. Individual employees are
-    intentionally limited to their own effective assignment because their
-    schedule is displayed on the dashboard rather than in a management tab.
+    Shift management remains available to elevated business roles (and Super
+    Admin). An employee with no elevated role is intentionally limited to their
+    own effective assignment because their schedule is displayed on the
+    dashboard rather than in a management tab.
     """
     if user.is_superuser:
         return None
     employee = await get_current_employee(user, session)
-    return employee if employee.role == "EMPLOYEE" else None
+    return employee if resolve_business_access(employee).business_role is None else None
 
 
 async def _employee_visible_shifts(service: ShiftService, employee_id: int) -> list[ShiftRead]:

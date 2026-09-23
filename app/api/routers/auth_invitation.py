@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import UserManager, get_user_manager
+from core.business_roles import resolve_business_role
 from db.models import AuthSession, Employee
 from sqlalchemy import update
 from core.database import get_async_session
@@ -32,7 +33,8 @@ async def validate_invitation_token(
         )
 
     employee = await session.scalar(select(Employee).where(Employee.user_id == user.id))
-    role_name = employee.role if employee else "EMPLOYEE"
+    # Display label only: the business role, falling back to the base employee state.
+    role_name = (resolve_business_role(employee) or "EMPLOYEE") if employee else "EMPLOYEE"
 
     return ValidateInvitationResponse(
         valid=True,

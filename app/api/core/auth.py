@@ -3,8 +3,10 @@ core/auth.py — Authentication, password policy and permission helpers.
 
 Built on fastapi-users. Login accepts email, username, or Indian mobile
 number; passwords are enforced by a strict local policy; API access is
-authorized through fixed role-based permission sets (see
-FIXED_ROLE_PERMISSIONS at the bottom of this file) or the ERP API key.
+authorized through an effective permission set — the implicit
+``BASE_EMPLOYEE_PERMISSIONS`` every employee holds plus the bundle of an
+optional elevated business role (see this module's bottom section) — or the
+ERP API key. Row scope resolution lives in ``core.employee_access``.
 """
 
 import asyncio
@@ -26,6 +28,12 @@ from slowapi.util import get_remote_address
 from sqlalchemy import or_, select
 from zxcvbn import zxcvbn
 
+from core.business_roles import (
+    ELEVATED_BUSINESS_ROLES,
+    EMPLOYEE,
+    HR_ADMIN,
+    resolve_business_role,
+)
 from core.database import check_database_connection as _check_database_connection
 from core.database import get_async_session
 from core.settings import get_settings
@@ -244,19 +252,33 @@ async def user_has_permission(user: User, permission_code: str, session: AsyncSe
     return permission_code in permissions
 
 
+def effective_permissions(business_role: str | None) -> set[str]:
+    """Effective permission set for a business role (``None`` = plain employee).
+
+    Every employee holds the base self-service set; an elevated business role
+    adds its own bundle on top.  The elevated bundles therefore list only the
+    permissions they *add* — base permissions are never duplicated into them.
+    """
+    permissions = set(BASE_EMPLOYEE_PERMISSIONS)
+    if business_role:
+        permissions |= ROLE_PERMISSIONS.get(business_role, set())
+    return permissions
+
+
 async def get_user_permissions(user: User, session: AsyncSession) -> list[str]:
     """Resolve the effective permission set for a user.
 
-    Permissions are derived from the fixed role on the linked Employee
-    record; Super Admins always receive the full HR_ADMIN set. Users
-    without an employee profile fall back to the plain EMPLOYEE set.
+    Permissions are the base employee set plus the bundle of the linked
+    employee's elevated business role, if any.  Super Admins receive the full
+    HR bundle they always had; users without an employee profile hold the base
+    employee set.
     """
     if user.is_superuser:
-        return sorted(FIXED_ROLE_PERMISSIONS["HR_ADMIN"])
+        return sorted(effective_permissions(HR_ADMIN))
 
     employee = await session.scalar(select(Employee).where(Employee.user_id == user.id))
-    role = employee.role if employee and employee.role in FIXED_ROLE_PERMISSIONS else "EMPLOYEE"
-    return sorted(FIXED_ROLE_PERMISSIONS[role])
+    business_role = resolve_business_role(employee) if employee else None
+    return sorted(effective_permissions(business_role))
 
 
 def require_permission(permission_code: str):
@@ -275,30 +297,32 @@ def require_permission(permission_code: str):
     return dependency
 
 
-# The single source of truth for what each business role can do.
-# Roles live on Employee.role and are provisioned by ERP; the web UI also
-# queries this mapping indirectly via /auth/account permissions.
-FIXED_ROLE_PERMISSIONS: dict[str, set[str]] = {
-    "EMPLOYEE": {
-        "employee.view_self", "attendance.view_self", "leave.apply", "leave.view_self",
-        "leave.cancel", "work_arrangement.apply", "work_arrangement.view_self",
-        "work_arrangement.cancel", "shift.view_self", "overtime.view_self",
-    },
+# The single source of truth for what a user may do.
+#
+# BASE_EMPLOYEE_PERMISSIONS is implicit: every employee holds it.  Elevated
+# bundles intentionally list only the permissions the role *adds*, so no code
+# is duplicated between roles.  The role/scope columns themselves live on
+# Employee and are provisioned by ERP; the web UI reads the resolved list from
+# /users/me rather than hard-coding any of this.
+BASE_EMPLOYEE_PERMISSIONS: set[str] = {
+    "employee.view_self", "attendance.view_self", "leave.apply", "leave.view_self",
+    "leave.cancel", "work_arrangement.apply", "work_arrangement.view_self",
+    "work_arrangement.cancel", "shift.view_self", "overtime.view_self",
+}
+
+ROLE_PERMISSIONS: dict[str, set[str]] = {
     "DEPARTMENT_MANAGER": {
-        "employee.view", "employee.view_self", "attendance.view_department", "attendance.view_self",
-        "leave.approve", "leave.reject", "leave.apply", "leave.view_self", "leave.cancel",
-        "work_arrangement.approve", "work_arrangement.reject", "work_arrangement.apply",
-        "work_arrangement.view_self", "work_arrangement.cancel", "overtime.view_department",
-        "overtime.approve", "reports.attendance", "reports.leave", "shift.view_self",
-        "overtime.view_self",
+        "employee.view", "attendance.view_department", "leave.approve", "leave.reject",
+        "work_arrangement.approve", "work_arrangement.reject", "overtime.view_department",
+        "overtime.approve", "reports.attendance", "reports.leave",
     },
     "HR_ADMIN": {
         "user.view", "user.create", "user.update", "user.deactivate", "employee.view", "employee.create",
         "employee.update", "employee.deactivate", "designation.view", "designation.create",
         "designation.update", "designation.delete", "attendance.view", "attendance.view_unit",
         "attendance.view_department", "attendance.process", "attendance.correct", "leave.manage",
-        "leave.approve", "leave.reject", "leave.cancel", "work_arrangement.manage",
-        "work_arrangement.approve", "work_arrangement.reject", "work_arrangement.cancel",
+        "leave.approve", "leave.reject", "work_arrangement.manage",
+        "work_arrangement.approve", "work_arrangement.reject",
         "shift.assign", "shift.update", "overtime.approve", "overtime.view_department",
         "reports.view", "reports.attendance", "reports.leave", "reports.overtime", "reports.salary_cost",
         "system.configure", "audit.view", "salary_cost.view_unit", "salary_cost.view_department",
@@ -308,6 +332,19 @@ FIXED_ROLE_PERMISSIONS: dict[str, set[str]] = {
         "overtime.view", "overtime.view_department", "reports.view", "reports.attendance",
         "reports.leave", "reports.overtime", "dashboard.view_organization",
     },
+}
+
+# The keys are string literals (not the role constants) so the permission
+# catalogue tests can read them statically; this keeps them honest.
+assert set(ROLE_PERMISSIONS) == set(ELEVATED_BUSINESS_ROLES)
+
+# Backward-compatible role → full permission-set view (base + role bundle).
+# Kept because it names the four persisted role values and is asserted by the
+# permission-catalog tests; runtime code resolves through
+# ``effective_permissions`` so base permissions stay unduplicated.
+FIXED_ROLE_PERMISSIONS: dict[str, set[str]] = {
+    role: effective_permissions(role)
+    for role in (EMPLOYEE, *ELEVATED_BUSINESS_ROLES)
 }
 
 

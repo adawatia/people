@@ -1,9 +1,13 @@
-"""Guard the fixed-role permission model against dead gates.
+"""Guard the role/permission model against dead gates and duplicated grants.
 
 A permission code that the API *enforces* but no role is ever *granted* can
 never pass for any user, which silently turns an endpoint into a permanent
 403.  That is how ``attendance.approve_correction`` disabled attendance
 approvals for HR Admins and Super Admins alike.
+
+The model is: ``BASE_EMPLOYEE_PERMISSIONS`` (implicit for every employee) plus
+one bundle per elevated business role in ``ROLE_PERMISSIONS``.  Bundles must
+not repeat base permissions.
 
 These tests are static: they read the source tree, so they fail fast in CI
 without a database and name the offending file for each dead gate.
@@ -75,28 +79,46 @@ def _module_string_constants(tree: ast.Module) -> dict[str, list[str]]:
     return constants
 
 
-def granted_permissions() -> dict[str, set[str]]:
-    """Parse ``FIXED_ROLE_PERMISSIONS`` from ``core/auth.py``."""
-    tree = ast.parse(AUTH_MODULE.read_text(encoding="utf-8"))
+def _module_literal(tree: ast.Module, name: str) -> ast.expr | None:
+    """Return the literal assigned to a module-level name, if any."""
     for node in tree.body:
-        if isinstance(node, ast.AnnAssign):
-            target, value = node.target, node.value
-        elif isinstance(node, ast.Assign) and len(node.targets) == 1:
-            target, value = node.targets[0], node.value
-        else:
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.target.id == name:
+            return node.value
+        if (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and node.targets[0].id == name
+        ):
+            return node.value
+    return None
+
+
+def permission_bundles() -> tuple[set[str], dict[str, set[str]]]:
+    """Parse ``BASE_EMPLOYEE_PERMISSIONS`` and ``ROLE_PERMISSIONS`` from core/auth.py."""
+    tree = ast.parse(AUTH_MODULE.read_text(encoding="utf-8"))
+
+    base_node = _module_literal(tree, "BASE_EMPLOYEE_PERMISSIONS")
+    base = set(_string_collection(base_node))
+    if not base:
+        raise TypeError("BASE_EMPLOYEE_PERMISSIONS must be a non-empty set literal in core/auth.py")
+
+    roles_node = _module_literal(tree, "ROLE_PERMISSIONS")
+    if not isinstance(roles_node, ast.Dict):
+        raise TypeError("ROLE_PERMISSIONS must be a dict literal in core/auth.py")
+    roles: dict[str, set[str]] = {}
+    for key, role_permissions in zip(roles_node.keys, roles_node.values, strict=True):
+        role = _string(key)
+        if role is None:
             continue
-        if not isinstance(target, ast.Name) or target.id != "FIXED_ROLE_PERMISSIONS":
-            continue
-        if not isinstance(value, ast.Dict):
-            raise TypeError("FIXED_ROLE_PERMISSIONS must be a dict literal")
-        roles: dict[str, set[str]] = {}
-        for key, role_permissions in zip(value.keys, value.values, strict=True):
-            role = _string(key)
-            if role is None:
-                continue
-            roles[role] = set(_string_collection(role_permissions))
-        return roles
-    raise TypeError("FIXED_ROLE_PERMISSIONS not found in core/auth.py")
+        roles[role] = set(_string_collection(role_permissions))
+    return base, roles
+
+
+def granted_permissions() -> dict[str, set[str]]:
+    """Full effective set per role: base employee permissions + role bundle."""
+    base, roles = permission_bundles()
+    return {"EMPLOYEE": set(base), **{role: set(base) | codes for role, codes in roles.items()}}
 
 
 def _looks_like_permission_code(value: str | None) -> bool:
@@ -173,11 +195,24 @@ def test_no_permission_is_enforced_without_being_granted():
     )
 
 
-def test_every_role_has_permissions():
-    roles = granted_permissions()
-    assert set(roles) == {"EMPLOYEE", "DEPARTMENT_MANAGER", "HR_ADMIN", "ORGANIZATION_OWNER"}
+def test_every_elevated_role_adds_permissions_and_repeats_no_base_code():
+    base, roles = permission_bundles()
+    assert set(roles) == {"DEPARTMENT_MANAGER", "HR_ADMIN", "ORGANIZATION_OWNER"}
     for role, codes in roles.items():
-        assert codes, f"{role} has no permissions"
+        assert codes, f"{role} adds no permissions"
+        duplicated = codes & base
+        assert not duplicated, f"{role} repeats base employee permissions: {sorted(duplicated)}"
+
+
+def test_fixed_role_permissions_matches_base_plus_bundles():
+    """The compatibility role → permission view stays consistent with the model."""
+    from core.auth import FIXED_ROLE_PERMISSIONS, effective_permissions
+
+    base, roles = permission_bundles()
+    assert FIXED_ROLE_PERMISSIONS["EMPLOYEE"] == effective_permissions(None) == base
+    for role in roles:
+        assert FIXED_ROLE_PERMISSIONS[role] == effective_permissions(role)
+    assert set(FIXED_ROLE_PERMISSIONS) == {"EMPLOYEE", *roles}
 
 
 def test_no_web_gate_references_an_ungranted_permission():

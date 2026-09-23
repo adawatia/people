@@ -5,7 +5,7 @@
  * SSR-safe). The user is fetched once per request via the session endpoint
  * (`/api/session/me`) and cached until `force` refresh or logout.
  */
-import type { CurrentUser, LoginPayload } from '#shared/types/auth'
+import type { AccessScope, BusinessRole, CurrentUser, LoginPayload } from '#shared/types/auth'
 
 export function useAuth() {
   const requestFetch = useRequestFetch()
@@ -21,8 +21,15 @@ export function useAuth() {
   const initials = computed(() => displayName.value.split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase())
   /** Super Admin bypasses permission checks; everyone else checks their list. */
   const hasPermission = (permission: string) => Boolean(user.value?.is_superuser || user.value?.permissions?.includes(permission))
-  /** Roles matter only for non-superusers, who see every role's nav. */
-  const hasRole = (role: CurrentUser['role']) => Boolean(user.value?.is_superuser || user.value?.role === role)
+  /**
+   * Elevated business role, if any — for genuinely role-specific experiences
+   * (the Organization Owner dashboard). Action and nav visibility should gate
+   * on `hasPermission` instead: the server enforces permission *and* scope on
+   * every endpoint, so a hidden control is convenience, never security.
+   */
+  const businessRole = computed<BusinessRole | null>(() => user.value?.business_role ?? null)
+  /** Where the business role applies; `SELF` for a plain employee. */
+  const scopeType = computed<AccessScope>(() => user.value?.scope_type ?? 'SELF')
 
   /**
    * Load the signed-in user from the cookie-backed session.
@@ -59,5 +66,5 @@ export function useAuth() {
     await navigateTo('/login')
   }
 
-  return { user, initialized, loading, displayName, initials, hasPermission, hasRole, fetchUser, login, logout }
+  return { user, initialized, loading, displayName, initials, hasPermission, businessRole, scopeType, fetchUser, login, logout }
 }

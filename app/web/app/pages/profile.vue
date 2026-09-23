@@ -17,7 +17,16 @@ if (auth.user.value?.employee_id) {
 }
 
 const user = computed(() => auth.user.value as CurrentUser | null)
-const roleLabel = computed(() => user.value?.role === 'DEPARTMENT_MANAGER' ? 'Department Manager' : user.value?.role === 'HR_ADMIN' ? 'HR Admin' : user.value?.role === 'SUPER_ADMIN' ? 'Super Admin' : 'Employee')
+// Label from the business role + scope, so unit HR and organization HR are
+// distinguishable. Display only — authorization always comes from the API.
+const roleLabel = computed(() => {
+  switch (user.value?.business_role) {
+    case 'ORGANIZATION_OWNER': return 'Organization Owner'
+    case 'HR_ADMIN': return user.value.scope_type === 'ORGANIZATION' ? 'HR Admin (Organization)' : 'HR Admin (Unit)'
+    case 'DEPARTMENT_MANAGER': return 'Department Manager'
+    default: return user.value?.is_superuser || user.value?.role === 'SUPER_ADMIN' ? 'Super Admin' : 'Employee'
+  }
+})
 const details = computed(() => [
   { label: 'Full name', value: employee.value?.full_name || [user.value?.first_name, user.value?.last_name].filter(Boolean).join(' ') || user.value?.username },
   { label: 'Employee code', value: employee.value?.employee_code || user.value?.employee_code },

@@ -3,7 +3,6 @@ from datetime import date, datetime
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.attendance_access import require_hr_admin, require_hr_unit_access
 from core.auth import fastapi_users, require_permission
 from core.database import get_async_session
 from core.employee_access import (
@@ -85,7 +84,7 @@ async def list_checkins(
             session,
             allow_self=True,
         )
-    elif not scope.organization and not scope.unit_ids and not scope.department_ids:
+    elif scope.self_only:
         employee_id = current_employee.id
     return await service.list_punches(
         employee_id=employee_id,
@@ -122,7 +121,7 @@ async def list_attendance(
             session,
             allow_self=True,
         )
-    elif not scope.organization and not scope.unit_ids and not scope.department_ids:
+    elif scope.self_only:
         employee_id = current_employee.id
     return await service.list_attendance(
         employee_id=employee_id,
@@ -218,15 +217,19 @@ async def process_attendance(
 @router.post("/corrections", response_model=AttendanceCorrectionRead, status_code=status.HTTP_201_CREATED)
 async def submit_correction(
     data: AttendanceCorrectionCreate,
-    current_user: User = Depends(require_hr_admin),
+    current_user: User = Depends(require_permission("attendance.correct")),
     session: AsyncSession = Depends(get_async_session),
 ) -> AttendanceCorrectionRead:
-    """HR submits a correction for ERP reconciliation; ERP remains authoritative."""
+    """HR submits a correction for ERP reconciliation; ERP remains authoritative.
+
+    Gated on the HR permission plus the caller's row scope, so unit HR can
+    correct their own unit while organization HR covers every unit.
+    """
     service = AttendanceService(session)
     record = await service.record_repo.get_by_id(data.attendance_record_id)
     if record is None:
         raise HTTPException(status_code=404, detail="Attendance record not found")
-    await require_hr_unit_access(current_user, record.employee, session)
+    await require_employee_access(current_user, record.employee, "attendance.correct", session)
     return await service.submit_correction(data)
 
 
@@ -244,7 +247,7 @@ async def list_corrections(
     current_employee = await get_current_employee(current_user, session)
     scope = await get_permission_scope(current_user, "attendance.correct", session)
     employee_id = None
-    if not scope.organization and not scope.unit_ids and not scope.department_ids:
+    if scope.self_only:
         employee_id = current_employee.id
     return await service.list_corrections(
         status=status,

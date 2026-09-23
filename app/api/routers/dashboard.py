@@ -9,6 +9,7 @@ from sqlalchemy.orm import selectinload
 from core.audit import record_audit_event
 from core.auth import fastapi_users, get_user_permissions
 from core.database import get_async_session
+from core.employee_access import get_employee_scope
 from core.rbac import get_visible_widgets
 from db.models import (
     AttendanceCorrectionRequest,
@@ -196,9 +197,17 @@ async def get_dashboard_metrics(
     )
 
     if has_mgr_access:
+        # Scope always comes from the centralized resolver: unit HR sees their
+        # unit, organization HR and the Organization Owner see everything, a
+        # department manager sees their department.
         has_org_scope = user.is_superuser
-        unit_scope_ids = [emp.unit_id] if emp and emp.role == "HR_ADMIN" and emp.unit_id else []
-        dept_scope_ids = [emp.department_id] if emp and emp.role == "DEPARTMENT_MANAGER" and emp.department_id else []
+        unit_scope_ids: list[int] = []
+        dept_scope_ids: list[int] = []
+        if not has_org_scope:
+            scope = await get_employee_scope(user, session)
+            has_org_scope = scope.organization
+            unit_scope_ids = sorted(scope.unit_ids)
+            dept_scope_ids = sorted(scope.department_ids)
 
         if not has_org_scope and not unit_scope_ids and not dept_scope_ids and emp:
             if emp.unit_id:

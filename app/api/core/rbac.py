@@ -1,8 +1,9 @@
 """Fixed-role dashboard visibility helpers.
 
-Business permissions are resolved exclusively from ``Employee.role`` in
-``core.auth``.  This module intentionally contains no role-assignment tables
-or dynamic-RBAC behaviour.
+Effective permissions are resolved in ``core.auth`` (base employee set plus the
+optional elevated business role) and row scope in ``core.employee_access``.
+This module intentionally contains no role-assignment tables or dynamic-RBAC
+behaviour: it only maps a widget key to the permission that unlocks it.
 """
 
 from sqlalchemy.ext.asyncio import AsyncSession

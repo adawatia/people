@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import fastapi_users, get_user_permissions
+from core.business_roles import SCOPE_ORGANIZATION, resolve_business_access
 from core.database import get_async_session
 from db.models import Employee, User
 from schemas import UserPermissionsResponse, UserRead
@@ -30,8 +31,16 @@ async def get_current_user_me(
         user_read.employee_id = employee.id
         user_read.employee_code = employee.employee_code
         user_read.role = employee.role
+        # Resolved (not raw) role/scope, so rows written before the scope
+        # columns existed report the access they actually have.
+        access = resolve_business_access(employee)
+        user_read.business_role = access.business_role
+        user_read.scope_type = access.scope_type
     elif target_user.is_superuser:
         user_read.role = "SUPER_ADMIN"
+    if target_user.is_superuser:
+        # Break-glass technical administrator: not an employee, organization wide.
+        user_read.scope_type = SCOPE_ORGANIZATION
     return user_read
 
 

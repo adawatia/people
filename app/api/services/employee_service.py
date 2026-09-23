@@ -3,6 +3,13 @@ from fastapi import HTTPException, status
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.audit import add_audit_event
+from core.business_roles import (
+    ROLE_COLUMN_FIELDS,
+    merge_role_columns,
+    resolve_business_access,
+    role_columns,
+)
 from db.models import AuthSession, Department, Designation, Employee, EmployeeWorkHistory, Shift, Unit, User, now_ist
 from repositories.employee_repo import EmployeeRepository
 from schemas.employees import (
@@ -23,6 +30,12 @@ class EmployeeService:
     def enrich(self, emp: Employee) -> EmployeeRead:
         """Constructs EmployeeRead with nested readable names and computed full_name."""
         data = EmployeeRead.model_validate(emp)
+        # Report the *resolved* authorization identity, so a row that only
+        # carries the legacy role column still describes the access it has.
+        access = resolve_business_access(emp)
+        data.business_role = access.business_role
+        data.access_scope = access.scope_type
+        data.access_scope_id = access.scope_id
         # Compute full name
         full_name_parts = [p for p in (emp.first_name, emp.last_name) if p]
         data.full_name = " ".join(full_name_parts) if full_name_parts else emp.employee_code
@@ -212,8 +225,33 @@ class EmployeeService:
         payload = data.model_dump()
         payload["unit_id"] = unit_id
         payload["designation"] = designation_title
+        # Persist the explicit business role and access scope; `role` stays the
+        # compatibility mirror. An explicit business_role wins, otherwise the
+        # legacy role drives the defaults (unit HR, department manager, owner).
+        payload.update(
+            role_columns(
+                payload.get("business_role") or payload.get("role"),
+                access_scope=payload.get("access_scope"),
+                access_scope_id=payload.get("access_scope_id"),
+                unit_id=unit_id,
+                department_id=data.department_id,
+            )
+        )
         emp = Employee(**payload)
         await self.repo.create(emp)
+        if emp.business_role:
+            add_audit_event(
+                self.session,
+                actor=None,
+                action="EMPLOYEE_ROLE_GRANTED",
+                entity_type="employee",
+                entity_id=str(emp.id),
+                filters={
+                    "business_role": emp.business_role,
+                    "scope_type": emp.access_scope,
+                    "scope_id": emp.access_scope_id,
+                },
+            )
 
         # Record initial work history
         initial_history = EmployeeWorkHistory(
@@ -300,9 +338,41 @@ class EmployeeService:
                 )
             update_data["designation"] = desig.name
 
+        # Authorization assignment. `role` remains the field the ERP writes, so
+        # a role-only update still produces coherent scope columns, moving an HR
+        # admin from unit to organization scope keeps the HR role, and an
+        # explicit business_role of "EMPLOYEE"/null removes the elevation.
+        # A transfer of an elevated employee is reconciled too, so a unit HR
+        # admin's scope follows them instead of lingering on the old unit.
+        previous_access = resolve_business_access(emp)
+        assignment_touched = bool(ROLE_COLUMN_FIELDS & update_data.keys())
+        moved_with_scope = previous_access.is_elevated and bool({"unit_id", "department_id"} & update_data.keys())
+        role_assignment_changed = assignment_touched or moved_with_scope
+        if role_assignment_changed:
+            update_data.update(merge_role_columns(emp, update_data))
+
         # Apply updates
         for key, val in update_data.items():
             setattr(emp, key, val)
+
+        if role_assignment_changed:
+            current_access = resolve_business_access(emp)
+            if current_access != previous_access:
+                add_audit_event(
+                    self.session,
+                    actor=None,
+                    action="EMPLOYEE_ROLE_CHANGED",
+                    entity_type="employee",
+                    entity_id=str(emp.id),
+                    filters={
+                        "business_role": current_access.business_role,
+                        "scope_type": current_access.scope_type,
+                        "scope_id": current_access.scope_id,
+                        "previous_business_role": previous_access.business_role,
+                        "previous_scope_type": previous_access.scope_type,
+                        "previous_scope_id": previous_access.scope_id,
+                    },
+                )
 
         # Check if movement occurred
         new_unit = emp.unit_id

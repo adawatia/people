@@ -54,7 +54,7 @@ async def list_work_arrangements(
             session,
             allow_self=True,
         )
-    elif not scope.organization and not scope.unit_ids and not scope.department_ids:
+    elif scope.self_only:
         employee_id = current_employee.id
 
     return await service.list_requests(

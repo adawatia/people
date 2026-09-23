@@ -33,7 +33,7 @@ async def list_overtime(
             from fastapi import HTTPException
             raise HTTPException(status_code=404, detail="Employee not found")
         await require_employee_access(current_user, employee, ("overtime.view", "overtime.view_department"), session, allow_self=True)
-    elif not scope.organization and not scope.unit_ids and not scope.department_ids:
+    elif scope.self_only:
         employee_id = (await get_current_employee(current_user, session)).id
     return await service.list_overtime(
         employee_id=employee_id,

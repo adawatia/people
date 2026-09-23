@@ -4,7 +4,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import UserManager, fastapi_users, get_user_manager, require_permission
-from core.employee_access import get_current_employee, require_employee_access
+from core.employee_access import get_employee_scope, require_employee_access
 from fastapi_users import exceptions as fu_exceptions
 from core.database import get_async_session
 from db.models import User
@@ -38,17 +38,22 @@ async def list_employees(
     allowed_unit_ids: set[int] | None = None
     allowed_department_ids: set[int] | None = None
     if not current_user.is_superuser:
-        current_employee = await get_current_employee(current_user, session)
-        if current_employee.role == "ORGANIZATION_OWNER":
+        # The directory is readable by any authenticated user, but only within
+        # the row scope of their business role: an employee sees themselves, a
+        # manager their department, HR their unit or the organization.
+        scope = await get_employee_scope(current_user, session)
+        if scope.organization:
             pass
-        elif current_employee.role == "HR_ADMIN":
-            allowed_employee_ids = set() if current_employee.unit_id is None else None
-            allowed_unit_ids = {current_employee.unit_id} if current_employee.unit_id else None
-        elif current_employee.role == "DEPARTMENT_MANAGER":
-            allowed_employee_ids = set() if current_employee.department_id is None else None
-            allowed_department_ids = {current_employee.department_id} if current_employee.department_id else None
+        elif scope.employee_ids:
+            allowed_employee_ids = set(scope.employee_ids)
+        elif scope.unit_ids:
+            allowed_unit_ids = scope.unit_ids
+        elif scope.department_ids:
+            allowed_department_ids = scope.department_ids
         else:
-            allowed_employee_ids = {current_employee.id}
+            # Elevated role without a usable scope (e.g. unit HR with no unit)
+            # must not degrade into an unrestricted listing.
+            allowed_employee_ids = set()
     service = EmployeeService(session)
     return await service.list_employees(
         page=page,

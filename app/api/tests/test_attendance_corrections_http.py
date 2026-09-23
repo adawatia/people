@@ -9,6 +9,11 @@ Attendance corrections are raised by HR for ERP reconciliation, so:
 * the always-403 approve/reject endpoints are gone, because ERP confirmation is
   the approval.
 
+They also pin the role/scope split: a *unit* HR admin and an *organization* HR
+admin share the same HR permission bundle, so the only difference between them
+is scope — the unit admin must be refused outside their unit while the
+organization admin succeeds, with no role change involved.
+
 These tests drive the real ASGI app with real bearer tokens.
 """
 
@@ -49,7 +54,11 @@ def unique_suffix():
 
 
 async def _seed(suffix: str) -> dict[str, object]:
-    """Two units, an HR admin and two employees, with one pending correction."""
+    """Two units, a unit HR admin, an organization HR admin and two employees.
+
+    Each unit holds one pending correction, so the two HR admins can be
+    compared on identical data: same permission, different scope.
+    """
     async with async_session_maker() as session:
         # The organization table is a singleton, so reuse whatever exists.
         org = await session.scalar(select(Organization).order_by(Organization.id.asc()))
@@ -82,6 +91,7 @@ async def _seed(suffix: str) -> dict[str, object]:
             return user
 
         hr_user = await make_user("hr")
+        org_hr_user = await make_user("orghr")
         member_user = await make_user("member")
         outsider_user = await make_user("outsider")
 
@@ -91,8 +101,21 @@ async def _seed(suffix: str) -> dict[str, object]:
             first_name="Hr",
             last_name="Admin",
             role="HR_ADMIN",
+            business_role="HR_ADMIN",
+            access_scope="UNIT",
             unit_id=unit.id,
             department_id=dept.id,
+            status="ACTIVE",
+        )
+        # Same HR role, organization scope and no unit: organization-level HR.
+        org_hr_employee = Employee(
+            user_id=org_hr_user.id,
+            employee_code=f"OHR_{suffix}",
+            first_name="Org",
+            last_name="Hr",
+            role="HR_ADMIN",
+            business_role="HR_ADMIN",
+            access_scope="ORGANIZATION",
             status="ACTIVE",
         )
         member_employee = Employee(
@@ -114,13 +137,17 @@ async def _seed(suffix: str) -> dict[str, object]:
             unit_id=other_unit.id,
             status="ACTIVE",
         )
-        session.add_all([hr_employee, member_employee, outsider_employee])
+        session.add_all([hr_employee, org_hr_employee, member_employee, outsider_employee])
         await session.flush()
 
         record = AttendanceRecord(employee_id=member_employee.id, attendance_date="2026-03-02", status="MISSED_PUNCH")
         # A second record without a pending correction, for the submission test.
         free_record = AttendanceRecord(employee_id=member_employee.id, attendance_date="2026-03-03", status="MISSED_PUNCH")
-        session.add_all([record, free_record])
+        # The other unit needs its own correction and free record, so a scoped
+        # caller can be shown to reach exactly one of the two units.
+        other_record = AttendanceRecord(employee_id=outsider_employee.id, attendance_date="2026-03-02", status="MISSED_PUNCH")
+        other_free_record = AttendanceRecord(employee_id=outsider_employee.id, attendance_date="2026-03-03", status="MISSED_PUNCH")
+        session.add_all([record, free_record, other_record, other_free_record])
         await session.flush()
 
         correction = AttendanceCorrectionRequest(
@@ -131,17 +158,28 @@ async def _seed(suffix: str) -> dict[str, object]:
             status="PENDING",
         )
         session.add(correction)
+        other_correction = AttendanceCorrectionRequest(
+            attendance_record_id=other_record.id,
+            requested_punch_in="09:20",
+            requested_punch_out="18:00",
+            reason=f"Forgot to punch in {suffix}",
+            status="PENDING",
+        )
+        session.add(other_correction)
         await session.flush()
 
         strategy = get_jwt_strategy()
         tokens = {
             "hr": await strategy.write_token(hr_user),
+            "org_hr": await strategy.write_token(org_hr_user),
             "member": await strategy.write_token(member_user),
             "outsider": await strategy.write_token(outsider_user),
         }
         correction_id = correction.id
+        other_correction_id = other_correction.id
         record_id = record.id
         free_record_id = free_record.id
+        other_free_record_id = other_free_record.id
         await session.commit()
 
     # The app runs in the TestClient's own event loop; release pooled
@@ -150,8 +188,10 @@ async def _seed(suffix: str) -> dict[str, object]:
     return {
         **tokens,
         "correction_id": correction_id,
+        "other_correction_id": other_correction_id,
         "record_id": record_id,
         "free_record_id": free_record_id,
+        "other_free_record_id": other_free_record_id,
     }
 
 
@@ -175,6 +215,42 @@ def test_hr_lists_unit_corrections_and_employees_see_only_their_own(unique_suffi
         outsider_response = client.get("/api/v1/attendance/corrections", headers=_auth(str(seeded["outsider"])))
         assert outsider_response.status_code == 200, outsider_response.text
         assert correction_id not in [item["id"] for item in outsider_response.json()]
+
+
+def test_unit_hr_is_confined_to_their_unit_while_organization_hr_covers_every_unit(unique_suffix):
+    """Same HR role, same permissions — only the access scope differs."""
+    seeded = run_async(_seed(unique_suffix))
+    in_unit_id = seeded["correction_id"]
+    out_of_unit_id = seeded["other_correction_id"]
+
+    with TestClient(app) as client:
+        unit_hr_listing = client.get("/api/v1/attendance/corrections", headers=_auth(str(seeded["hr"])))
+        assert unit_hr_listing.status_code == 200, unit_hr_listing.text
+        assert {item["id"] for item in unit_hr_listing.json()} == {in_unit_id}
+
+        org_hr_listing = client.get("/api/v1/attendance/corrections", headers=_auth(str(seeded["org_hr"])))
+        assert org_hr_listing.status_code == 200, org_hr_listing.text
+        assert {item["id"] for item in org_hr_listing.json()} >= {in_unit_id, out_of_unit_id}
+
+        outside_payload = {
+            "attendance_record_id": seeded["other_free_record_id"],
+            "requested_punch_in": "09:10",
+            "requested_punch_out": "18:05",
+            "reason": "Out-of-unit correction attempt",
+        }
+        unit_hr_attempt = client.post(
+            "/api/v1/attendance/corrections",
+            json=outside_payload,
+            headers=_auth(str(seeded["hr"])),
+        )
+        assert unit_hr_attempt.status_code == 403, unit_hr_attempt.text
+
+        org_hr_attempt = client.post(
+            "/api/v1/attendance/corrections",
+            json=outside_payload,
+            headers=_auth(str(seeded["org_hr"])),
+        )
+        assert org_hr_attempt.status_code == 201, org_hr_attempt.text
 
 
 def test_raising_a_correction_is_hr_only(unique_suffix):

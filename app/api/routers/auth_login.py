@@ -4,11 +4,11 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, Field
 
-from core.auth import UserManager, fastapi_users, get_jwt_strategy, get_user_manager
+from core.auth import UserManager, fastapi_users, get_jwt_strategy, get_user_manager, require_permission
 from core.database import get_async_session
+from core.employee_access import require_employee_access
 from db.models import AuthSession, Employee, User, now_ist
 from core.mobile import normalize_indian_mobile
-from core.attendance_access import require_hr_admin, require_hr_unit_access
 from core.auth import verify_erp_api_key
 
 router = APIRouter(prefix="/auth")
@@ -128,13 +128,14 @@ async def hr_password_reset(
     employee_id: int,
     payload: TemporaryPasswordRequest,
     manager: UserManager = Depends(get_user_manager),
-    _: User = Depends(require_hr_admin),
+    _: User = Depends(require_permission("user.update")),
     session: AsyncSession = Depends(get_async_session),
 ):
+    """HR user administration: permission + row scope, not a role check."""
     employee = await session.get(Employee, employee_id)
     if employee is None:
         raise HTTPException(status_code=404, detail="Employee not found")
-    await require_hr_unit_access(_, employee, session)
+    await require_employee_access(_, employee, "user.update", session)
     return await _reset_password(employee, payload, manager, session)
 
 
