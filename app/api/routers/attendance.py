@@ -71,7 +71,6 @@ async def list_checkins(
     session: AsyncSession = Depends(get_async_session),
 ) -> list[AttendancePunchRead]:
     service = AttendanceService(session)
-    current_employee = await get_current_employee(current_user, session)
     scope = await _attendance_read_scope(current_user, session)
     if employee_id is not None:
         employee = await service.employee_repo.get_by_id(employee_id)
@@ -85,7 +84,7 @@ async def list_checkins(
             allow_self=True,
         )
     elif scope.self_only:
-        employee_id = current_employee.id
+        employee_id = (await get_current_employee(current_user, session)).id
     return await service.list_punches(
         employee_id=employee_id,
         from_time=from_time,
@@ -108,7 +107,6 @@ async def list_attendance(
     session: AsyncSession = Depends(get_async_session),
 ) -> list[AttendanceRecordRead]:
     service = AttendanceService(session)
-    current_employee = await get_current_employee(current_user, session)
     scope = await _attendance_read_scope(current_user, session)
     if employee_id is not None:
         employee = await service.employee_repo.get_by_id(employee_id)
@@ -122,7 +120,7 @@ async def list_attendance(
             allow_self=True,
         )
     elif scope.self_only:
-        employee_id = current_employee.id
+        employee_id = (await get_current_employee(current_user, session)).id
     return await service.list_attendance(
         employee_id=employee_id,
         from_date=from_date,
@@ -244,11 +242,10 @@ async def list_corrections(
     HR sees their unit, everyone else sees only their own requests.
     """
     service = AttendanceService(session)
-    current_employee = await get_current_employee(current_user, session)
     scope = await get_permission_scope(current_user, "attendance.correct", session)
     employee_id = None
     if scope.self_only:
-        employee_id = current_employee.id
+        employee_id = (await get_current_employee(current_user, session)).id
     return await service.list_corrections(
         status=status,
         employee_id=employee_id,

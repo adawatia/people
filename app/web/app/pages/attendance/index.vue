@@ -4,9 +4,11 @@ import type { AttendanceCorrection, AttendanceRecord, AttendanceSummary } from '
 
 useSeoMeta({ title: 'Attendance' })
 const auth = useAuth()
+const workspace = useWorkspace()
 const api = useHrmsApi()
 const toast = useToast()
 const employeeId = computed(() => auth.user.value?.employee_id)
+const personalView = computed(() => workspace.current.value === 'MY')
 const monthCursor = ref(new Date(new Date().getFullYear(), new Date().getMonth(), 1))
 const correctionRecord = ref<AttendanceRecord | null>(null)
 const correction = reactive({ requested_punch_in: '', requested_punch_out: '', reason: '' })
@@ -28,7 +30,7 @@ const monthLabel = computed(() => new Intl.DateTimeFormat('en-IN', { month: 'lon
 const { data: attendanceData, pending, error, refresh } = await useAsyncData(
   'my-attendance',
   async () => {
-    if (!employeeId.value) return null
+    if (!personalView.value || !employeeId.value) return null
     const year = monthCursor.value.getFullYear()
     const month = monthCursor.value.getMonth() + 1
     const first = new Date(year, month - 1, 1)
@@ -40,7 +42,24 @@ const { data: attendanceData, pending, error, refresh } = await useAsyncData(
     ])
     return { records, summary, corrections, first: dateKey(first), last: dateKey(last) }
   },
-  { watch: [monthKey, employeeId] }
+  { watch: [monthKey, employeeId, personalView] }
+)
+const { data: scopedRecords, pending: scopedPending, error: scopedError, refresh: refreshScoped } = await useAsyncData(
+  'scoped-attendance',
+  async () => {
+    if (personalView.value) return []
+    const year = monthCursor.value.getFullYear()
+    const month = monthCursor.value.getMonth() + 1
+    return await api.request<AttendanceRecord[]>('attendance/', {
+      query: {
+        from_date: `${year}-${String(month).padStart(2, '0')}-01`,
+        to_date: dateKey(new Date(year, month, 0)),
+        page: 1,
+        page_size: 100
+      }
+    })
+  },
+  { watch: [monthKey, personalView] }
 )
 
 const records = computed(() => attendanceData.value?.records || [])
@@ -173,13 +192,13 @@ function hasPendingCorrection(recordId: number) {
     <div class="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
       <div>
         <p class="text-sm font-medium text-primary">
-          My workday
+          {{ personalView ? 'My Workspace' : workspace.current.value === 'TEAM' ? 'Team Workspace' : 'HR Workspace' }}
         </p>
         <h2 class="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">
           Attendance
         </h2>
         <p class="mt-2 max-w-2xl text-sm leading-6 text-muted">
-          Review ERP-synced attendance and flag anything that needs correction.
+          {{ personalView ? 'Review your ERP-synced attendance and flag anything that needs correction.' : 'Review attendance records within your authorized scope.' }}
         </p>
       </div>
       <div class="flex items-center gap-2">
@@ -202,7 +221,7 @@ function hasPendingCorrection(recordId: number) {
     </div>
 
     <UAlert
-      v-if="auth.user.value?.is_superuser"
+      v-if="personalView && auth.user.value?.is_superuser"
       class="mt-6"
       color="info"
       variant="soft"
@@ -211,7 +230,7 @@ function hasPendingCorrection(recordId: number) {
       description="This account is not an employee and does not have attendance records. Use System administration for technical account and integration settings."
     />
     <UAlert
-      v-else-if="!employeeId"
+      v-else-if="personalView && !employeeId"
       class="mt-6"
       color="warning"
       variant="soft"
@@ -220,7 +239,7 @@ function hasPendingCorrection(recordId: number) {
       description="Ask your People administrator to link this user account to an employee record before using attendance."
     />
     <UAlert
-      v-else-if="error"
+      v-else-if="personalView && error"
       class="mt-6"
       color="warning"
       variant="soft"
@@ -230,7 +249,90 @@ function hasPendingCorrection(recordId: number) {
       :actions="[{ label: 'Refresh attendance', onClick: () => refresh() }]"
     />
 
-    <template v-if="employeeId">
+    <section
+      v-if="!personalView"
+      class="people-card mt-7 overflow-hidden"
+    >
+      <div
+        v-if="scopedPending"
+        class="space-y-3 p-5"
+      >
+        <USkeleton
+          v-for="index in 6"
+          :key="index"
+          class="h-14 w-full"
+        />
+      </div>
+      <UAlert
+        v-else-if="scopedError"
+        class="m-5"
+        color="warning"
+        variant="soft"
+        title="Attendance records could not be loaded"
+        description="Refresh to try again. Results are limited by your server-assigned scope."
+        :actions="[{ label: 'Refresh', onClick: () => refreshScoped() }]"
+      />
+      <div
+        v-else-if="scopedRecords?.length"
+        class="overflow-x-auto"
+      >
+        <table class="w-full min-w-[680px] text-left text-sm">
+          <thead class="bg-muted/5 text-xs uppercase tracking-wide text-muted">
+            <tr>
+              <th class="px-5 py-3">
+                Employee ID
+              </th><th class="px-4 py-3">
+                Date
+              </th><th class="px-4 py-3">
+                Status
+              </th><th class="px-4 py-3">
+                Worked
+              </th><th class="px-4 py-3">
+                Overtime
+              </th><th class="px-5 py-3">
+                Exceptions
+              </th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-[var(--people-border)]">
+            <tr
+              v-for="record in scopedRecords"
+              :key="record.id"
+            >
+              <td class="px-5 py-4 font-semibold">
+                #{{ record.employee_id }}
+              </td>
+              <td class="px-4 py-4">
+                {{ record.attendance_date }}
+              </td>
+              <td class="px-4 py-4">
+                <AttendanceStatusBadge :status="record.status" />
+              </td>
+              <td class="px-4 py-4">
+                {{ formatDuration(record.worked_minutes) }}
+              </td>
+              <td class="px-4 py-4">
+                {{ formatDuration(record.overtime_minutes) }}
+              </td>
+              <td class="px-5 py-4 text-muted">
+                {{ [record.late_minutes ? `${record.late_minutes}m late` : '', record.early_exit_minutes ? `${record.early_exit_minutes}m early` : ''].filter(Boolean).join(' · ') || '—' }}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="border-t border-[var(--people-border)] px-5 py-3 text-xs text-muted">
+          Showing up to 100 records for {{ monthLabel }}. Use Reports for aggregated attendance analysis.
+        </p>
+      </div>
+      <div
+        v-else
+        class="p-10 text-center text-sm text-muted"
+      >
+        No attendance records are visible in this scope for {{ monthLabel }}.
+      </div>
+    </section>
+
+    <template v-if="personalView && employeeId">
       <div class="mt-7 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <div
           v-for="card in summaryCards"

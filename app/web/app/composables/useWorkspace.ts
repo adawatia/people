@@ -20,6 +20,47 @@ export const WORKSPACES: WorkspaceDefinition[] = [
 
 const WORKSPACE_KEYS = new Set<Workspace>(WORKSPACES.map(workspace => workspace.key))
 
+interface WorkspaceRouteRule {
+  path: string
+  permissions?: string[]
+}
+
+const WORKSPACE_ROUTES: Record<Workspace, WorkspaceRouteRule[]> = {
+  MY: [
+    { path: '/' }, { path: '/attendance', permissions: ['attendance.view_self'] },
+    { path: '/leaves', permissions: ['leave.apply'] }, { path: '/work-arrangements', permissions: ['work_arrangement.apply'] },
+    { path: '/overtime', permissions: ['overtime.view_self'] }, { path: '/shifts' }, { path: '/holidays' },
+    { path: '/profile' }, { path: '/settings' }, { path: '/notifications' }
+  ],
+  TEAM: [
+    { path: '/' }, { path: '/employees', permissions: ['employee.view'] },
+    { path: '/attendance', permissions: ['attendance.view_department'] }, { path: '/leaves', permissions: ['leave.approve'] },
+    { path: '/work-arrangements', permissions: ['work_arrangement.approve'] }, { path: '/overtime', permissions: ['overtime.view_department'] },
+    { path: '/approvals', permissions: ['leave.approve', 'work_arrangement.approve'] },
+    { path: '/reports', permissions: ['reports.attendance', 'reports.leave', 'reports.view'] },
+    { path: '/profile' }, { path: '/settings' }, { path: '/notifications' }
+  ],
+  HR: [
+    { path: '/' }, { path: '/employees', permissions: ['employee.view'] },
+    { path: '/attendance', permissions: ['attendance.view', 'attendance.view_unit', 'attendance.process'] },
+    { path: '/leaves', permissions: ['leave.manage', 'leave.approve'] },
+    { path: '/work-arrangements', permissions: ['work_arrangement.manage', 'work_arrangement.approve'] },
+    { path: '/overtime', permissions: ['overtime.view_department', 'overtime.approve'] },
+    { path: '/approvals', permissions: ['leave.approve', 'work_arrangement.approve'] },
+    { path: '/shifts', permissions: ['shift.assign', 'shift.update'] }, { path: '/holidays' },
+    { path: '/organization', permissions: ['designation.view', 'employee.view'] },
+    { path: '/reports', permissions: ['reports.attendance', 'reports.leave', 'reports.view'] },
+    { path: '/profile' }, { path: '/settings' }, { path: '/notifications' }
+  ],
+  EXECUTIVE: [
+    { path: '/', permissions: ['dashboard.view_organization'] },
+    { path: '/reports', permissions: ['reports.attendance', 'reports.leave', 'reports.view'] },
+    { path: '/organization', permissions: ['employee.view'] },
+    { path: '/profile' }, { path: '/settings' }, { path: '/notifications' }
+  ],
+  TECHNICAL: [{ path: '/' }, { path: '/settings' }, { path: '/profile' }, { path: '/notifications' }]
+}
+
 export function workspacesForUser(user: CurrentUser | null): Workspace[] {
   if (!user) return []
   if (user.is_superuser) return ['TECHNICAL']
@@ -40,7 +81,10 @@ export function useWorkspace() {
   const route = useRoute()
   const router = useRouter()
   const auth = useAuth()
-  const selected = useState<Workspace | null>('active-workspace', () => null)
+  // This is a presentation preference only. Persisting it lets a refresh on an
+  // internal page keep the selected workspace; availability is recalculated
+  // from current permissions below on every app load.
+  const selected = useCookie<Workspace | null>('people_workspace', { maxAge: 60 * 60 * 24 * 365, sameSite: 'lax' })
   const available = computed(() => workspacesForUser(auth.user.value))
   const requested = computed(() => String(route.query.workspace || '').toUpperCase() as Workspace)
   const current = computed<Workspace>(() => {
@@ -49,6 +93,11 @@ export function useWorkspace() {
     return available.value[0] || 'MY'
   })
   const definition = computed(() => WORKSPACES.find(workspace => workspace.key === current.value) || WORKSPACES[0]!)
+
+  function canVisit(path: string, inWorkspace = current.value) {
+    const rule = WORKSPACE_ROUTES[inWorkspace].find(candidate => candidate.path === path || (candidate.path !== '/' && path.startsWith(`${candidate.path}/`)))
+    return Boolean(rule && (!rule.permissions || rule.permissions.some(auth.hasPermission)))
+  }
 
   watch(current, (value) => {
     selected.value = value
@@ -60,12 +109,12 @@ export function useWorkspace() {
   async function select(workspace: Workspace, path = route.path) {
     if (!available.value.includes(workspace)) return
     selected.value = workspace
-    await router.push({ path, query: { ...route.query, workspace } })
+    await router.push({ path: canVisit(path, workspace) ? path : '/', query: { ...route.query, workspace } })
   }
 
   function link(path: string) {
     return { path, query: { ...route.query, workspace: current.value } }
   }
 
-  return { available, current, definition, select, link }
+  return { available, current, definition, select, link, canVisit }
 }

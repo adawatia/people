@@ -4,9 +4,11 @@ import type { WorkArrangement, WorkArrangementType } from '#shared/types/work-ar
 
 useSeoMeta({ title: 'Work arrangements' })
 const auth = useAuth()
+const workspace = useWorkspace()
 const api = useHrmsApi()
 const toast = useToast()
 const employeeId = computed(() => auth.user.value?.employee_id)
+const selfService = computed(() => workspace.current.value === 'MY')
 const requestOpen = ref(false)
 const submitting = ref(false)
 const cancellingId = ref<number | null>(null)
@@ -22,9 +24,11 @@ const typeConfig: Record<WorkArrangementType, { label: string, description: stri
 }
 
 const { data: requests, pending, error, refresh } = await useAsyncData('my-work-arrangements', async () => {
-  if (!employeeId.value) return []
-  return await api.request<WorkArrangement[]>('work-arrangements/', { query: { employee_id: employeeId.value } })
-}, { watch: [employeeId] })
+  if (selfService.value && !employeeId.value) return []
+  return await api.request<WorkArrangement[]>('work-arrangements/', {
+    query: selfService.value ? { employee_id: employeeId.value } : undefined
+  })
+}, { watch: [employeeId, selfService] })
 const filtered = computed(() => (requests.value || []).filter(item => filter.value === 'ALL' || item.status === filter.value))
 const requestDays = computed(() => {
   const from = new Date(`${form.from_date}T00:00:00`)
@@ -32,6 +36,12 @@ const requestDays = computed(() => {
   return to >= from ? Math.floor((to.getTime() - from.getTime()) / 86400000) + 1 : 0
 })
 const formValid = computed(() => requestDays.value > 0 && form.reason.trim().length >= 5)
+
+watch(selfService, (isSelfService) => {
+  requestOpen.value = false
+  filter.value = 'ALL'
+  if (isSelfService && !employeeId.value) requests.value = []
+})
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(`${value}T00:00:00`))
@@ -86,13 +96,14 @@ async function cancelRequest(item: WorkArrangement) {
     <div class="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
       <div>
         <p class="text-sm font-medium text-primary">
-          Flexible work
+          {{ selfService ? 'My Workspace' : workspace.current.value === 'TEAM' ? 'Team Workspace' : 'HR Workspace' }}
         </p><h2 class="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">
           Work arrangements
         </h2><p class="mt-2 max-w-2xl text-sm leading-6 text-muted">
-          Request to work from home and follow the status of your requests.
+          {{ selfService ? 'Request to work from home and follow the status of your requests.' : 'Review work arrangement requests within your authorized scope.' }}
         </p>
       </div><UButton
+        v-if="selfService"
         size="lg"
         icon="i-lucide-plus"
         :disabled="!employeeId"
@@ -102,7 +113,7 @@ async function cancelRequest(item: WorkArrangement) {
       </UButton>
     </div>
     <UAlert
-      v-if="!employeeId"
+      v-if="selfService && !employeeId"
       class="mt-6"
       color="warning"
       variant="soft"
@@ -121,7 +132,7 @@ async function cancelRequest(item: WorkArrangement) {
       :actions="[{ label: 'Refresh requests', onClick: () => refresh() }]"
     />
     <UAlert
-      v-else
+      v-else-if="selfService"
       class="mt-6"
       color="info"
       variant="soft"
@@ -130,7 +141,7 @@ async function cancelRequest(item: WorkArrangement) {
       description="This feature is being built step by step. For now, you can submit and track work-from-home requests here."
     />
 
-    <template v-if="employeeId">
+    <template v-if="selfService && employeeId">
       <div class="mt-7 max-w-xl">
         <article class="people-card p-5">
           <span
@@ -246,6 +257,65 @@ async function cancelRequest(item: WorkArrangement) {
         </div>
       </section>
     </template>
+
+    <section
+      v-else-if="!selfService"
+      class="people-card mt-7 overflow-hidden"
+    >
+      <div
+        v-if="pending"
+        class="space-y-3 p-5"
+      >
+        <USkeleton
+          v-for="index in 5"
+          :key="index"
+          class="h-14 w-full"
+        />
+      </div>
+      <UAlert
+        v-else-if="error"
+        class="m-5"
+        color="warning"
+        variant="soft"
+        title="Requests could not be loaded"
+        description="Refresh to try again. The list is restricted to your assigned scope."
+        :actions="[{ label: 'Refresh', onClick: () => refresh() }]"
+      />
+      <div
+        v-else-if="filtered.length"
+        class="divide-y divide-[var(--people-border)]"
+      >
+        <article
+          v-for="item in filtered"
+          :key="item.id"
+          class="flex flex-wrap items-center gap-3 p-5 sm:px-6"
+        >
+          <UAvatar :text="(item.employee_name || `E${item.employee_id}`).split(/\s+/).map(part => part[0]).join('').slice(0, 2)" />
+          <div class="min-w-0 flex-1">
+            <p class="font-semibold">
+              {{ item.employee_name || `Employee #${item.employee_id}` }}
+            </p>
+            <p class="text-xs text-muted">
+              {{ typeConfig[item.arrangement_type].label }} · {{ formatDate(item.from_date) }}<span v-if="item.to_date !== item.from_date"> – {{ formatDate(item.to_date) }}</span>
+            </p>
+            <p class="mt-1 text-sm text-muted">
+              {{ item.reason }}
+            </p>
+          </div>
+          <UBadge
+            :label="item.status"
+            :color="statusColor(item.status)"
+            variant="soft"
+          />
+        </article>
+      </div>
+      <div
+        v-else
+        class="p-10 text-center text-sm text-muted"
+      >
+        No work arrangement requests are visible in this scope.
+      </div>
+    </section>
 
     <div
       v-if="requestOpen"

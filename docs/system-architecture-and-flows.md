@@ -407,9 +407,9 @@ if employee.business_role:
 | `BASE_EMPLOYEE_PERMISSIONS` | self-service: `employee.view_self`, `attendance.view_self`, `leave.apply` / `view_self` / `cancel`, `work_arrangement.apply` / `view_self` / `cancel`, `overtime.view_self`, `shift.view_self` |
 | `DEPARTMENT_MANAGER` | `employee.view`, `attendance.view_department`, `leave.approve` / `reject`, `work_arrangement.approve` / `reject`, `overtime.view_department` / `approve`, `reports.attendance` / `reports.leave` |
 | `HR_ADMIN` | user + employee administration, designation CRUD, `attendance.view` / `view_unit` / `view_department` / `process` / `correct`, `leave.manage` / `approve` / `reject`, `work_arrangement.manage` / `approve` / `reject`, `shift.assign` / `update`, `overtime.approve` / `view_department`, all `reports.*`, `system.configure`, `audit.view`, `salary_cost.view_unit` / `view_department` |
-| `ORGANIZATION_OWNER` | read/analytics only: `employee.view`, `attendance.view` / `view_unit` / `view_department`, `overtime.view` / `view_department`, `reports.view` / `attendance` / `leave` / `overtime`, `dashboard.view_organization` |
+| `ORGANIZATION_OWNER` | read/analytics additions: `employee.view`, `attendance.view` / `view_unit` / `view_department`, `overtime.view` / `view_department`, `reports.view` / `attendance` / `leave` / `overtime`, `dashboard.view_organization`; like all workforce roles, also receives base self-service permissions |
 
-**Unit HR and organization HR receive the same `HR_ADMIN` bundle** — only the scope differs (§2.6.2). The Organization Owner is deliberately *not* a superset of HR: it has organization-wide visibility and no operational HR or manager approval capability. Roles are not hierarchical.
+**Unit HR and organization HR receive the same `HR_ADMIN` bundle** — only the scope differs (§2.6.2). The Organization Owner is deliberately *not* a superset of HR: it has organization-wide analytics and no HR operations or manager approval capability. It still has the base self-service permissions, as every workforce role does. Roles are not hierarchical.
 
 #### 2.6.2 Business role → scope resolution
 
@@ -634,6 +634,7 @@ app/web
 │  ├─ layouts/auth.vue                # split-screen unauthenticated shell (currently unused: login.vue sets layout:false)
 │  ├─ layouts/default.vue             # sidebar + topbar + bottom mobile nav + nav gating
 │  ├─ middleware/auth.global.ts       # route guard (session required, public paths incl. /admin/login)
+│  ├─ middleware/workspace.global.ts # route visibility guard for the active workspace
 │  ├─ composables/useAuth.ts          # shared auth state, permissions, login/logout/MFA
 │  ├─ composables/useWorkspace.ts     # permission-derived workspace availability and switching
 │  ├─ composables/useHrmsApi.ts       # typed wrapper over /api/hrms/** (+ 401 → /login)
@@ -701,7 +702,7 @@ This means **token refresh is transparent to every page**: a 15-minute access to
 |---|---|
 | `displayName`, `initials` | display helpers |
 | `hasPermission(code)` | true when `is_superuser` **or** `permissions` contains the code |
-| `businessRole` | the resolved elevated business role (or `null`) — for role-specific experiences such as the Organization Owner dashboard |
+| `businessRole` | the resolved elevated business role (or `null`) — used for descriptive labels; workspace availability and actions are permission-derived |
 | `scopeType` | `SELF` \| `DEPARTMENT` \| `UNIT` \| `ORGANIZATION`, used to adapt copy and layout; the scope *identifier* stays server-side |
 | `fetchUser(force = false)` | one `GET /api/session/me` per request; errors ⇒ signed-out state (never throws) |
 | `login(payload)` | posts to the BFF; returns the user, **or** an `MfaChallenge` the caller must complete before a session exists |
@@ -711,11 +712,11 @@ This means **token refresh is transparent to every page**: a 15-minute access to
 | `logout()` | revokes session, clears state, `navigateTo('/login')` |
 | `clear()` | forgets client state without calling the API (used after a password change, which has already killed every session) |
 
-`middleware/auth.global.ts` runs on every navigation: `await fetchUser()` → unauthenticated and not a public path ⇒ `/login?redirect=<fullPath>`; authenticated visiting a sign-in page ⇒ `/`. Public paths: `/login`, `/admin/login`, `/forgot-password`, `/reset-password`, `/invitation`, `/verify-email`, `/auth/invitation`.
+`middleware/auth.global.ts` runs on every navigation: `await fetchUser()` → unauthenticated and not a public path ⇒ `/login?redirect=<fullPath>`; authenticated visiting a sign-in page ⇒ `/`. Public paths: `/login`, `/admin/login`, `/forgot-password`, `/reset-password`, `/invitation`, `/verify-email`, `/auth/invitation`. `middleware/workspace.global.ts` then redirects a signed-in user from a route that is unavailable in the active workspace to that workspace's dashboard; API permission and row-scope checks remain authoritative.
 
 `useHrmsApi().request()` additionally hard-handles `401` mid-session: clears `auth-user` and redirects to `/login?redirect=<current>`, then rethrows.
 
-`useWorkspace()` keeps identity separate from presentation. It derives available workspaces from the permission codes returned by `/users/me`, defaults to `MY`, and changes only the `workspace` query context — it never logs the user out or creates another session. The server remains authoritative for every resource and row scope; the workspace switcher is an information-architecture aid, not an authorization boundary.
+`useWorkspace()` keeps identity separate from presentation. It derives available workspaces from the permission codes returned by `/users/me`, defaults to `MY`, and changes only the `workspace` query context — it never logs the user out or creates another session. The selected workspace is kept in a preference cookie for refreshes and is revalidated against the currently signed-in user's permissions. The server remains authoritative for every resource and row scope; the workspace switcher is an information-architecture aid, not an authorization boundary.
 
 ### 3.4 Navigation & visibility — permission-gated workspaces
 
@@ -726,8 +727,8 @@ One account can move between contexts without another login:
 | Workspace | Audience | Typical navigation |
 |---|---|---|
 | My Workspace | Every employee, including elevated users | Personal attendance, leave, work arrangements, overtime, shifts, holidays |
-| Team Workspace | Department/team review permissions | Team dashboard, employees, attendance, approvals, team reports |
-| HR Workspace | HR operations permissions | Employees, attendance processing, leave/work-arrangement management, approvals, reports, organization |
+| Team Workspace | Department/team review permissions | Team dashboard, scoped employees/attendance/leave/work-arrangement/overtime records, approvals, reports |
+| HR Workspace | HR operations permissions | Scoped workforce/attendance/leave/work-arrangement/overtime records, approvals, reports, organization |
 | Executive Workspace | `dashboard.view_organization` | Organization analytics, reports, organization overview |
 | Technical Administration | Super Admin only | Technical metrics and system administration |
 
@@ -743,11 +744,11 @@ One account can move between contexts without another login:
 
 Action and dialog visibility follows the same rule: `pages/attendance/index.vue` gates the correction dialog on `hasPermission('attendance.correct')` rather than on the `HR_ADMIN` role, and `pages/profile.vue` derives its display label from `business_role` + `scope_type` (so unit HR and organization HR are distinguishable). Dashboard presentation now follows the active workspace (`MY`, `TEAM`, `HR`, `EXECUTIVE`, or `TECHNICAL`) rather than branching directly on a role.
 
-Super Admin gets **only** Dashboard + System administration — the business nav is replaced, because master data lives in ERP.
+Navigation is grouped by purpose inside each workspace (for example Workforce, Requests & approvals, Time & compensation, Organization, and Insights in HR). Super Admin gets **only** Dashboard + System administration — the business nav is replaced, because master data lives in ERP.
 
-Mobile: the 4 first non-dashboard visible items become the bottom bar, plus Profile; the sidebar collapses into a drawer.
+Mobile: the 4 first non-dashboard visible items become the bottom bar, plus Profile; the header menu button opens the full grouped sidebar drawer so later items remain reachable.
 
-**Important consequence:** the nav gate is *presentation only*. Every endpoint re-checks permission and row scope (§2.6), so a hidden link is convenience, never security. Conversely, an item without a permission list (Attendance, Leave, Work arrangements, Overtime, Holidays) is visible to plain employees and must be self-service-safe on the server — which it is today.
+The workspace middleware keeps hidden routes out of the current workspace and returns users to its dashboard. It is a user-experience guard only: every endpoint still re-checks permission and row scope (§2.6). Collection views in Attendance, Leave, Work arrangements and Overtime choose self-service employee filters in `MY`, and omit the employee filter in `TEAM`/`HR` so the backend applies the manager's department or HR's unit/organization scope. Self-service actions are hidden in management views.
 
 ### 3.5 Page inventory → API map
 
@@ -758,14 +759,14 @@ Mobile: the 4 first non-dashboard visible items become the bottom bar, plus Prof
 | `pages/index.vue` | `dashboard/metrics`, `dashboard/technical-metrics` (SA only), `dashboard/owner` via component | workspace-specific hero copy, personal/team/HR KPI cards, shift + today's attendance cards, executive analytics branch | ignores `/dashboard/widgets` |
 | `pages/employees/index.vue` | `employees/`, `org/units`, `org/departments`, `designations/` | paginated directory, filters, activate/deactivate, delete | PATCH/DELETE endpoints **do not exist** → 405 |
 | `pages/employees/[id].vue` | `employees/{id}`, `employees/{id}/work-history` | profile, org placement, work history | — |
-| `pages/attendance/index.vue` | `attendance/employee/{id}/calendar`, `…/summary`, `attendance/corrections` | month calendar, status pie, summary tiles, correction request dialog | dialog POSTs require **HR_ADMIN**; employee submits get 403 |
-| `pages/leaves/index.vue` | `leaves/`, `leaves/types`, `leaves/balance/employee/{id}` | apply leave (type/date/reason/half-day), balance cards, own history, cancel/early-return | — |
-| `pages/work-arrangements/index.vue` | `work-arrangements/` | request WFH, list, cancel | only WFH accepted server-side |
+| `pages/attendance/index.vue` | My: `attendance/employee/{id}/calendar`, `…/summary`, `attendance/corrections`; Team/HR: `attendance/` | My calendar and correction flow; Team/HR scoped records table | scoped collection currently identifies employees by ID; row-level API scope applies |
+| `pages/leaves/index.vue` | My: `leaves/`, `leaves/types`, `leaves/balance/employee/{id}`; Team/HR: `leaves/` | My balance/apply/history; Team/HR scoped request list linking to approvals | — |
+| `pages/work-arrangements/index.vue` | `work-arrangements/` | My request/list/cancel; Team/HR scoped request list | only WFH accepted server-side |
 | `pages/approvals/index.vue` | `attendance/corrections`, `attendance/records/{id}`, `leaves/?status=PENDING`, `leaves/?status=CANCELLATION_PENDING`, `work-arrangements/?status=PENDING` | tabs per queue (permission-driven), approve, reject with reason modal | attendance tab approve → 403 ERP; no overtime tab |
 | `pages/shifts/index.vue` | `shifts/`, `shifts/assignments`, `org/units`, `employees/` | shift definitions + assignments tables, "New shift"/"Assign shift" dialogs | POST endpoints **do not exist** → 405 |
 | `pages/holidays/index.vue` | `holidays/lists`, `org/units` | calendar + holiday list viewer | `canManage` hard-coded `false` (correct, ERP-owned) |
 | `pages/organization/index.vue` | `org/organization`, `org/units`, `org/departments`, `designations/` | tabs per entity, enable/disable, delete | PATCH/DELETE are ERP-only → 405 |
-| `pages/overtime/index.vue` | `overtime/`, `overtime/employee/{id}/summary` | own + scoped overtime records and monthly summary | read-only (no approve path) |
+| `pages/overtime/index.vue` | My: `overtime/`, `overtime/employee/{id}/summary`; Team/HR: `overtime/` | My monthly summary and records; Team/HR scoped records | management collection has no employee name or date filters yet |
 | `pages/reports/index.vue` | `reports/attendance-matrix`, `reports/leave-summary` | month picker, attendance matrix, leave summary; tabs gated by permission | — |
 | `pages/notifications.vue` | `notifications`, `notifications/{id}/read`, `notifications/mark-all-read` | list, read, mark-all | — |
 | `pages/profile.vue` | `users/me` (via composable) | identity, role label, employee code | — |
@@ -837,9 +838,7 @@ On approval, each day becomes `WORK_FROM_HOME` in attendance, so the calendar st
 
 ### 4.2 F2 — DEPARTMENT_MANAGER (approve & report for one department)
 
-**Login/Dashboard.** Same door; `hasPermission('leave.approve')` and `employee.view` make it a "manager".
-`GET /dashboard/metrics` → `has_mgr_access = true`; scope = **their department** (`get_employee_scope` ⇒ `dept_scope_ids`), thus: headcount, today's attendance breakdown, attendance rate, today/month OT hours, pending leave + correction counts (excluding self), and up to 5 items *each* from leave, correction, overtime and work-arrangement queues merged into `pendingApprovals` with `type`, employee name/code, department, detail, `timeAgo`.
-UI: 4 KPI cards (department members, present, on leave, needs attention) + *Pending approvals* card linking to `/approvals`.
+**Login/Dashboard.** Same door; `hasPermission('leave.approve')` and `employee.view` make the Team workspace available. In `MY`, the user sees personal metrics. In `TEAM`, `GET /dashboard/metrics` returns data scoped to **their department** (`get_employee_scope` ⇒ `dept_scope_ids`): headcount, attendance breakdown, overtime and pending-work indicators. The dashboard links to `/approvals`.
 
 **Approvals (`/approvals`).** Tabs are permission-driven: `leave.approve` (+`leave.reject` for the reject button) and `work_arrangement.approve`; the attendance tab is a read-only queue (ERP confirms corrections).
 * Leave queue loads `PENDING` **and** `CANCELLATION_PENDING` in parallel and picks the right endpoint per row (`/approve` vs `/cancellation/approve`).
@@ -853,7 +852,7 @@ UI: 4 KPI cards (department members, present, on leave, needs attention) + *Pend
 
 ### 4.3 F3 — HR_ADMIN (unit operations, or organization-wide when scoped so)
 
-**Dashboard.** Scope = **their unit** (`unit_scope_ids`). KPI labels switch to "Unit members"; same 4 cards, but `pendingApprovals` includes unit-wide leave/correction/overtime/WFH items minus their own.
+**Dashboard.** In `MY`, HR sees personal metrics. In `HR`, dashboard metrics use the configured `UNIT` or `ORGANIZATION` scope and label the headcount accordingly.
 
 **Employees (`/employees`).** Unit-limited directory with search/filters, pagination (`page_size` ≤ 100), detail page with work history. Provisioning is ERP-only: `POST /employees/onboard` returns `410`, and the page's own activate/deactivate/delete buttons hit non-existent routes (§8.1 A1).
 
@@ -871,7 +870,7 @@ UI: 4 KPI cards (department members, present, on leave, needs attention) + *Pend
 
 ### 4.4 F4 — ORGANIZATION_OWNER (analytics only)
 
-**Dashboard (`/`)** renders `components/dashboard/OwnerDashboard.vue` instead of the standard stats grid, and never the approvals card.
+The owner can switch between `My Workspace` and `Executive Workspace`. `MY` shows employee self-service; the Executive dashboard renders `components/dashboard/OwnerDashboard.vue` and has no approval actions.
 
 ```
 GET /dashboard/owner            (from_date, to_date, unit_id)
@@ -886,7 +885,7 @@ GET /dashboard/owner/exceptions (kind, target_date, unit_id, page, page_size)
 
 GET /org/units                  → unit filter options
 ```
-Owner permissions deliberately exclude every approval and self-service permission (`test_organization_owner_has_analytics_but_no_operational_approval_permissions` asserts this). Reports give them whole-organization attendance/leave/overtime.
+Owner permissions exclude approval and HR operations permissions. The Owner still receives base self-service permissions. Reports give them whole-organization attendance/leave/overtime.
 
 ### 4.5 F5 — SUPER_ADMIN (technical administrator)
 

@@ -4,19 +4,24 @@ import type { OvertimeRecord, OvertimeSummary } from '#shared/types/overtime'
 
 useSeoMeta({ title: 'Overtime' })
 const auth = useAuth()
+const workspace = useWorkspace()
 const api = useHrmsApi()
 const employeeId = computed(() => auth.user.value?.employee_id)
+const selfService = computed(() => workspace.current.value === 'MY')
 const selectedMonth = ref(new Date().toISOString().slice(0, 7))
 const statusFilter = ref('ALL')
 const { data, pending, error, refresh } = await useAsyncData('my-overtime', async () => {
-  if (!employeeId.value) return null
+  if (selfService.value && !employeeId.value) return null
   const parts = selectedMonth.value.split('-').map(Number)
-  const [summary, records] = await Promise.all([
-    api.request<OvertimeSummary>(`overtime/employee/${employeeId.value}/summary`, { query: { year: parts[0], month: parts[1] } }),
-    api.request<OvertimeRecord[]>('overtime/', { query: { employee_id: employeeId.value } })
-  ])
+  const summaryRequest = selfService.value && employeeId.value
+    ? api.request<OvertimeSummary>(`overtime/employee/${employeeId.value}/summary`, { query: { year: parts[0], month: parts[1] } })
+    : Promise.resolve(null)
+  const recordsRequest = api.request<OvertimeRecord[]>('overtime/', {
+    query: selfService.value ? { employee_id: employeeId.value } : undefined
+  })
+  const [summary, records] = await Promise.all([summaryRequest, recordsRequest])
   return { summary, records }
-}, { watch: [employeeId, selectedMonth] })
+}, { watch: [employeeId, selectedMonth, selfService] })
 const filtered = computed(() => (data.value?.records || []).filter(item => statusFilter.value === 'ALL' || item.status === statusFilter.value))
 const hours = (minutes: number) => `${Math.floor(minutes / 60)}h ${minutes % 60}m`
 const statusColor = (value: string) => ({ PENDING: 'warning', APPROVED: 'success', REJECTED: 'error' }[value] || 'neutral') as 'warning' | 'success' | 'error' | 'neutral'
@@ -30,8 +35,8 @@ const overtimeChartOption = computed<ECOption>(() => ({
     type: 'bar',
     barMaxWidth: 64,
     data: [
-      { value: Number(((data.value?.summary.total_calculated_minutes || 0) / 60).toFixed(1)), itemStyle: { color: '#6366f1' } },
-      { value: Number(((data.value?.summary.total_approved_minutes || 0) / 60).toFixed(1)), itemStyle: { color: '#10b981' } }
+      { value: Number(((data.value?.summary?.total_calculated_minutes || 0) / 60).toFixed(1)), itemStyle: { color: '#6366f1' } },
+      { value: Number(((data.value?.summary?.total_approved_minutes || 0) / 60).toFixed(1)), itemStyle: { color: '#10b981' } }
     ]
   }]
 }))
@@ -42,14 +47,15 @@ const overtimeChartOption = computed<ECOption>(() => ({
     <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
       <div>
         <p class="text-sm font-medium text-primary">
-          Time tracking
+          {{ selfService ? 'My Workspace' : workspace.current.value === 'TEAM' ? 'Team Workspace' : 'HR Workspace' }}
         </p><h2 class="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">
-          My overtime
+          {{ selfService ? 'My overtime' : 'Overtime records' }}
         </h2><p class="mt-2 text-sm text-muted">
-          Review calculated hours and approval status.
+          {{ selfService ? 'Review your calculated hours and approval status.' : 'Review overtime records within your authorized scope.' }}
         </p>
       </div>
       <UInput
+        v-if="selfService"
         v-model="selectedMonth"
         type="month"
         icon="i-lucide-calendar-range"
@@ -57,7 +63,7 @@ const overtimeChartOption = computed<ECOption>(() => ({
       />
     </div>
     <UAlert
-      v-if="!employeeId"
+      v-if="selfService && !employeeId"
       class="mt-6"
       color="warning"
       variant="soft"
@@ -74,10 +80,13 @@ const overtimeChartOption = computed<ECOption>(() => ({
       description="We couldn’t refresh your overtime details right now. Please try again in a moment."
       :actions="[{ label: 'Refresh overtime', onClick: () => refresh() }]"
     />
-    <template v-else-if="employeeId">
-      <section class="mt-7 grid gap-4 sm:grid-cols-3">
+    <template v-else-if="selfService ? employeeId : true">
+      <section
+        v-if="selfService"
+        class="mt-7 grid gap-4 sm:grid-cols-3"
+      >
         <article
-          v-for="metric in [{ label: 'Calculated', value: hours(data?.summary.total_calculated_minutes || 0), icon: 'i-lucide-timer', bg: 'var(--people-blue)' }, { label: 'Approved', value: hours(data?.summary.total_approved_minutes || 0), icon: 'i-lucide-circle-check', bg: 'var(--people-mint)' }, { label: 'Pending reviews', value: String(data?.summary.pending_count || 0), icon: 'i-lucide-hourglass', bg: 'var(--people-peach)' }]"
+          v-for="metric in [{ label: 'Calculated', value: hours(data?.summary?.total_calculated_minutes || 0), icon: 'i-lucide-timer', bg: 'var(--people-blue)' }, { label: 'Approved', value: hours(data?.summary?.total_approved_minutes || 0), icon: 'i-lucide-circle-check', bg: 'var(--people-mint)' }, { label: 'Pending reviews', value: String(data?.summary?.pending_count || 0), icon: 'i-lucide-hourglass', bg: 'var(--people-peach)' }]"
           :key="metric.label"
           class="people-card p-5"
         >
@@ -96,7 +105,10 @@ const overtimeChartOption = computed<ECOption>(() => ({
           </p>
         </article>
       </section>
-      <section class="people-card mt-7 p-5 sm:px-6">
+      <section
+        v-if="selfService"
+        class="people-card mt-7 p-5 sm:px-6"
+      >
         <h3 class="font-semibold">
           Overtime hours
         </h3>
@@ -169,7 +181,7 @@ const overtimeChartOption = computed<ECOption>(() => ({
           >
             <div>
               <p class="font-medium">
-                Attendance record #{{ item.attendance_record_id }}
+                {{ selfService ? `Attendance record #${item.attendance_record_id}` : `Employee #${item.employee_id}` }}
               </p><p class="mt-1 text-xs text-muted">
                 Overtime reference #{{ item.id }}
               </p>

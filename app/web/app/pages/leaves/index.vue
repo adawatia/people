@@ -4,9 +4,11 @@ import type { LeaveApplication, LeaveBalance, LeaveType } from '#shared/types/le
 
 useSeoMeta({ title: 'Leave' })
 const auth = useAuth()
+const workspace = useWorkspace()
 const api = useHrmsApi()
 const toast = useToast()
 const employeeId = computed(() => auth.user.value?.employee_id)
+const managementMode = computed(() => workspace.current.value === 'TEAM' || workspace.current.value === 'HR')
 const applyOpen = ref(false)
 const submitting = ref(false)
 const cancellingId = ref<number | null>(null)
@@ -15,14 +17,17 @@ const today = new Date().toISOString().slice(0, 10)
 const form = reactive({ leave_type_id: 0, from_date: today, to_date: today, half_day: false, reason: '' })
 
 const { data, pending, error, refresh } = await useAsyncData('my-leave', async () => {
-  if (!employeeId.value) return null
-  const [balances, applications, types] = await Promise.all([
-    api.request<LeaveBalance[]>(`leaves/balance/employee/${employeeId.value}`),
-    api.request<LeaveApplication[]>('leaves/', { query: { employee_id: employeeId.value } }),
-    api.request<LeaveType[]>('leaves/types', { query: { is_active: true } })
-  ])
+  if (!managementMode.value && !employeeId.value) return null
+  const balanceRequest = !managementMode.value && employeeId.value
+    ? api.request<LeaveBalance[]>(`leaves/balance/employee/${employeeId.value}`)
+    : Promise.resolve([])
+  const applicationsRequest = api.request<LeaveApplication[]>('leaves/', {
+    query: managementMode.value ? undefined : { employee_id: employeeId.value }
+  })
+  const typesRequest = api.request<LeaveType[]>('leaves/types', { query: { is_active: true } })
+  const [balances, applications, types] = await Promise.all([balanceRequest, applicationsRequest, typesRequest])
   return { balances, applications, types }
-}, { watch: [employeeId] })
+}, { watch: [employeeId, managementMode] })
 
 const filteredApplications = computed(() => (data.value?.applications || []).filter(item => filter.value === 'ALL' || item.status === filter.value))
 const pendingDaysByType = computed(() => {
@@ -51,6 +56,11 @@ const estimatedDays = computed(() => {
   return form.half_day ? 0.5 : Math.floor((to.getTime() - from.getTime()) / 86400000) + 1
 })
 const formValid = computed(() => form.leave_type_id > 0 && estimatedDays.value > 0 && form.reason.trim().length >= 3)
+
+watch(managementMode, () => {
+  applyOpen.value = false
+  filter.value = 'ALL'
+})
 
 function openApplication() {
   const first = data.value?.balances.find(item => item.available > 0) || data.value?.balances[0]
@@ -136,14 +146,15 @@ async function cancelApplication(application: LeaveApplication) {
     <div class="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
       <div>
         <p class="text-sm font-medium text-primary">
-          Time away
+          {{ managementMode ? (workspace.current.value === 'TEAM' ? 'Team Workspace' : 'HR Workspace') : 'My Workspace' }}
         </p><h2 class="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">
-          Leave
+          {{ managementMode ? 'Leave requests' : 'Leave' }}
         </h2><p class="mt-2 max-w-2xl text-sm leading-6 text-muted">
-          See your available balance, request time off, and follow every approval.
+          {{ managementMode ? 'Review leave requests visible within your assigned scope.' : 'See your available balance, request time off, and follow every approval.' }}
         </p>
       </div>
       <UButton
+        v-if="!managementMode"
         size="lg"
         icon="i-lucide-plus"
         :disabled="!employeeId || !data?.types.length"
@@ -154,7 +165,7 @@ async function cancelApplication(application: LeaveApplication) {
     </div>
 
     <UAlert
-      v-if="!employeeId"
+      v-if="!managementMode && !employeeId"
       class="mt-6"
       color="warning"
       variant="soft"
@@ -173,7 +184,7 @@ async function cancelApplication(application: LeaveApplication) {
       :actions="[{ label: 'Refresh leave board', onClick: () => refresh() }]"
     />
 
-    <template v-if="employeeId">
+    <template v-if="employeeId && !managementMode">
       <section class="mt-7">
         <div class="mb-4 flex items-center justify-between">
           <div>
@@ -415,6 +426,88 @@ async function cancelApplication(application: LeaveApplication) {
         </div>
       </section>
     </template>
+
+    <section
+      v-if="managementMode"
+      class="people-card mt-7 overflow-hidden"
+    >
+      <div class="flex items-center justify-between border-b border-[var(--people-border)] p-5 sm:px-6">
+        <div>
+          <h3 class="font-semibold">
+            Scoped leave requests
+          </h3>
+          <p class="mt-1 text-sm text-muted">
+            Employees and requests are limited by your server-assigned scope.
+          </p>
+        </div>
+        <UButton
+          :to="workspace.link('/approvals')"
+          icon="i-lucide-clipboard-check"
+          color="neutral"
+          variant="soft"
+        >
+          Open approvals
+        </UButton>
+      </div>
+      <div
+        v-if="pending"
+        class="space-y-3 p-5"
+      >
+        <USkeleton
+          v-for="index in 5"
+          :key="index"
+          class="h-14 w-full"
+        />
+      </div>
+      <UAlert
+        v-else-if="error"
+        class="m-5"
+        color="warning"
+        variant="soft"
+        title="Requests could not be loaded"
+        description="Refresh to try again."
+        :actions="[{ label: 'Refresh', onClick: () => refresh() }]"
+      />
+      <div
+        v-else-if="filteredApplications.length"
+        class="divide-y divide-[var(--people-border)]"
+      >
+        <article
+          v-for="application in filteredApplications"
+          :key="application.id"
+          class="flex flex-wrap items-center gap-3 p-5 sm:px-6"
+        >
+          <div class="min-w-0 flex-1">
+            <p class="font-semibold">
+              {{ application.employee_name || `Employee #${application.employee_id}` }} <span class="font-normal text-muted">· {{ application.leave_type_name || `Leave #${application.leave_type_id}` }}</span>
+            </p>
+            <p class="mt-1 text-sm text-muted">
+              {{ formatDate(application.from_date) }}<span v-if="application.to_date !== application.from_date"> – {{ formatDate(application.to_date) }}</span> · {{ application.days_count }} day(s)
+            </p>
+          </div>
+          <UBadge
+            :label="application.status"
+            :color="statusConfig(application.status).color"
+            variant="soft"
+          />
+          <UButton
+            v-if="['PENDING', 'CANCELLATION_PENDING'].includes(application.status)"
+            :to="workspace.link('/approvals')"
+            size="sm"
+            color="neutral"
+            variant="soft"
+          >
+            Review
+          </UButton>
+        </article>
+      </div>
+      <div
+        v-else
+        class="p-10 text-center text-sm text-muted"
+      >
+        No leave requests are visible in this scope.
+      </div>
+    </section>
 
     <div
       v-if="applyOpen"

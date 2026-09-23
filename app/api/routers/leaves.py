@@ -155,7 +155,6 @@ async def list_leave_applications(
     session: AsyncSession = Depends(get_async_session),
 ) -> list[LeaveApplicationRead]:
     service = LeaveService(session)
-    current_employee = await get_current_employee(current_user, session)
     scope = await _leave_management_scope(current_user, session)
     if employee_id is not None:
         employee = await service.employee_repo.get_by_id(employee_id)
@@ -169,7 +168,7 @@ async def list_leave_applications(
             allow_self=True,
         )
     elif scope.self_only:
-        employee_id = current_employee.id
+        employee_id = (await get_current_employee(current_user, session)).id
     return await service.list_applications(
         employee_id=employee_id,
         status=status_filter,

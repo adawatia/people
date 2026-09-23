@@ -1,4 +1,5 @@
 from datetime import date
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,7 +32,6 @@ async def list_work_arrangements(
     session: AsyncSession = Depends(get_async_session),
 ) -> list[WorkArrangementRead]:
     service = WorkArrangementService(session)
-    current_employee = await get_current_employee(current_user, session)
     scope = await get_permission_scope(current_user, "work_arrangement.manage", session)
     scope.include(
         await get_permission_scope(current_user, "work_arrangement.approve", session)
@@ -55,7 +55,7 @@ async def list_work_arrangements(
             allow_self=True,
         )
     elif scope.self_only:
-        employee_id = current_employee.id
+        employee_id = (await get_current_employee(current_user, session)).id
 
     return await service.list_requests(
         employee_id=employee_id,

@@ -3,11 +3,9 @@ import { WORKSPACES, type Workspace } from '~/composables/useWorkspace'
 /**
  * Application shell: sidebar navigation, top bar and content slot.
  *
- * Nav visibility is a single permission gate: an item is shown when the user
- * holds at least one of its permission codes (items without a list are
- * self-service and visible to everyone). Technical admins (superuser) skip the
- * business nav entirely and get a dedicated "System administration" link
- * instead.
+ * Navigation is grouped by the active workspace and filtered by permissions.
+ * Items without permission codes are shared/self-service pages. Technical
+ * admins (superuser) get a dedicated technical workspace.
  *
  * The gate is presentation only — every endpoint re-checks permission and row
  * scope, so a hidden link is convenience, never security.
@@ -62,6 +60,22 @@ const navByWorkspace: Record<string, NavItem[]> = {
   TECHNICAL: [{ label: 'Dashboard', icon: 'i-lucide-layout-dashboard', to: '/', iconTone: 'people-icon--blue' }]
 }
 const visibleItems = computed(() => (navByWorkspace[workspace.current.value] || []).filter(item => !item.permissions || item.permissions.some(auth.hasPermission)))
+const navSections = computed(() => {
+  const groups: Record<string, NavItem[]> = {}
+  for (const item of visibleItems.value) {
+    const key = workspace.current.value === 'MY'
+      ? 'My work'
+      : workspace.current.value === 'TEAM'
+        ? item.to === '/' ? 'Overview' : ['/employees', '/attendance'].includes(item.to) ? 'Team' : ['/leaves', '/work-arrangements', '/approvals'].includes(item.to) ? 'Requests & approvals' : 'Insights'
+        : workspace.current.value === 'HR'
+          ? item.to === '/' ? 'Overview' : ['/employees', '/attendance'].includes(item.to) ? 'Workforce' : ['/leaves', '/work-arrangements', '/approvals'].includes(item.to) ? 'Requests & approvals' : item.to === '/overtime' ? 'Time & compensation' : ['/shifts', '/holidays', '/organization'].includes(item.to) ? 'Organization' : 'Insights'
+          : workspace.current.value === 'EXECUTIVE'
+            ? item.to === '/' ? 'Overview' : 'Insights'
+            : 'Administration'
+    ;(groups[key] ||= []).push(item)
+  }
+  return Object.entries(groups).map(([label, items]) => ({ label, items }))
+})
 const pageTitle = computed(() => {
   if (route.path === '/settings') return isTechnicalAdmin.value ? 'System administration' : 'Security settings'
   if (route.path === '/profile') return 'Profile'
@@ -135,26 +149,35 @@ watch(() => route.fullPath, () => {
         </p>
       </div>
       <nav
-        class="mt-9 flex-1 space-y-1"
+        class="mt-6 flex-1 space-y-5 overflow-y-auto"
         aria-label="Primary navigation"
       >
-        <NuxtLink
-          v-for="item in visibleItems"
-          :key="item.to"
-          :to="workspace.link(item.to)"
-          class="flex min-h-11 items-center gap-3 rounded-xl px-3 text-sm font-medium transition-colors"
-          :class="route.path === item.to || (item.to !== '/' && route.path.startsWith(item.to)) ? 'bg-[var(--people-lavender)] text-primary-700 dark:text-primary-300' : 'text-muted hover:bg-muted/10 hover:text-highlighted'"
+        <section
+          v-for="section in navSections"
+          :key="section.label"
+          :aria-label="section.label"
         >
-          <span
-            class="people-icon size-8 shrink-0"
-            :class="item.iconTone"
+          <p class="mb-1.5 px-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">
+            {{ section.label }}
+          </p>
+          <NuxtLink
+            v-for="item in section.items"
+            :key="item.to"
+            :to="workspace.link(item.to)"
+            class="flex min-h-11 items-center gap-3 rounded-xl px-3 text-sm font-medium transition-colors"
+            :class="route.path === item.to || (item.to !== '/' && route.path.startsWith(item.to)) ? 'bg-[var(--people-lavender)] text-primary-700 dark:text-primary-300' : 'text-muted hover:bg-muted/10 hover:text-highlighted'"
           >
-            <UIcon
-              :name="item.icon"
-              class="size-4"
-            />
-          </span>{{ item.label }}
-        </NuxtLink>
+            <span
+              class="people-icon size-8 shrink-0"
+              :class="item.iconTone"
+            >
+              <UIcon
+                :name="item.icon"
+                class="size-4"
+              />
+            </span>{{ item.label }}
+          </NuxtLink>
+        </section>
         <NuxtLink
           v-if="isTechnicalAdmin"
           to="/settings"
@@ -199,11 +222,11 @@ watch(() => route.fullPath, () => {
       <header class="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-[var(--people-border)] bg-[var(--people-surface)]/90 px-4 backdrop-blur-xl sm:px-6 lg:px-8">
         <UButton
           class="lg:hidden"
-          icon="i-lucide-user-round"
+          icon="i-lucide-menu"
           color="neutral"
           variant="ghost"
-          to="/profile"
-          aria-label="Open profile"
+          aria-label="Open navigation"
+          @click="mobileOpen = true"
         />
         <h1 class="min-w-0 flex-1 truncate text-base font-semibold">
           {{ pageTitle }}
