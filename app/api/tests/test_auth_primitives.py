@@ -9,7 +9,9 @@ HTTP-level consequences are covered in ``test_auth_hardening_http.py``.
 
 from __future__ import annotations
 
+import base64
 import importlib.util
+import os
 from datetime import timedelta
 
 import jwt
@@ -25,6 +27,12 @@ from core.password_policy import (
     build_breach_checker,
     validate_password_policy,
 )
+from core.secret_box import (
+    SecretBoxError,
+    decrypt_secret,
+    encrypt_secret,
+    is_encrypted,
+)
 from core.settings import Settings
 from core.tokens import (
     ACCESS_TOKEN_AUDIENCE,
@@ -36,8 +44,16 @@ from core.tokens import (
     hash_refresh_token,
     token_fingerprint,
 )
-from core.totp import generate_secret, totp_at, verify_totp
-from db.models import now_ist
+from core.totp import (
+    generate_secret,
+    is_totp_replay,
+    match_totp_step,
+    totp_at,
+    verify_totp,
+)
+from db.models import User, now_ist
+from routers.auth_login import normalize_business_identity
+from services.auth_service import AuthService
 from tests.auth_helpers import PASSWORD, run_async
 
 # ── tokens ────────────────────────────────────────────────────────────────────
@@ -86,6 +102,18 @@ def test_a_token_signed_with_another_key_is_rejected():
         decode_token(token, secret="different-secret")
 
 
+def test_business_login_identity_is_mobile_or_username_not_email():
+    assert normalize_business_identity("  employee_42 ") == "employee_42"
+    assert normalize_business_identity("9876543210") == "+919876543210"
+    assert "@" in normalize_business_identity("employee@example.com")
+
+
+def test_global_mfa_switch_disables_an_existing_factor():
+    user = User(mfa_enabled=True, is_superuser=True)
+    service = AuthService(None, settings=Settings(mfa_enabled=False))
+    assert service.mfa_required(user) is False
+
+
 # ── TOTP ──────────────────────────────────────────────────────────────────────
 
 
@@ -104,6 +132,68 @@ def test_totp_rejects_malformed_codes_and_other_secrets():
     assert not verify_totp("abcdef", secret, now)
     assert not verify_totp("12345", secret, now)  # wrong length
     assert not verify_totp(totp_at(other, now), secret, now)
+
+
+def test_match_totp_step_reports_the_step_that_matched_not_the_current_one():
+    """A drifted code must be attributed to its own step.
+
+    Recording "now" instead would either block a legitimate lagging client or
+    leave the window open - which is exactly what made replay possible before.
+    """
+    secret = generate_secret()
+    now = now_ist()
+    current = int(now.timestamp()) // 30
+
+    assert match_totp_step(totp_at(secret, now), secret, now) == current
+    # A client one step behind still authenticates, and is attributed to its step.
+    assert match_totp_step(totp_at(secret, now - timedelta(seconds=30)), secret, now) == current - 1
+    assert match_totp_step(totp_at(secret, now - timedelta(seconds=120)), secret, now) is None
+    assert match_totp_step("", secret, now) is None
+
+
+def test_is_totp_replay_only_rejects_a_step_already_spent():
+    assert is_totp_replay(None, None), "a submission that matched nothing is never accepted"
+    assert is_totp_replay(None, 100), "matching nothing is still nothing"
+    assert not is_totp_replay(100, None), "this seed has never consumed a code"
+    assert not is_totp_replay(101, 100), "the next step's code is legitimate"
+    assert is_totp_replay(100, 100), "the same step is spent"
+    assert is_totp_replay(99, 100), "a stale drifted code is spent too"
+
+
+# ── secret encryption ─────────────────────────────────────────────────────────
+
+
+def test_secret_box_round_trips_and_never_reuses_a_ciphertext():
+    key = base64.urlsafe_b64encode(os.urandom(32)).decode("ascii")
+    secret = generate_secret()
+    first = encrypt_secret(secret, key)
+    second = encrypt_secret(secret, key)
+    assert first != second, "a fresh nonce per call must make ciphertext opaque"
+    assert first.startswith("v1:") and secret not in first
+    assert decrypt_secret(first, key) == secret
+    assert decrypt_secret(second, key) == secret
+    assert is_encrypted(first)
+
+
+def test_secret_box_reads_legacy_plaintext_and_fails_closed_on_a_bad_key():
+    key = base64.urlsafe_b64encode(os.urandom(32)).decode("ascii")
+    legacy = generate_secret()
+    # A value written before encryption existed is read as-is, so introducing
+    # encryption cannot lock existing users out of their authenticator.
+    assert not is_encrypted(legacy)
+    assert decrypt_secret(legacy, key) == legacy
+
+    other_key = base64.urlsafe_b64encode(os.urandom(32)).decode("ascii")
+    sealed = encrypt_secret(legacy, key)
+    with pytest.raises(SecretBoxError):
+        decrypt_secret(sealed, other_key)
+    # Tampering is detected rather than silently producing a wrong secret.
+    with pytest.raises(SecretBoxError):
+        decrypt_secret(sealed[:-2] + ("AA" if not sealed.endswith("AA") else "BB"), key)
+    with pytest.raises(SecretBoxError):
+        encrypt_secret(legacy, "not-a-real-key")
+    with pytest.raises(SecretBoxError):
+        encrypt_secret(legacy, "")
 
 
 # ── password policy ───────────────────────────────────────────────────────────

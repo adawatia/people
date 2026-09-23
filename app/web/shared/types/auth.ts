@@ -57,8 +57,21 @@ export type LoginResult = CurrentUser | MfaChallenge
 /** One-time view of a new authenticator secret; never returned again. */
 export interface MfaEnrollment {
   secret: string
+  /** otpauth:// URI to render as a QR code — never re-display the secret itself. */
   otpauth_uri: string
+  /**
+   * Single-use codes, shown once. Empty when replacing an existing
+   * authenticator: the current codes keep working until regenerated on purpose.
+   */
   recovery_codes: string[]
+  /** The existing authenticator stays valid until this new secret is confirmed. */
+  replacing_existing: boolean
+}
+
+/** A freshly issued set of recovery codes; shown once and never returned again. */
+export interface MfaRecoveryCodes {
+  recovery_codes: string[]
+  recovery_codes_remaining: number
 }
 
 export interface MfaStatus {
@@ -66,6 +79,8 @@ export interface MfaStatus {
   enrolled_at?: string | null
   last_verified_at?: string | null
   recovery_codes_remaining: number
+  /** A replacement authenticator was issued but not yet confirmed. */
+  replacement_pending?: boolean
 }
 
 /** A signed-in session (device) as reported by `GET /auth/sessions`. */

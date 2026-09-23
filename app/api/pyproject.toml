@@ -8,6 +8,10 @@ dependencies = [
     "aiosqlite>=0.22.1",
     "alembic>=1.19.1",
     "asyncpg>=0.31.0",
+    # AES-256-GCM for TOTP secrets at rest (core/secret_box.py). Declared
+    # explicitly rather than relied on as a transitive dependency: this one
+    # protects a second factor, so it must not disappear in a lockfile refresh.
+    "cryptography>=44.0",
     "fastapi-users[sqlalchemy]>=15.0.5",
     "fastapi[standard]>=0.141.1",
     "psycopg[binary]>=3.3.4",

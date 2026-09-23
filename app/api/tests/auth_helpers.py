@@ -10,14 +10,15 @@ import asyncio
 import selectors
 import sys
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
 from fastapi_users.password import PasswordHelper
 from sqlalchemy import select
 
-from db.models import Department, Designation, Employee, Organization, Unit, User
+from core.totp import totp_at
+from db.models import Department, Designation, Employee, Organization, Unit, User, now_ist
 
 # Meets the policy: 12+ chars, all classes, not common, not personal, zxcvbn >= 3.
 PASSWORD = "Ridge7-Cobalt-Lantern"
@@ -135,3 +136,20 @@ def refresh(client_instance: TestClient, refresh_token: str):
 
 def as_datetime(value: str) -> datetime:
     return datetime.fromisoformat(value)
+
+
+def next_code(secret: str, *, step: int = 1) -> str:
+    """The code the authenticator will show ``step`` intervals from now.
+
+    Codes are single-use, so a test that needs to authenticate twice with the
+    same enrolled factor must move forward in time the way a real user does
+    rather than resubmitting the code it just spent.
+    """
+    return totp_at(secret, now_ist() + timedelta(seconds=30 * step))
+
+
+def activate_mfa(client_instance: TestClient, mfa_token: str, secret: str) -> dict:
+    """Complete first-time enrolment and return the issued session payload."""
+    response = client_instance.post(f"{API}/auth/mfa/activate", json={"mfa_token": mfa_token, "code": totp_at(secret, now_ist())})
+    assert response.status_code == 200, response.text
+    return response.json()

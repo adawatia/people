@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { MfaEnrollment, MfaStatus, SessionSummary } from '#shared/types/auth'
+import type { MfaEnrollment, MfaRecoveryCodes, MfaStatus, SessionSummary } from '#shared/types/auth'
 
 const auth = useAuth()
 const api = useHrmsApi()
@@ -65,6 +65,10 @@ const mfaPassword = ref('')
 const mfaCode = ref('')
 const pendingEnrollment = ref<MfaEnrollment | null>(null)
 const busyMfa = ref(false)
+// Newly regenerated codes, kept only until the page is left: the server stores
+// hashes, so this is the one and only time they can be shown.
+const regeneratedCodes = ref<string[]>([])
+const busyCodes = ref(false)
 
 async function loadMfaStatus() {
   try {
@@ -85,6 +89,24 @@ async function startEnrollment() {
     toast.add({ title: 'Could not start setup', description: message(error), color: 'error' })
   } finally {
     busyMfa.value = false
+  }
+}
+
+async function regenerateRecoveryCodes() {
+  busyCodes.value = true
+  try {
+    const result = await api.request<MfaRecoveryCodes>('auth/mfa/recovery/regenerate', {
+      method: 'POST',
+      body: { current_password: mfaPassword.value }
+    })
+    regeneratedCodes.value = result.recovery_codes
+    mfaPassword.value = ''
+    await loadMfaStatus()
+    toast.add({ title: 'New recovery codes issued', description: 'Every previous code no longer works.', color: 'success' })
+  } catch (error) {
+    toast.add({ title: 'Could not issue new codes', description: message(error), color: 'error' })
+  } finally {
+    busyCodes.value = false
   }
 }
 
@@ -304,31 +326,31 @@ onMounted(async () => {
         :color="mfaStatus?.enabled ? 'success' : 'warning'"
         variant="soft"
         :icon="mfaStatus?.enabled ? 'i-lucide-shield-check' : 'i-lucide-triangle-alert'"
-        :title="mfaStatus?.enabled ? 'Enabled' : 'Not set up'"
-        :description="mfaStatus?.enabled
-          ? `Enrolled ${shortTime(mfaStatus.enrolled_at)} · ${mfaStatus.recovery_codes_remaining} recovery codes left`
-          : 'Anyone with the password alone can currently sign in to this account.'"
+        :title="mfaStatus?.replacement_pending
+          ? 'Replacement awaiting confirmation'
+          : (mfaStatus?.enabled ? 'Enabled' : 'Not set up')"
+        :description="mfaStatus?.replacement_pending
+          ? `Your current authenticator is still required and still works · ${mfaStatus.recovery_codes_remaining} recovery codes left`
+          : (mfaStatus?.enabled
+            ? `Enrolled ${shortTime(mfaStatus.enrolled_at)} · ${mfaStatus.recovery_codes_remaining} recovery codes left`
+            : 'Anyone with the password alone can currently sign in to this account.')"
       />
 
       <template v-if="pendingEnrollment">
+        <UAlert
+          v-if="pendingEnrollment.replacing_existing"
+          color="info"
+          variant="soft"
+          icon="i-lucide-info"
+          title="Your current authenticator still works"
+          description="It keeps signing you in, and your existing recovery codes stay valid, until you confirm the new one below."
+        />
         <div class="space-y-3 rounded-xl border border-[var(--people-border)] p-4">
-          <div>
-            <p class="text-xs font-medium uppercase tracking-wide text-muted">
-              Secret key
-            </p>
-            <p class="mt-1 break-all font-mono text-sm">
-              {{ pendingEnrollment.secret }}
-            </p>
-          </div>
-          <div>
-            <p class="text-xs font-medium uppercase tracking-wide text-muted">
-              Setup link
-            </p>
-            <p class="mt-1 break-all font-mono text-xs text-muted">
-              {{ pendingEnrollment.otpauth_uri }}
-            </p>
-          </div>
-          <div>
+          <MfaQrCode
+            :uri="pendingEnrollment.otpauth_uri"
+            :secret="pendingEnrollment.secret"
+          />
+          <div v-if="pendingEnrollment.recovery_codes.length">
             <p class="text-xs font-medium uppercase tracking-wide text-muted">
               Recovery codes (shown once)
             </p>
@@ -393,6 +415,15 @@ onMounted(async () => {
           </UButton>
           <UButton
             v-if="mfaStatus?.enabled"
+            variant="soft"
+            :loading="busyCodes"
+            icon="i-lucide-key-round"
+            @click="regenerateRecoveryCodes"
+          >
+            Issue new recovery codes
+          </UButton>
+          <UButton
+            v-if="mfaStatus?.enabled"
             color="error"
             variant="soft"
             :loading="busyMfa"
@@ -400,6 +431,31 @@ onMounted(async () => {
             @click="disableMfa"
           >
             Remove authenticator
+          </UButton>
+        </div>
+
+        <div
+          v-if="regeneratedCodes.length"
+          class="space-y-2 rounded-xl border border-[var(--people-border)] p-4"
+        >
+          <p class="text-xs font-medium uppercase tracking-wide text-muted">
+            New recovery codes (shown once)
+          </p>
+          <div class="grid grid-cols-2 gap-1 font-mono text-xs">
+            <span
+              v-for="code in regeneratedCodes"
+              :key="code"
+            >{{ code }}</span>
+          </div>
+          <p class="text-xs text-muted">
+            Save these now. Your previous codes no longer work. Each one signs you in once if you lose your device.
+          </p>
+          <UButton
+            variant="ghost"
+            size="sm"
+            @click="regeneratedCodes = []"
+          >
+            I’ve saved them
           </UButton>
         </div>
       </template>

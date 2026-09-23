@@ -37,11 +37,22 @@ from schemas.auth import (
     MfaEnrollmentResponse,
     MfaEnrollRequest,
     MfaPasswordRequest,
+    MfaRecoveryCodesResponse,
     MfaStatusResponse,
 )
-from services.auth_service import AuthService
+from services.auth_service import TOTP_ALREADY_USED, AuthService
 
 router = APIRouter(prefix="/auth/mfa", tags=["auth-account"])
+
+
+async def _verify_management_password(payload, user, manager, throttle, request) -> str:
+    account = AuthThrottle.account_key(f"user:{user.id}")
+    await guard_throttle(throttle, request=request, account=account, scope="mfa")
+    verified, _ = manager.password_helper.verify_and_update(payload.current_password, user.hashed_password)
+    if not verified:
+        await record_throttle_failure(throttle, request=request, account=account, scope="mfa")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect")
+    return account
 
 
 def _session_payload(issued, *, must_change_password: bool) -> LoginResponse:
@@ -84,11 +95,15 @@ async def enroll_mfa(
             status_code=status.HTTP_409_CONFLICT,
             detail="This account already has an authenticator. Sign in with it, or reset it from account settings.",
         )
+    # Read before enrolling: a truthy active secret means this is a replacement,
+    # in which case the current authenticator stays live until it is confirmed.
+    replacing_existing = bool(user.mfa_secret)
     enrollment = await service.start_enrollment(user)
     return MfaEnrollmentResponse(
         secret=enrollment.secret,
         otpauth_uri=enrollment.otpauth_uri,
         recovery_codes=enrollment.recovery_codes,
+        replacing_existing=replacing_existing,
     )
 
 
@@ -159,15 +174,18 @@ async def verify_mfa(
             detail="This account has no authenticator yet. Start enrolment to finish signing in.",
         )
 
-    verified = await service.verify_mfa(
+    result = await service.verify_mfa(
         user,
         payload.code,
         ip_address=client_ip(request),
         request_id=request_id(request),
     )
-    if not verified:
+    if not result.ok:
         await record_throttle_failure(throttle, request=request, account=account, scope="mfa")
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="That code is not valid")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=TOTP_ALREADY_USED if result.replayed else "That code is not valid",
+        )
 
     await throttle.record_success(ip=client_ip(request), account=account, scope="mfa")
     issued = await service.issue_session(
@@ -180,12 +198,16 @@ async def verify_mfa(
 
 
 def _status_payload(user: User) -> MfaStatusResponse:
-    hashes = json.loads(user.mfa_recovery_code_hashes) if user.mfa_recovery_code_hashes else []
+    try:
+        hashes = json.loads(user.mfa_recovery_code_hashes) if user.mfa_recovery_code_hashes else []
+    except (TypeError, ValueError):
+        hashes = []
     return MfaStatusResponse(
         enabled=bool(user.mfa_enabled),
         enrolled_at=user.mfa_enrolled_at,
         last_verified_at=user.last_mfa_verified_at,
         recovery_codes_remaining=len(hashes) if isinstance(hashes, list) else 0,
+        replacement_pending=bool(user.mfa_pending_secret),
     )
 
 
@@ -212,18 +234,46 @@ async def confirm_mfa(
     user: User = Depends(fastapi_users.current_user(active=True)),
     manager: UserManager = Depends(get_user_manager),
     session: AsyncSession = Depends(get_async_session),
+    throttle: AuthThrottle = Depends(get_auth_throttle),
 ):
     """Step-up protected: password *and* a code from the pending secret."""
-    verified, _ = manager.password_helper.verify_and_update(payload.current_password, user.hashed_password)
-    if not verified:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect")
-    await AuthService(session).activate_enrollment(
-        user,
-        payload.code,
-        ip_address=client_ip(request),
-        request_id=request_id(request),
-    )
+    account = await _verify_management_password(payload, user, manager, throttle, request)
+    try:
+        await AuthService(session).activate_enrollment(user, payload.code, ip_address=client_ip(request), request_id=request_id(request))
+    except HTTPException:
+        await record_throttle_failure(throttle, request=request, account=account, scope="mfa")
+        raise
+    await throttle.record_success(ip=client_ip(request), account=account, scope="mfa")
     return _status_payload(user)
+
+
+@router.post(
+    "/recovery/regenerate",
+    response_model=MfaRecoveryCodesResponse,
+    summary="Issue a new set of recovery codes",
+    description=(
+        "Replaces every existing recovery code and returns the new set once. "
+        "Step-up protected: the current password must be supplied. Refused while "
+        "no authenticator is enrolled, because the codes exist to recover from "
+        "losing one."
+    ),
+)
+async def regenerate_recovery_codes(
+    payload: MfaPasswordRequest,
+    request: Request,
+    user: User = Depends(fastapi_users.current_user(active=True)),
+    manager: UserManager = Depends(get_user_manager),
+    session: AsyncSession = Depends(get_async_session),
+    throttle: AuthThrottle = Depends(get_auth_throttle),
+) -> MfaRecoveryCodesResponse:
+    account = await _verify_management_password(payload, user, manager, throttle, request)
+    try:
+        codes = await AuthService(session).regenerate_recovery_codes(user)
+    except HTTPException:
+        await record_throttle_failure(throttle, request=request, account=account, scope="mfa")
+        raise
+    await throttle.record_success(ip=client_ip(request), account=account, scope="mfa")
+    return MfaRecoveryCodesResponse(recovery_codes=codes, recovery_codes_remaining=len(codes))
 
 
 @router.post("/reset", response_model=MfaEnrollmentResponse, summary="Re-issue my authenticator secret")
@@ -233,16 +283,23 @@ async def reset_mfa(
     user: User = Depends(fastapi_users.current_user(active=True)),
     manager: UserManager = Depends(get_user_manager),
     session: AsyncSession = Depends(get_async_session),
+    throttle: AuthThrottle = Depends(get_auth_throttle),
 ):
-    """Step-up protected: the current password must be supplied again."""
-    verified, _ = manager.password_helper.verify_and_update(payload.current_password, user.hashed_password)
-    if not verified:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect")
+    """Step-up protected: the current password must be supplied again.
+
+    Only the *pending* secret is replaced. A working authenticator keeps working,
+    and its recovery codes remain valid, until the new secret is confirmed - a
+    half-finished reset therefore cannot lock the account out or weaken it.
+    """
+    account = await _verify_management_password(payload, user, manager, throttle, request)
+    replacing_existing = bool(user.mfa_secret)
     enrollment = await AuthService(session).start_enrollment(user)
+    await throttle.record_success(ip=client_ip(request), account=account, scope="mfa")
     return MfaEnrollmentResponse(
         secret=enrollment.secret,
         otpauth_uri=enrollment.otpauth_uri,
         recovery_codes=enrollment.recovery_codes,
+        replacing_existing=replacing_existing,
     )
 
 
@@ -253,15 +310,14 @@ async def disable_mfa(
     user: User = Depends(fastapi_users.current_user(active=True)),
     manager: UserManager = Depends(get_user_manager),
     session: AsyncSession = Depends(get_async_session),
+    throttle: AuthThrottle = Depends(get_auth_throttle),
 ):
     """Step-up protected: the password is re-verified before the factor is removed.
 
     Removal is rejected while policy requires MFA for this account, so a stolen
     password cannot be used to strip the second factor and then sign in with it.
     """
-    verified, _ = manager.password_helper.verify_and_update(payload.current_password, user.hashed_password)
-    if not verified:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect")
+    account = await _verify_management_password(payload, user, manager, throttle, request)
     service = AuthService(session)
     if service.policy_requires_mfa(user) and user.mfa_enabled:
         raise HTTPException(
@@ -269,4 +325,5 @@ async def disable_mfa(
             detail="This account requires MFA. An administrator must change the policy first.",
         )
     await service.disable_mfa(user, ip_address=client_ip(request), request_id=request_id(request))
+    await throttle.record_success(ip=client_ip(request), account=account, scope="mfa")
     return MessageResponse(message="Authenticator removed")

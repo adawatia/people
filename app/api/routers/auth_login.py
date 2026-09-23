@@ -15,6 +15,7 @@ account, source IP and the pair.
 from __future__ import annotations
 
 import re
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
@@ -29,9 +30,18 @@ from core.database import get_async_session
 from core.employee_access import require_employee_access
 from core.mobile import normalize_indian_mobile
 from core.request_context import client_ip, request_id, user_agent
+from core.settings import get_settings
+from core.tokens import hash_refresh_token, token_fingerprint
 from db.models import Employee, User
 from routers.auth_sessions import guard_throttle, record_throttle_failure
-from schemas.auth import LoginResponse
+from schemas.auth import (
+    LoginResponse,
+    MessageResponse,
+    PasswordRecoveryResetRequest,
+    PasswordRecoveryStartRequest,
+    PasswordRecoveryStartResponse,
+    PasswordRecoveryVerifyRequest,
+)
 from services.auth_service import (
     INVALID_CREDENTIALS,
     AuditAction,
@@ -41,6 +51,8 @@ from services.auth_service import (
 )
 
 router = APIRouter(prefix="/auth")
+
+PASSWORD_RECOVERY_GENERIC = "If the account is eligible, continue with your authenticator code."
 
 
 class PasswordChangeRequest(BaseModel):
@@ -65,11 +77,9 @@ class UsernameChangeRequest(BaseModel):
 def normalize_business_identity(identity: str) -> str:
     """Resolve a business login identifier.
 
-    The login field accepts a mobile number, an email address or a username, so
-    only values that actually look like a phone number are put through the
-    strict Indian-mobile normaliser; everything else is passed to the user
-    lookup untouched.  (Previously any non-mobile value was rejected, which
-    silently made email/username sign-in unreachable despite being documented.)
+    The login field accepts only an Indian mobile number or username. Email is
+    deliberately not a login identifier; it remains account metadata and a
+    future recovery-channel option.
     """
     candidate = (identity or "").strip()
     if not candidate or "@" in candidate:
@@ -131,6 +141,9 @@ async def _authenticate_human(
             # but it is still counted so a script cannot ignore throttling.
             await record_throttle_failure(throttle, request=request, account=key, scope=policy_scope)
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if "@" in identity:
+            await record_throttle_failure(throttle, request=request, account=key, scope=policy_scope)
+            raise HTTPException(status_code=400, detail="Use your mobile number or username to sign in")
     elif identity.startswith("+") or identity.isdigit() or "@" in identity:
         await record_throttle_failure(throttle, request=request, account=key, scope=policy_scope)
         raise HTTPException(status_code=400, detail="This sign-in uses a username")
@@ -259,8 +272,8 @@ async def _login(
     response_model=LoginResponse,
     summary="Business login (all workforce roles)",
     description=(
-        "OAuth2 form fields: ``username`` is the employee's Indian mobile number, "
-        "email address or username; ``password`` is the current password. Every "
+        "OAuth2 form fields: ``username`` is the employee's Indian mobile number "
+        "or username; ``password`` is the current password. Every "
         "workforce user — employee, manager, unit HR, organization HR, "
         "organization owner — signs in here; permissions and scope are resolved "
         "afterwards via /users/me."
@@ -299,6 +312,108 @@ async def super_admin_login(
     return await _login(
         form, manager, session, request, throttle, super_admin=True
     )
+
+
+@router.post(
+    "/password-recovery/start",
+    response_model=PasswordRecoveryStartResponse,
+    summary="Start password recovery with an authenticator",
+)
+async def start_password_recovery(
+    payload: PasswordRecoveryStartRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_async_session),
+    throttle: AuthThrottle = Depends(get_auth_throttle),
+):
+    """Start a password-recovery flow without revealing account existence."""
+    try:
+        identity = normalize_business_identity(payload.identity)
+    except ValueError:
+        identity = payload.identity.strip()
+    account = account_key(identity or "anonymous")
+    await guard_throttle(throttle, request=request, account=account, scope="password_recovery")
+    user = await session.scalar(select(User).where((User.username == identity) | (User.mobile_number == identity)))
+    recoverable = bool(user and user.is_active and user.mfa_enabled and get_settings().mfa_enabled)
+    service = AuthService(session)
+    token = service.create_password_recovery_challenge(user.id if recoverable else 0, recoverable=recoverable)
+    await throttle.record_success(ip=client_ip(request), account=account, scope="password_recovery")
+    return PasswordRecoveryStartResponse(
+        message=PASSWORD_RECOVERY_GENERIC,
+        recovery_token=token,
+        expires_in=get_settings().password_recovery_ttl_seconds,
+    )
+
+
+@router.post(
+    "/password-recovery/verify",
+    response_model=PasswordRecoveryStartResponse,
+    summary="Verify an authenticator for password recovery",
+)
+async def verify_password_recovery(
+    payload: PasswordRecoveryVerifyRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_async_session),
+    throttle: AuthThrottle = Depends(get_auth_throttle),
+):
+    service = AuthService(session)
+    try:
+        user_id, _nonce = service.resolve_password_recovery(payload.recovery_token)
+    except HTTPException:
+        await record_throttle_failure(throttle, request=request, account="recovery:invalid", scope="password_recovery")
+        raise
+    account = AuthThrottle.account_key(f"user:{user_id}")
+    await guard_throttle(throttle, request=request, account=account, scope="password_recovery")
+    user = await session.get(User, user_id)
+    if user is None or not user.is_active or not user.mfa_enabled or not get_settings().mfa_enabled:
+        await record_throttle_failure(throttle, request=request, account=account, scope="password_recovery")
+        raise HTTPException(status_code=401, detail="Recovery session is not valid")
+    result = await service.verify_mfa(user, payload.code, ip_address=client_ip(request), request_id=request_id(request))
+    if not result.ok:
+        await record_throttle_failure(throttle, request=request, account=account, scope="password_recovery")
+        raise HTTPException(status_code=401, detail="That authenticator code is not valid")
+    reset_token = await service.issue_password_recovery_reset(user)
+    await throttle.record_success(ip=client_ip(request), account=account, scope="password_recovery")
+    return PasswordRecoveryStartResponse(
+        message="Authenticator verified. Choose a new password.",
+        recovery_token=reset_token,
+        expires_in=get_settings().password_recovery_ttl_seconds,
+    )
+
+
+@router.post(
+    "/password-recovery/reset",
+    response_model=MessageResponse,
+    summary="Set a new password after authenticator recovery",
+)
+async def reset_password_with_recovery(
+    payload: PasswordRecoveryResetRequest,
+    request: Request,
+    manager: UserManager = Depends(get_user_manager),
+    session: AsyncSession = Depends(get_async_session),
+    throttle: AuthThrottle = Depends(get_auth_throttle),
+):
+    account = AuthThrottle.account_key(f"reset:{token_fingerprint(payload.reset_token)}")
+    await guard_throttle(throttle, request=request, account=account, scope="password_recovery")
+    user = await session.scalar(
+        select(User).where(
+            User.password_recovery_token_hash == hash_refresh_token(payload.reset_token),
+            User.password_recovery_expires_at > datetime.now(UTC),
+        )
+    )
+    if user is None or not user.is_active:
+        await record_throttle_failure(throttle, request=request, account=account, scope="password_recovery")
+        raise HTTPException(status_code=401, detail="Recovery session expired")
+    try:
+        await manager.validate_password(payload.new_password, user)
+    except Exception as exc:
+        await record_throttle_failure(throttle, request=request, account=account, scope="password_recovery")
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    await AuthService(session).reset_password_with_token(
+        payload.reset_token,
+        manager.password_helper.hash(payload.new_password),
+    )
+    await throttle.record_success(ip=client_ip(request), account=account, scope="password_recovery")
+    return MessageResponse(message="Password reset. All sessions were ended; sign in with your new password.")
 
 
 @router.post("/change-password", tags=["auth-account"], summary="Change own password")

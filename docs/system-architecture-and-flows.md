@@ -194,8 +194,10 @@ Notes that matter operationally:
 | `AUTH_REFRESH_MAX_FAILURES` | `20` | budget for the refresh scope (looser: the token is unguessable) |
 | `AUTH_THROTTLE_BACKEND` / `REDIS_URL` | `memory` / `""` | `redis` is **required** for more than one worker; asking for it without `REDIS_URL` (or without the `redis` package) fails loudly |
 | `TRUST_PROXY_HEADERS` | `false` | honour `X-Forwarded-For`; only enable behind a proxy you control |
-| `MFA_ENABLED` / `MFA_REQUIRED_FOR_SUPER_ADMIN` | `true` / `false` | opt-in enforcement so an existing operator can enrol first; startup logs a warning while it is off |
+| `MFA_ENABLED` / `MFA_REQUIRED_FOR_SUPER_ADMIN` | `true` / `false` | global MFA kill switch / privileged-account enforcement; startup logs a warning while MFA is off |
 | `MFA_ISSUER` / `MFA_CHALLENGE_TTL_SECONDS` | `People HRMS` / `300` | authenticator label and challenge-token lifetime |
+| `MFA_ENCRYPTION_KEY` | development key | AES-256 key (base64 or hex) encrypting TOTP seeds at rest. Empty means "unset" and resolves to the development key. **Production refuses the development default at startup** — a seed dump protected by a key sitting in the repository protects nothing. Rotating it invalidates enrolled factors (they must re-enrol), so treat it like a database credential |
+| `PASSWORD_RECOVERY_TTL_SECONDS` | `600` | lifetime of the authenticator-based password recovery and one-time reset capability |
 | `PASSWORD_MIN_LENGTH` / `PASSWORD_MAX_LENGTH` | `12` / `256` | floors/ceilings are validated, so they cannot be lowered accidentally |
 | `PASSWORD_BREACH_CHECK` / `_URL` | `local` / `""` | `off` \| `local` \| `remote` (k-anonymity, fail-open) |
 
@@ -212,7 +214,7 @@ Notes that matter operationally:
 **Identity & access**
 | Table | Key points |
 |---|---|
-| `users` | `user_id` PK, unique `username`, unique nullable `mobile_number` (E.164), `must_change_password`, `created_by`, invitation metadata (hash, sent/expires/used), fastapi-users fields (`is_active`, `is_verified`, `is_superuser`), MFA columns (`mfa_enabled`, `mfa_secret`, `mfa_enrolled_at`, `last_mfa_verified_at`, `mfa_recovery_code_hashes` — hashes only) |
+| `users` | `user_id` PK, unique `username`, unique nullable `mobile_number` (E.164), `must_change_password`, `created_by`, invitation metadata (hash, sent/expires/used), fastapi-users fields (`is_active`, `is_verified`, `is_superuser`), MFA columns (`mfa_enabled`, `mfa_secret` — AES-GCM ciphertext, `mfa_pending_secret` — a replacement awaiting proof, `mfa_last_used_step` — the last spent TOTP step, `mfa_enrolled_at`, `last_mfa_verified_at`, `mfa_recovery_code_hashes` — hashes only) |
 | `auth_sessions` | Only the **SHA-256 hash** of the refresh token; `expires_at` (30 d outer bound), `absolute_expires_at` (hard end of the chain), `last_used_at` (idle timeout), `revoked_at` + `revoked_reason` (`rotated`, `logout`, `logout_all`, `password_changed`, `password_reset:*`, `reuse_detected`, `idle_timeout`, `account_inactive`), `replaced_by_id` (rotation chain), `ip_address`, `user_agent` (device list) |
 | `audit_logs` | Append-only: actor, action, entity, `filters_json`, `request_id`, `ip_address` |
 
@@ -260,7 +262,7 @@ Authentication answers *who you are*; a business role never selects a login endp
 
 | Endpoint | Tag | Identity accepted | Extra rule |
 |---|---|---|---|
-| `POST /api/v1/auth/employee/login` | `auth-employee` | Indian mobile (any input is normalized to E.164) or email or username | **must** have a linked `Employee`, else `403 "This account is a technical account. Use the technical sign-in."` — reachable only with a *correct* password, so it cannot be used to probe for accounts |
+| `POST /api/v1/auth/employee/login` | `auth-employee` | Indian mobile (any input is normalized to E.164) or username | **must** have a linked `Employee`, else `403 "This account is a technical account. Use the technical sign-in."` — reachable only with a *correct* password, so it cannot be used to probe for accounts |
 | `POST /api/v1/auth/super-admin/login` | `auth-super-admin` | username **only** (rejects `@`, digits, `+` → `400`) | must have `is_superuser`; otherwise the same generic `401 "Invalid login credentials"` as a wrong password |
 
 Both are OAuth2 password-form endpoints and **both issue a session directly** — there is no intermediate long-lived bearer token any more (§2.5.3). Response shape:
@@ -273,7 +275,7 @@ Both are OAuth2 password-form endpoints and **both issue a session directly** �
 {"mfa_required": true, "mfa_enrollment_required": false, "mfa_token": "…", "mfa_expires_in": 300}
 ```
 
-`UserManager.authenticate()` resolves `email → username → normalized mobile` and performs a **dummy hash** for unknown users so the timing of a failed lookup resembles a failed password check (§2.5.7).
+`UserManager.authenticate()` resolves `username → normalized mobile` and performs a **dummy hash** for unknown users so the timing of a failed lookup resembles a failed password check (§2.5.7).
 
 #### 2.5.2 Login and refresh throttling
 
@@ -312,7 +314,19 @@ Split so a stolen password alone can never replace an existing factor:
 * **Challenge endpoints** (unauthenticated, require the short-lived challenge token issued *after* a correct password): `POST /auth/mfa/enroll` (first-time only — returns the secret, `otpauth://` URI and 10 single-use recovery codes, shown once), `POST /auth/mfa/activate` (confirm the new secret and sign in), `POST /auth/mfa/verify` (TOTP or recovery code).
 * **Management endpoints** (authenticated **and** password re-verified): `POST /auth/mfa/reset` (new secret), `POST /auth/mfa/confirm` (activate from an existing session), `POST /auth/mfa/disable`, `GET /auth/mfa/status`.
 
-A second factor is requested when the account's *policy* mandates it **or** the account has already enrolled — an enrolled authenticator is always used, otherwise opting in from account settings would protect nothing. `MFA_REQUIRED_FOR_SUPER_ADMIN` defaults to `false` so enabling it is a deliberate, communicated rollout; `MFA_ENABLED=false` disables the feature. Verification is constant-time with a ±1 step (30 s) drift window, and recovery codes are stored as SHA-256 hashes like refresh tokens. Enrolled already? `disable` is refused while policy requires MFA.
+A second factor is requested when the account's *policy* mandates it **or** the account has already enrolled — an enrolled authenticator is always used, otherwise opting in from account settings would protect nothing. `MFA_REQUIRED_FOR_SUPER_ADMIN` defaults to `false` so enabling it is a deliberate, communicated rollout; `MFA_ENABLED=false` disables MFA enforcement, including for previously enrolled accounts. Verification is constant-time with a ±1 step (30 s) drift window, and recovery codes are stored as SHA-256 hashes like refresh tokens. Enrolled already? `disable` is refused while policy requires MFA.
+
+**Forgot-password recovery** is separate from normal login: the user enters a username or mobile number, proves possession of the enrolled TOTP authenticator (or a recovery code), and receives a short-lived one-time password-reset capability. The flow never creates a session, revokes every existing session after the new password is saved, keeps MFA enrolled, and is throttled and audited.
+
+**Every code is single-use.** A successful verification records the TOTP *step it matched* (`users.mfa_last_used_step`) and any later submission of that step or an earlier one is refused with a distinct message, so an observed code cannot be replayed for the remainder of its window — including the ±1 step of drift either side. The matched step is recorded rather than "now" on purpose: attributing a lagging client's code to the current step would either block a legitimate sign-in or leave the window open, which is exactly how replay was possible before. A spent code is reported as *spent* rather than invalid, so the user is told to wait for the next code instead of hunting for a typo that does not exist.
+
+**Seeds are encrypted, not hashed** (`core/secret_box.py`): AES-256-GCM with a fresh nonce per write, stored as `v1:<base64url(nonce‖ciphertext‖tag)>` under `MFA_ENCRYPTION_KEY`, which never lives in the database. A seed must be recoverable to verify future codes, unlike a password or a refresh token, so the protection is encryption plus a key held elsewhere — a database dump alone yields no usable second factor. A value without the `v1:` prefix predates this and is read as-is, then re-encrypted on the next write, so the upgrade cannot lock anyone out; a value that cannot be decrypted (wrong or rotated key) fails **closed** — the account falls back to its recovery codes and re-enrolment rather than accepting codes derived from garbage.
+
+**A replacement factor is proven before it replaces anything.** `start_enrollment` writes only `mfa_pending_secret`; the active seed, `mfa_enabled` and the recovery codes are untouched until a code from the new secret is accepted (`activate` / `confirm`), at which point the pending seed is promoted and the replay counter resets. This matters because the obvious implementation — clearing the live secret and `mfa_enabled` at the start — lets an abandoned "issue a new secret" disable the second factor entirely *and* kill the authenticator in the user's hand. Recovery codes are issued only with a first factor: replacing one keeps the existing set valid, and `POST /auth/mfa/recovery/regenerate` issues a fresh set (password re-verified) when the user actually wants one.
+
+**QR setup is rendered in the browser.** Enrolment returns the `otpauth://` URI and the API never re-displays it; the Nuxt side draws the QR client-side from that URI, so the seed travels only in the JSON body it arrived in and never into a URL or query string where it would be written to access logs and browser history. Manual entry stays available as a fallback for the key.
+
+The spec vocabulary maps onto the implemented routes as: `totp/setup` → `POST /auth/mfa/enroll` (first factor, challenge token) or `POST /auth/mfa/reset` (replacement, password re-verified); `totp/enable` → `POST /auth/mfa/activate` (login-time) or `POST /auth/mfa/confirm` (from a session); `challenge/totp` and `challenge/recovery` → `POST /auth/mfa/verify` (one endpoint accepts either, and a valid TOTP code never consumes a recovery code); `recovery/regenerate` → `POST /auth/mfa/recovery/regenerate`; status → `GET /auth/mfa/status`. Every one of them is throttled on the account, the source IP and the pair.
 
 #### 2.5.5 Password policy (enforced on register, change, and HR/ERP temporary-password set)
 
@@ -334,7 +348,7 @@ Unknown accounts get a dummy hash instead of a fast `return None`, all credentia
 
 #### 2.5.8 Security audit events
 
-`services/auth_service.py` writes to the existing append-only `audit_logs` table (no second audit framework): `AUTH_LOGIN_SUCCESS` / `AUTH_LOGIN_FAILED`, `SUPER_ADMIN_LOGIN_SUCCESS` / `_FAILED`, `AUTH_LOGOUT`, `AUTH_SESSION_CREATED`, `AUTH_SESSION_REFRESHED`, `AUTH_REFRESH_FAILED`, `AUTH_REFRESH_REUSE_DETECTED`, `AUTH_SESSION_REVOKED`, `AUTH_ALL_SESSIONS_REVOKED`, `AUTH_PASSWORD_CHANGED`, `AUTH_PASSWORD_RESET`, `AUTH_USERNAME_CHANGED`, `AUTH_MFA_CHALLENGE` / `_ENROLLED` / `_SUCCESS` / `_FAILED`. Records carry `user_id` (when known), session id, `request_id`, IP, user agent and a reason category. The correlation id is minted by the request-logging middleware (an inbound `X-Request-ID` / `X-Correlation-ID` is preserved), stored on `request.state` and echoed on the response as `X-Request-ID`, so one id ties a user-visible failure to the API log line *and* the audit rows it produced. **Never** logged: passwords, raw access/refresh tokens, TOTP secrets or recovery codes — identities in failure events are stored as truncated hashes.
+`services/auth_service.py` writes to the existing append-only `audit_logs` table (no second audit framework): `AUTH_LOGIN_SUCCESS` / `AUTH_LOGIN_FAILED`, `SUPER_ADMIN_LOGIN_SUCCESS` / `_FAILED`, `AUTH_LOGOUT`, `AUTH_SESSION_CREATED`, `AUTH_SESSION_REFRESHED`, `AUTH_REFRESH_FAILED`, `AUTH_REFRESH_REUSE_DETECTED`, `AUTH_SESSION_REVOKED`, `AUTH_ALL_SESSIONS_REVOKED`, `AUTH_PASSWORD_CHANGED`, `AUTH_PASSWORD_RESET`, `AUTH_USERNAME_CHANGED`, `AUTH_MFA_CHALLENGE` / `_ENROLLED` / `_SUCCESS` / `_FAILED` / `_RECOVERY_REGENERATED`. Records carry `user_id` (when known), session id, `request_id`, IP, user agent and a reason category (`invalid` versus `replayed` on an MFA failure, and `activate` versus `verify` for the stage). The correlation id is minted by the request-logging middleware (an inbound `X-Request-ID` / `X-Correlation-ID` is preserved), stored on `request.state` and echoed on the response as `X-Request-ID`, so one id ties a user-visible failure to the API log line *and* the audit rows it produced. **Never** logged: passwords, raw access/refresh tokens, TOTP secrets or recovery codes — identities in failure events are stored as truncated hashes.
 
 #### 2.5.9 Session lifecycle (state machine)
 
@@ -559,7 +573,7 @@ Every tag below is also an OpenAPI tag declared in `main.py`. Auth column: **E**
 |---|---|---|---|
 | **account** | `GET /users/me` | Any | returns permissions + employee_id/code + resolved `business_role` / `scope_type` (the scope id is not exposed) |
 | | `GET /users/me/permissions` | Any | — |
-| **auth** | `POST /auth/employee/login` | public, throttled | mobile/email/username → session (or MFA challenge) |
+| **auth** | `POST /auth/employee/login` | public, throttled | mobile/username → session (or MFA challenge) |
 | | `POST /auth/super-admin/login` | public, throttled | username only → session (or MFA challenge) |
 | | `POST /auth/change-password` | Any | clears `must_change_password` **and revokes every session** (`reauthentication_required: true`) |
 | | `PATCH /auth/super-admin/username` | SA + password step-up | conflict-checked |
@@ -730,7 +744,7 @@ Mobile: the 4 first non-dashboard visible items become the bottom bar, plus Prof
 
 | Page | Primary endpoint(s) | Key UI capabilities | Broken/limited (see §8) |
 |---|---|---|---|
-| `pages/login.vue` | `POST /api/session/login`, `/api/session/mfa` | **workforce sign-in only** (mobile / email / username), password reveal, second-factor step, `redirect` honouring, inline error text; a temporary-password account is sent to `/settings?change-password=1` | link to `/admin/login`; no forgot-password page (copy says "Password reset: contact HR") |
+| `pages/login.vue` | `POST /api/session/login`, `/api/session/mfa` | **workforce sign-in only** (mobile / username), password reveal, second-factor step, `redirect` honouring, inline error text; a temporary-password account is sent to `/settings?change-password=1` | links to `/admin/login` and `/forgot-password` |
 | `pages/admin/login.vue` | `POST /api/session/login` (`accountType: 'super_admin'`), `/api/session/mfa` | separate technical entry point (username only), visually distinct, MFA step with first-time enrolment | business accounts are rejected by the API |
 | `pages/index.vue` | `dashboard/metrics`, `dashboard/technical-metrics` (SA only), `dashboard/owner` via component | role-specific hero copy, 4 KPI cards, shift + today's attendance cards, pending-approvals list (managers), owner analytics branch | ignores `/dashboard/widgets` |
 | `pages/employees/index.vue` | `employees/`, `org/units`, `org/departments`, `designations/` | paginated directory, filters, activate/deactivate, delete | PATCH/DELETE endpoints **do not exist** → 405 |
@@ -946,9 +960,10 @@ OvertimeRecord  PENDING ──approve/reject──▶ (service only; no HTTP sur
 |---|---|
 | `test_main.py` | root + health endpoints |
 | `test_auth_setup.py` | limiter wiring, user schemas, OWNER permission boundary, invalid-login robustness, CORS preflight |
-| `test_auth_primitives.py` | token/crypto primitives (refresh entropy + hash-only storage, audience separation, expiry, wrong key), TOTP accept/reject, password policy (weak, personal-info, passphrase, breach-checker selection + fail-open), and the throttle rules: per-pair blocking, geometric growth with a cap, short delay for a typo, one employee cannot lock out colleagues, success clears counters, separate refresh budget, key normalisation, store-backend misconfiguration, counter expiry |
+| `test_auth_primitives.py` | token/crypto primitives (refresh entropy + hash-only storage, audience separation, expiry, wrong key), TOTP accept/reject, drift attribution (`match_totp_step` reports the step that matched, and `is_totp_replay` treats only a spent step as reuse), secret-box round-trip/nonce-uniqueness/legacy-plaintext/tamper-and-wrong-key failure, password policy (weak, personal-info, passphrase, breach-checker selection + fail-open), and the throttle rules: per-pair blocking, geometric growth with a cap, short delay for a typo, one employee cannot lock out colleagues, success clears counters, separate refresh budget, key normalisation, store-backend misconfiguration, counter expiry |
 | `test_auth_sessions.py` | session lifecycle over HTTP: direct session issuance at login, rotation + old-token rejection, replay of a logged-out token not destroying sibling sessions, logout-everywhere, device listing, idle timeout, absolute timeout that refreshing cannot extend, refresh-TTL expiry, the concurrent-refresh race (exactly one winner), audited reuse detection, malformed tokens |
 | `test_auth_hardening_http.py` | every workforce role through one business endpoint, technical↔business door separation, no account enumeration, secret-free auth audit events, login throttling + recovery, refresh-abuse throttling, password change ending all sessions, access token surviving until expiry, HR temporary-password reset revocation + forced change, must-change-password clearing, Super Admin MFA challenge completion, challenge token not usable as an access token, employee MFA opt-in |
+| `test_mfa_totp.py` | the second factor's own guarantees: a code authenticates exactly once (and a replay says so), a drifted code is accepted once and then spent, recovery codes are unaffected by TOTP single use, an abandoned replacement keeps the existing factor working (the regression where it used to turn MFA off), confirming a replacement promotes the new seed and retires the old one, a Super Admin is never forced to re-enrol after an abandoned reset, seeds are ciphertext at rest and absent from every response, and recovery codes regenerate/step-up correctly |
 | `test_business_role_authorization.py` | the authorization matrix: base permissions for everyone, manager/unit-HR/org-HR/owner/super-admin reach, HR bundle identical across scopes, org scope not conferring owner analytics |
 | `test_business_role_provisioning.py` | role assignment/transfer reconciliation (a moved unit HR cannot keep the old unit's scope), legacy-only rows repaired on write, explicit `null` beating a stale legacy `role`, audited role changes |
 | `test_permission_grants.py` | static guard: every permission code in the catalog is granted, and every role bundle key is a real role |

@@ -61,7 +61,7 @@ const recoveryCodes = computed(() => enrollment.value?.recovery_codes ?? [])
       </h3>
       <p class="mt-2 text-sm leading-6 text-muted">
         <template v-if="enrollmentRequired">
-          This account requires two-step verification. Add the secret below to your authenticator app, then confirm with the code it shows.
+          This account requires two-step verification. Scan the QR code with your authenticator app, then confirm with the code it shows.
         </template>
         <template v-else>
           Open your authenticator app and enter the current 6-digit code. A single-use recovery code works too.
@@ -80,22 +80,10 @@ const recoveryCodes = computed(() => enrollment.value?.recovery_codes ?? [])
         Preparing your secret…
       </p>
       <template v-else-if="enrollment">
-        <div>
-          <p class="text-xs font-medium uppercase tracking-wide text-muted">
-            Secret key
-          </p>
-          <p class="mt-1 break-all font-mono text-sm">
-            {{ enrollment.secret }}
-          </p>
-        </div>
-        <div>
-          <p class="text-xs font-medium uppercase tracking-wide text-muted">
-            Setup link
-          </p>
-          <p class="mt-1 break-all font-mono text-xs text-muted">
-            {{ enrollment.otpauth_uri }}
-          </p>
-        </div>
+        <MfaQrCode
+          :uri="enrollment.otpauth_uri"
+          :secret="enrollment.secret"
+        />
         <div v-if="recoveryCodes.length">
           <p class="text-xs font-medium uppercase tracking-wide text-muted">
             Recovery codes (shown once)
