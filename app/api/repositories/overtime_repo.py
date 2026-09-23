@@ -1,4 +1,5 @@
 from datetime import date
+
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,6 +34,15 @@ class OvertimeRepository:
 
     async def get_by_id(self, ot_id: int) -> OvertimeRecord | None:
         return await self.session.get(OvertimeRecord, ot_id)
+
+    async def get_by_id_for_update(self, ot_id: int) -> OvertimeRecord | None:
+        stmt = (
+            select(OvertimeRecord)
+            .where(OvertimeRecord.id == ot_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return await self.session.scalar(stmt)
 
     async def create_approval(self, approval: OvertimeApproval) -> OvertimeApproval:
         self.session.add(approval)

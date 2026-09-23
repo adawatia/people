@@ -1,9 +1,10 @@
 import calendar
 from datetime import date
+
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import Employee, OvertimeApproval, OvertimeRecord, now_ist
+from db.models import OvertimeApproval, now_ist
 from repositories.employee_repo import EmployeeRepository
 from repositories.overtime_repo import OvertimeRepository
 from schemas.overtime import (
@@ -44,11 +45,16 @@ class OvertimeService:
         data: OvertimeApprovalCreate,
         actioned_by_user_id: int,
     ) -> OvertimeRecordRead:
-        ot = await self.repo.get_by_id(ot_id)
+        ot = await self.repo.get_by_id_for_update(ot_id)
         if not ot:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Overtime record not found")
         if ot.status != "PENDING":
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Overtime is not in PENDING state")
+        if data.approved_minutes <= 0 or data.approved_minutes > ot.calculated_minutes:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Approved minutes must be positive and cannot exceed calculated overtime",
+            )
 
         # Self-approval prevention
         emp = await self.employee_repo.get_by_id(ot.employee_id)
@@ -80,7 +86,7 @@ class OvertimeService:
         data: OvertimeRejectionCreate,
         actioned_by_user_id: int,
     ) -> OvertimeRecordRead:
-        ot = await self.repo.get_by_id(ot_id)
+        ot = await self.repo.get_by_id_for_update(ot_id)
         if not ot:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Overtime record not found")
         if ot.status != "PENDING":

@@ -1,5 +1,6 @@
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class OvertimeRecordRead(BaseModel):
@@ -20,12 +21,20 @@ class OvertimeRecordRead(BaseModel):
 
 
 class OvertimeApprovalCreate(BaseModel):
-    approved_minutes: int
-    remarks: str | None = None
+    approved_minutes: int = Field(gt=0)
+    remarks: str | None = Field(default=None, max_length=500)
 
 
 class OvertimeRejectionCreate(BaseModel):
-    remarks: str | None = None
+    remarks: str = Field(min_length=3, max_length=500)
+
+    @field_validator("remarks")
+    @classmethod
+    def strip_and_validate_remarks(cls, value: str) -> str:
+        value = value.strip()
+        if len(value) < 3:
+            raise ValueError("Rejection reason must contain at least 3 non-whitespace characters")
+        return value
 
 
 class OvertimeSummary(BaseModel):

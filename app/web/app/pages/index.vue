@@ -9,6 +9,7 @@ const isTechnicalAdmin = computed(() => Boolean(auth.user.value?.is_superuser))
 const isExecutiveWorkspace = computed(() => workspace.current.value === 'EXECUTIVE')
 const scopeType = computed(() => auth.scopeType.value)
 const hasTeamScope = computed(() => workspace.current.value === 'TEAM' || workspace.current.value === 'HR')
+const canReviewApprovals = computed(() => ['leave.approve', 'work_arrangement.approve'].some(auth.hasPermission))
 const teamLabel = computed(() => scopeType.value === 'ORGANIZATION' ? 'Organization members' : scopeType.value === 'UNIT' ? 'Unit members' : scopeType.value === 'DEPARTMENT' ? 'Department members' : 'Employees')
 const dashboardTitle = computed(() => workspace.current.value === 'EXECUTIVE' ? 'Organization performance at a glance.' : workspace.current.value === 'HR' ? 'People operations at a glance.' : workspace.current.value === 'TEAM' ? 'Your team at a glance.' : 'Here’s your workday at a glance.')
 const dashboardSubtitle = computed(() => workspace.current.value === 'EXECUTIVE' ? 'Monitor company-wide attendance, workforce exceptions, leave and overtime.' : workspace.current.value === 'HR' ? `Manage people operations across your ${scopeType.value === 'ORGANIZATION' ? 'organization' : 'unit'} scope.` : workspace.current.value === 'TEAM' ? 'Review your department attendance, leave and approval workload.' : 'Review your attendance, leave balance and work schedule.')
@@ -200,7 +201,7 @@ const shiftTimeRange = (shift?: EmployeeDashboardShift | null) => shift
         class="mt-6 grid gap-6"
         :class="hasTeamScope ? 'xl:grid-cols-[1.15fr_0.85fr]' : 'xl:grid-cols-2'"
       >
-        <UCard>
+        <UCard v-if="!hasTeamScope">
           <div class="flex items-start gap-3">
             <span class="people-icon people-icon--blue size-10 shrink-0"><UIcon
               name="i-lucide-clock-3"
@@ -236,7 +237,7 @@ const shiftTimeRange = (shift?: EmployeeDashboardShift | null) => shift
           </div>
         </UCard>
 
-        <UCard>
+        <UCard v-if="!hasTeamScope">
           <div class="flex items-center justify-between">
             <div class="flex items-start gap-3">
               <span class="people-icon people-icon--mint size-10 shrink-0"><UIcon
@@ -285,7 +286,7 @@ const shiftTimeRange = (shift?: EmployeeDashboardShift | null) => shift
           </div>
         </UCard>
 
-        <UCard v-if="hasTeamScope">
+        <UCard v-if="hasTeamScope && canReviewApprovals">
           <div class="flex items-center justify-between">
             <div>
               <h3 class="font-semibold">

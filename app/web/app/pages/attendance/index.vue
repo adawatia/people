@@ -13,8 +13,7 @@ const monthCursor = ref(new Date(new Date().getFullYear(), new Date().getMonth()
 const correctionRecord = ref<AttendanceRecord | null>(null)
 const correction = reactive({ requested_punch_in: '', requested_punch_out: '', reason: '' })
 const correctionLoading = ref(false)
-// Only HR can raise a correction: the API gates this on the attendance.correct
-// permission plus the caller's row scope.
+// Correction requests require this capability and the caller's row scope.
 const canRequestCorrection = computed(() => auth.hasPermission('attendance.correct'))
 
 function dateKey(value: Date) {
@@ -509,19 +508,19 @@ function hasPendingCorrection(recordId: number) {
               <AttendanceStatusBadge :status="record.status" />
             </div>
             <div
-              v-if="record.late_minutes || record.early_exit_minutes || ['MISSED_PUNCH', 'ABSENT'].includes(record.status)"
+              v-if="record.late_minutes || record.early_exit_minutes || ['MISSED_PUNCH', 'ABSENT'].includes(record.status) || hasPendingCorrection(record.id)"
               class="mt-3 flex flex-wrap items-center gap-3 text-xs text-muted"
             >
               <span v-if="record.late_minutes">{{ record.late_minutes }}m late</span><span v-if="record.early_exit_minutes">{{ record.early_exit_minutes }}m early exit</span>
               <button
-                v-if="canRequestCorrection && !hasPendingCorrection(record.id)"
+                v-if="canRequestCorrection && ['MISSED_PUNCH', 'ABSENT'].includes(record.status) && !hasPendingCorrection(record.id)"
                 type="button"
                 class="font-semibold text-primary"
                 @click="openCorrection(record)"
               >
                 Request correction
               </button><span
-                v-else
+                v-else-if="hasPendingCorrection(record.id)"
                 class="font-medium text-amber-700 dark:text-amber-300"
               >Correction pending</span>
             </div>

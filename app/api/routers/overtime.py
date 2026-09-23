@@ -1,12 +1,14 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.auth import fastapi_users
+from core.auth import fastapi_users, require_permission
 from core.database import get_async_session
 from core.employee_access import get_current_employee, get_permission_scope, require_employee_access
 from db.models import User
 from schemas.overtime import (
+    OvertimeApprovalCreate,
     OvertimeRecordRead,
+    OvertimeRejectionCreate,
     OvertimeSummary,
 )
 from services.overtime_service import OvertimeService
@@ -27,12 +29,19 @@ async def list_overtime(
     # have the organization-wide one. Merge both before choosing the list scope.
     scope = await get_permission_scope(current_user, "overtime.view", session)
     scope.include(await get_permission_scope(current_user, "overtime.view_department", session))
+    scope.include(await get_permission_scope(current_user, "overtime.approve", session))
     if employee_id is not None:
         employee = await service.employee_repo.get_by_id(employee_id)
         if employee is None:
             from fastapi import HTTPException
             raise HTTPException(status_code=404, detail="Employee not found")
-        await require_employee_access(current_user, employee, ("overtime.view", "overtime.view_department"), session, allow_self=True)
+        await require_employee_access(
+            current_user,
+            employee,
+            ("overtime.view", "overtime.view_department", "overtime.approve"),
+            session,
+            allow_self=True,
+        )
     elif scope.self_only:
         employee_id = (await get_current_employee(current_user, session)).id
     return await service.list_overtime(
@@ -55,7 +64,10 @@ async def get_overtime(
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Overtime record not found")
     employee = await service.employee_repo.get_by_id(record.employee_id)
-    await require_employee_access(_, employee, ("overtime.view", "overtime.view_department"), session, allow_self=True)
+    if employee is None:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Employee not found")
+    await require_employee_access(_, employee, ("overtime.view", "overtime.view_department", "overtime.approve"), session, allow_self=True)
     return await service.get_overtime(ot_id)
 
 
@@ -74,3 +86,39 @@ async def get_overtime_summary(
         raise HTTPException(status_code=404, detail="Employee not found")
     await require_employee_access(_, employee, ("overtime.view", "overtime.view_department"), session, allow_self=True)
     return await service.get_overtime_summary(employee_id=emp_id, month=month, year=year)
+
+
+@router.patch("/{ot_id}/approve", response_model=OvertimeRecordRead)
+async def approve_overtime(
+    ot_id: int,
+    data: OvertimeApprovalCreate,
+    current_user: User = Depends(require_permission("overtime.approve")),
+    session: AsyncSession = Depends(get_async_session),
+) -> OvertimeRecordRead:
+    service = OvertimeService(session)
+    record = await service.repo.get_by_id(ot_id)
+    if record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Overtime record not found")
+    employee = await service.employee_repo.get_by_id(record.employee_id)
+    if employee is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Employee not found")
+    await require_employee_access(current_user, employee, "overtime.approve", session)
+    return await service.approve_overtime(ot_id, data, actioned_by_user_id=current_user.id)
+
+
+@router.patch("/{ot_id}/reject", response_model=OvertimeRecordRead)
+async def reject_overtime(
+    ot_id: int,
+    data: OvertimeRejectionCreate,
+    current_user: User = Depends(require_permission("overtime.approve")),
+    session: AsyncSession = Depends(get_async_session),
+) -> OvertimeRecordRead:
+    service = OvertimeService(session)
+    record = await service.repo.get_by_id(ot_id)
+    if record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Overtime record not found")
+    employee = await service.employee_repo.get_by_id(record.employee_id)
+    if employee is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Employee not found")
+    await require_employee_access(current_user, employee, "overtime.approve", session)
+    return await service.reject_overtime(ot_id, data, actioned_by_user_id=current_user.id)

@@ -8,6 +8,8 @@ export interface OvertimeRecord {
   actioned_by?: number | null
   actioned_at?: string | null
   rejection_reason?: string | null
+  overtime_start?: string | null
+  overtime_end?: string | null
 }
 
 export interface OvertimeSummary {

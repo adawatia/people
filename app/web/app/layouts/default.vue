@@ -61,20 +61,22 @@ const navByWorkspace: Record<string, NavItem[]> = {
 }
 const visibleItems = computed(() => (navByWorkspace[workspace.current.value] || []).filter(item => !item.permissions || item.permissions.some(auth.hasPermission)))
 const navSections = computed(() => {
-  const groups: Record<string, NavItem[]> = {}
+  const groups = new Map<string, NavItem[]>()
   for (const item of visibleItems.value) {
-    const key = workspace.current.value === 'MY'
-      ? 'My work'
-      : workspace.current.value === 'TEAM'
-        ? item.to === '/' ? 'Overview' : ['/employees', '/attendance'].includes(item.to) ? 'Team' : ['/leaves', '/work-arrangements', '/approvals'].includes(item.to) ? 'Requests & approvals' : 'Insights'
-        : workspace.current.value === 'HR'
-          ? item.to === '/' ? 'Overview' : ['/employees', '/attendance'].includes(item.to) ? 'Workforce' : ['/leaves', '/work-arrangements', '/approvals'].includes(item.to) ? 'Requests & approvals' : item.to === '/overtime' ? 'Time & compensation' : ['/shifts', '/holidays', '/organization'].includes(item.to) ? 'Organization' : 'Insights'
-          : workspace.current.value === 'EXECUTIVE'
-            ? item.to === '/' ? 'Overview' : 'Insights'
-            : 'Administration'
-    ;(groups[key] ||= []).push(item)
+    let group: string
+    if (workspace.current.value === 'MY') group = 'My work'
+    else if (workspace.current.value === 'TEAM') {
+      group = item.to === '/' ? 'Overview' : ['/employees', '/attendance'].includes(item.to) ? 'Team' : ['/leaves', '/work-arrangements', '/approvals'].includes(item.to) ? 'Requests & approvals' : 'Insights'
+    } else if (workspace.current.value === 'HR') {
+      group = item.to === '/' ? 'Overview' : ['/employees', '/attendance'].includes(item.to) ? 'Workforce' : ['/leaves', '/work-arrangements', '/approvals'].includes(item.to) ? 'Requests & approvals' : item.to === '/overtime' ? 'Time & compensation' : ['/shifts', '/holidays', '/organization'].includes(item.to) ? 'Organization' : 'Insights'
+    } else if (workspace.current.value === 'EXECUTIVE') group = item.to === '/' ? 'Overview' : 'Insights'
+    else group = 'Administration'
+
+    const items = groups.get(group) || []
+    items.push(item)
+    groups.set(group, items)
   }
-  return Object.entries(groups).map(([label, items]) => ({ label, items }))
+  return Array.from(groups, ([label, items]) => ({ label, items }))
 })
 const pageTitle = computed(() => {
   if (route.path === '/settings') return isTechnicalAdmin.value ? 'System administration' : 'Security settings'
@@ -155,17 +157,19 @@ watch(() => route.fullPath, () => {
         <section
           v-for="section in navSections"
           :key="section.label"
-          :aria-label="section.label"
+          :aria-label="`${section.label} navigation`"
+          class="rounded-xl border border-[var(--people-border)] bg-[var(--people-canvas)]/45 p-2"
         >
-          <p class="mb-1.5 px-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">
+          <h2 class="mb-1.5 flex items-center gap-2 px-2 py-1 text-[11px] font-bold uppercase tracking-[0.12em] text-highlighted">
+            <span class="size-1.5 rounded-full bg-primary" />
             {{ section.label }}
-          </p>
+          </h2>
           <NuxtLink
             v-for="item in section.items"
             :key="item.to"
             :to="workspace.link(item.to)"
             class="flex min-h-11 items-center gap-3 rounded-xl px-3 text-sm font-medium transition-colors"
-            :class="route.path === item.to || (item.to !== '/' && route.path.startsWith(item.to)) ? 'bg-[var(--people-lavender)] text-primary-700 dark:text-primary-300' : 'text-muted hover:bg-muted/10 hover:text-highlighted'"
+            :class="route.path === item.to || (item.to !== '/' && route.path.startsWith(`${item.to}/`)) ? 'bg-[var(--people-lavender)] text-primary-700 dark:text-primary-300' : 'text-muted hover:bg-muted/10 hover:text-highlighted'"
           >
             <span
               class="people-icon size-8 shrink-0"
@@ -260,8 +264,8 @@ watch(() => route.fullPath, () => {
           :key="item.to"
           :to="workspace.link(item.to)"
           :icon="item.icon"
-          :color="route.path === item.to || (item.to !== '/' && route.path.startsWith(item.to)) ? 'primary' : 'neutral'"
-          :variant="route.path === item.to || (item.to !== '/' && route.path.startsWith(item.to)) ? 'soft' : 'ghost'"
+          :color="route.path === item.to || (item.to !== '/' && route.path.startsWith(`${item.to}/`)) ? 'primary' : 'neutral'"
+          :variant="route.path === item.to || (item.to !== '/' && route.path.startsWith(`${item.to}/`)) ? 'soft' : 'ghost'"
           size="sm"
           class="min-w-0 flex-1 flex-col gap-0.5 px-1 py-2 text-[10px]"
           :aria-label="item.label"

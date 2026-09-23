@@ -522,7 +522,7 @@ Config: `create_period`, `create_type`, `update_type`, `allocate_leaves` (writes
 
 #### 2.7.6 Overtime (`services/overtime_service.py`)
 
-`list_overtime`, `get_overtime`, `get_overtime_summary` (month filtering, approved minutes only), `approve_overtime` / `reject_overtime` with self-approval prevention and an `overtime_approvals` audit row. **The approve/reject service methods are not exposed by any router** (§8.1 A2).
+`list_overtime`, `get_overtime`, `get_overtime_summary` (month filtering, approved minutes only), `approve_overtime` / `reject_overtime` with row locking, self-approval prevention, state validation, an approved-minutes ceiling, and an `overtime_approvals` audit row for approvals. The router exposes approval/rejection only to `overtime.approve` users within their assigned employee scope.
 
 #### 2.7.7 Reports (`services/report_service.py`)
 
@@ -612,6 +612,7 @@ Every tag below is also an OpenAPI tag declared in `main.py`. Auth column: **E**
 | | `POST /`, `PATCH /{id}/cancel` | Any | self via apply/cancel |
 |  | `PATCH /{id}/approve\|reject` | perm(`work_arrangement.approve`/`reject`) | scope + no self-approval |
 | **overtime** | `GET /overtime/`, `/{id}`, `/employee/{id}/summary` | Any | business-role scope, self fallback |
+| | `PATCH /{id}/approve`, `PATCH /{id}/reject` | perm(`overtime.approve`) | employee scope + no self-action; approval cannot exceed calculated minutes |
 | **reports** | `GET /reports/attendance-matrix`, `/leave-summary` | perm(`reports.attendance`/`reports.leave`) | scope-forced filters inside the route (org scope may choose unit/department) |
 | **notifications** | `GET /notifications`, `/unread-count`, `PATCH /{id}/read`, `POST /mark-all-read` | Any | user + role broadcasts |
 | **health** | `GET /health` (10/min), `GET /db-health`, `GET /` | public | DB probe + uptime |
@@ -744,7 +745,7 @@ One account can move between contexts without another login:
 
 Action and dialog visibility follows the same rule: `pages/attendance/index.vue` gates the correction dialog on `hasPermission('attendance.correct')` rather than on the `HR_ADMIN` role, and `pages/profile.vue` derives its display label from `business_role` + `scope_type` (so unit HR and organization HR are distinguishable). Dashboard presentation now follows the active workspace (`MY`, `TEAM`, `HR`, `EXECUTIVE`, or `TECHNICAL`) rather than branching directly on a role.
 
-Navigation is grouped by purpose inside each workspace (for example Workforce, Requests & approvals, Time & compensation, Organization, and Insights in HR). Super Admin gets **only** Dashboard + System administration — the business nav is replaced, because master data lives in ERP.
+Navigation is grouped by purpose inside each workspace (for example Workforce, Requests & approvals, Time & compensation, Organization, and Insights in HR). Group headings are high-contrast and each group is visually bounded, so the active workspace's operational areas are distinguishable at a glance. Team/HR dashboards show scoped KPIs and approval work only; personal shift and attendance cards appear only in My Workspace. Approval shortcuts are rendered only when the user has a matching approval capability. Super Admin gets **only** Dashboard + System administration — the business nav is replaced, because master data lives in ERP.
 
 Mobile: the 4 first non-dashboard visible items become the bottom bar, plus Profile; the header menu button opens the full grouped sidebar drawer so later items remain reachable.
 
@@ -756,16 +757,16 @@ The workspace middleware keeps hidden routes out of the current workspace and re
 |---|---|---|---|
 | `pages/login.vue` | `POST /api/session/login`, `/api/session/mfa` | **workforce sign-in only** (mobile / username), password reveal, second-factor step, `redirect` honouring, inline error text; a temporary-password account is sent to `/settings?change-password=1` | links to `/admin/login` and `/forgot-password` |
 | `pages/admin/login.vue` | `POST /api/session/login` (`accountType: 'super_admin'`), `/api/session/mfa` | separate technical entry point (username only), visually distinct, MFA step with first-time enrolment | business accounts are rejected by the API |
-| `pages/index.vue` | `dashboard/metrics`, `dashboard/technical-metrics` (SA only), `dashboard/owner` via component | workspace-specific hero copy, personal/team/HR KPI cards, shift + today's attendance cards, executive analytics branch | ignores `/dashboard/widgets` |
-| `pages/employees/index.vue` | `employees/`, `org/units`, `org/departments`, `designations/` | paginated directory, filters, activate/deactivate, delete | PATCH/DELETE endpoints **do not exist** → 405 |
+| `pages/index.vue` | `dashboard/metrics`, `dashboard/technical-metrics` (SA only), `dashboard/owner` via component | workspace-specific KPIs; personal shift/attendance cards only in MY; scoped approvals only when permitted | ignores `/dashboard/widgets` |
+| `pages/employees/index.vue` | `employees/`, `org/units`, `org/departments`, `designations/` | paginated, filtered read-only directory; ERP ownership is stated in the page | Provisioning/lifecycle writes are ERP-owned and not offered in this UI |
 | `pages/employees/[id].vue` | `employees/{id}`, `employees/{id}/work-history` | profile, org placement, work history | — |
-| `pages/attendance/index.vue` | My: `attendance/employee/{id}/calendar`, `…/summary`, `attendance/corrections`; Team/HR: `attendance/` | My calendar and correction flow; Team/HR scoped records table | scoped collection currently identifies employees by ID; row-level API scope applies |
+| `pages/attendance/index.vue` | My: `attendance/employee/{id}/calendar`, `…/summary`, `attendance/corrections`; Team/HR: `attendance/` | My calendar and summary; correction request is shown only to `attendance.correct` users; Team/HR scoped records table | scoped collection currently identifies employees by ID; row-level API scope applies |
 | `pages/leaves/index.vue` | My: `leaves/`, `leaves/types`, `leaves/balance/employee/{id}`; Team/HR: `leaves/` | My balance/apply/history; Team/HR scoped request list linking to approvals | — |
 | `pages/work-arrangements/index.vue` | `work-arrangements/` | My request/list/cancel; Team/HR scoped request list | only WFH accepted server-side |
-| `pages/approvals/index.vue` | `attendance/corrections`, `attendance/records/{id}`, `leaves/?status=PENDING`, `leaves/?status=CANCELLATION_PENDING`, `work-arrangements/?status=PENDING` | tabs per queue (permission-driven), approve, reject with reason modal | attendance tab approve → 403 ERP; no overtime tab |
-| `pages/shifts/index.vue` | `shifts/`, `shifts/assignments`, `org/units`, `employees/` | shift definitions + assignments tables, "New shift"/"Assign shift" dialogs | POST endpoints **do not exist** → 405 |
+| `pages/approvals/index.vue` | Leave, work-arrangement, and overtime queues | queues and controls gated by matching permissions; rejection requires a reason; overtime approval defaults to calculated minutes | attendance corrections are ERP-confirmed, not approved here; overtime rows currently show employee IDs |
+| `pages/shifts/index.vue` | `shifts/`, `shifts/assignments`, `org/units`, `employees/` | read-only shift definitions and assignments synchronized from ERP | writes intentionally not offered; ERP owns the source data |
 | `pages/holidays/index.vue` | `holidays/lists`, `org/units` | calendar + holiday list viewer | `canManage` hard-coded `false` (correct, ERP-owned) |
-| `pages/organization/index.vue` | `org/organization`, `org/units`, `org/departments`, `designations/` | tabs per entity, enable/disable, delete | PATCH/DELETE are ERP-only → 405 |
+| `pages/organization/index.vue` | `org/organization`, `org/units`, `org/departments`, `designations/` | read-only tabs for organization structure synchronized from ERP | writes intentionally not offered |
 | `pages/overtime/index.vue` | My: `overtime/`, `overtime/employee/{id}/summary`; Team/HR: `overtime/` | My monthly summary and records; Team/HR scoped records | management collection has no employee name or date filters yet |
 | `pages/reports/index.vue` | `reports/attendance-matrix`, `reports/leave-summary` | month picker, attendance matrix, leave summary; tabs gated by permission | — |
 | `pages/notifications.vue` | `notifications`, `notifications/{id}/read`, `notifications/mark-all-read` | list, read, mark-all | — |
@@ -828,9 +829,9 @@ On approval, each day becomes `WORK_FROM_HOME` in attendance, so the calendar st
 * approved, already started ⇒ becomes `CANCELLATION_PENDING` (reason + today's date required) and waits for the manager; the UI labels the toast accordingly.
 
 **Attendance (`/attendance`).** `GET /attendance/employee/{id}/calendar` + `/summary` + `attendance/corrections` → month grid, status pie, tiles.
-⚠️ Tapping **Request correction** POSTs to `POST /attendance/corrections`, which requires the `HR_ADMIN` **role** → `403 "HR Admin access required"` for an employee today (§8.1 A3).
+The correction-request action is not available to a plain employee: it is hidden unless the user has `attendance.correct`, and the API independently enforces that permission and row scope. Authorized HR users can submit corrections from the personal attendance view; ERP reconciliation remains the final confirmation (§8.1 A3).
 
-**Overtime (`/overtime`).** `GET /overtime/` self-scoped + monthly summary (approved minutes only). Read-only.
+**Overtime (`/overtime`).** `GET /overtime/` self-scoped + monthly summary (approved minutes only). Approvers process the scoped pending queue in `/approvals`; self-action is rejected and approval minutes cannot exceed the ERP-calculated amount.
 
 **Notifications (`/notifications`).** `GET /notifications` (user + role broadcasts), `PATCH …/{id}/read`, `POST …/mark-all-read`; server prunes with the retention rules in §2.7.9.
 
@@ -838,7 +839,7 @@ On approval, each day becomes `WORK_FROM_HOME` in attendance, so the calendar st
 
 ### 4.2 F2 — DEPARTMENT_MANAGER (approve & report for one department)
 
-**Login/Dashboard.** Same door; `hasPermission('leave.approve')` and `employee.view` make the Team workspace available. In `MY`, the user sees personal metrics. In `TEAM`, `GET /dashboard/metrics` returns data scoped to **their department** (`get_employee_scope` ⇒ `dept_scope_ids`): headcount, attendance breakdown, overtime and pending-work indicators. The dashboard links to `/approvals`.
+**Login/Dashboard.** Same door; `hasPermission('leave.approve')` and `employee.view` make the Team workspace available. In `MY`, the user sees personal metrics and shift/attendance cards. In `TEAM`, `GET /dashboard/metrics` returns data scoped to **their department** (`get_employee_scope` ⇒ `dept_scope_ids`): headcount, attendance breakdown, overtime and pending-work indicators. Personal cards are not shown in this workspace; approval summaries/shortcuts appear only if the user holds leave or work-arrangement approval permission.
 
 **Approvals (`/approvals`).** Tabs are permission-driven: `leave.approve` (+`leave.reject` for the reject button) and `work_arrangement.approve`; the attendance tab is a read-only queue (ERP confirms corrections).
 * Leave queue loads `PENDING` **and** `CANCELLATION_PENDING` in parallel and picks the right endpoint per row (`/approve` vs `/cancellation/approve`).
@@ -852,7 +853,7 @@ On approval, each day becomes `WORK_FROM_HOME` in attendance, so the calendar st
 
 ### 4.3 F3 — HR_ADMIN (unit operations, or organization-wide when scoped so)
 
-**Dashboard.** In `MY`, HR sees personal metrics. In `HR`, dashboard metrics use the configured `UNIT` or `ORGANIZATION` scope and label the headcount accordingly.
+**Dashboard.** In `MY`, HR sees personal metrics and shift/attendance cards. In `HR`, dashboard metrics use the configured `UNIT` or `ORGANIZATION` scope and label the headcount accordingly; personal cards are not mixed into the HR view.
 
 **Employees (`/employees`).** Unit-limited directory with search/filters, pagination (`page_size` ≤ 100), detail page with work history. Provisioning is ERP-only: `POST /employees/onboard` returns `410`, and the page's own activate/deactivate/delete buttons hit non-existent routes (§8.1 A1).
 
@@ -939,7 +940,9 @@ AttendanceCorrectionRequest  status: PENDING (one per attendance_record) ──�
 
 ShiftAssignment  ACTIVE ──cancel──▶ CANCELLED   ·   no overlapping ACTIVE windows per employee.
 
-OvertimeRecord  PENDING ──approve/reject──▶ (service only; no HTTP surface today)
+OvertimeRecord  PENDING ──approve/reject──▶ APPROVED | REJECTED
+  Actions require overtime.approve + row scope; a row lock prevents competing decisions;
+  approved_minutes must be positive and no greater than calculated_minutes.
 ```
 
 ---
@@ -1004,23 +1007,24 @@ These are verified against the current code and are the highest-value item in th
 
 | # | Symptom | Root cause | Severity | Decision owner |
 |---|---|---|---|---|
-| **A1** | Employees page "activate/deactivate" and "delete" fail | `routers/employees.py` exposes only `GET /`, `POST /onboard` (410), `GET /{id}`, `GET /{id}/work-history`. Lifecycle writes exist only at `/integrations/erp/employees/{id}/deactivate` and `…/activate`. Delete exists only in `EmployeeService.delete_employee` (unused by any router) | High | Backend + Frontend lead |
-| **A2** | Overtime can never be approved in the product | `OvertimeService.approve_overtime/reject_overtime` are unreachable: `routers/overtime.py` is read-only and the Approvals page has no overtime tab even though DM/HR hold `overtime.approve` | High | Product + Backend lead |
-| **A3** | "Request correction" in Attendance fails for employees | Intentional: `POST /attendance/corrections` requires `attendance.correct` plus row scope, so a plain employee gets 403 and the attendance page hides the dialog for them. The Approvals → Attendance approve/reject endpoints have been removed entirely, because ERP confirmation is the approval | Low | Product (governance) + Frontend lead |
-| **A4** | Shifts page create/assign fail | `routers/shifts.py` is read-only; writes live at `/integrations/erp/shifts/**` | Medium | Backend lead |
-| **A5** | Organization page enable/disable/delete fail | `org/units`, `org/departments` and `designations/` routers expose GET only; writes are ERP-only | Medium | Frontend lead |
+| **A1** | ~~Employees page exposes lifecycle actions that fail~~ **Resolved** | Current directory is read-only and explicitly identifies ERP as the source of truth; the HRMS UI no longer offers activate/deactivate/delete actions. Backend lifecycle operations remain ERP-owned. | Resolved | Frontend lead |
+| **A2** | ~~Overtime approval methods were unreachable~~ **Resolved** | Scoped `PATCH /overtime/{id}/approve` and `/reject` routes and an `overtime.approve` queue tab now expose the existing workflow. State is locked during action; zero/negative/over-calculated approvals are rejected; self-action is blocked. | Resolved | Backend + Frontend |
+| **A3** | ~~Plain employees could see an attendance correction action they could not use~~ **Resolved** | The current UI hides correction submission unless `attendance.correct` is present, and the API enforces the same permission plus row scope. Correction approval is ERP-confirmed; no HRMS approve/reject routes are exposed. | Resolved | Frontend + Backend |
+| **A4** | ~~Shifts page create/assign fail~~ **Resolved** | Current Shifts UI only reads ERP-synchronized definitions and assignments; it does not offer create/assign controls. | Resolved | Frontend lead |
+| **A5** | ~~Organization page enable/disable/delete fail~~ **Resolved** | Current Organization UI is explicitly read-only; write controls are not rendered because organization master data is ERP-owned. | Resolved | Frontend lead |
 | **A6** | Holidays create/add buttons | Hidden by `canManage = false` (correct today) — the code remains and will 405 if ever enabled | Low | Frontend lead |
 | **A7** | ~~`attendance.approve_correction` is held by nobody~~ **Fixed** | The correction surfaces now gate on `attendance.correct` (which HR holds) and the approve/reject routes were removed, so `tests/test_permission_grants.py` passes with no dead-end code | Resolved | Architecture lead |
 | **A8** | `POST /attendance/checkins` + `/checkins/bulk` are 403 stubs | Intentional (ERP supplies punches) but the punch ingestion path is therefore untested through HTTP; publishing them for ERP would be cleaner than a separate ERP route | Low/Medium | Architecture lead |
 | **A9** | Dashboard widget API is not yet consumed | `GET /dashboard/widgets` exists and is permission-aware; workspace dashboards now provide the presentation context, while widget-level composition remains a future consolidation point | Medium | Frontend lead |
 | **A10** | Invitation UI missing | `/auth/invitation/*` + email templates exist, `middleware` lists `/invitation` and `/auth/invitation` as public, but no page/route exists and no router calls `create_invitation_for_user` | Medium | Product + Frontend lead |
+| **A11** | ~~Mobile Attendance showed “Correction pending” when no correction existed~~ **Resolved** | The mobile row now renders that state only when an actual pending correction matches the record; its correction action also uses the same status/permission conditions as desktop. | Resolved | Frontend |
 
 ### 8.2 Functional gaps (backend behaviour)
 
 * **No notification is created for any workflow** — `create_notification` is only used by tests. Applying/approving/rejecting leave or WFH notifies nobody in-app; approvers rely on dashboard/queue polling.
 * **`department_approvers` is decorative** — the table exists but no leave/WFH/shift/expense routing consults it; approvals are driven purely by role + unit/department scope.
 * **Attendance processing is manual** — no scheduler calls `process_attendance_batch`; someone (or a cron outside this repo) must POST `/attendance/process`.
-* **Overtime never reaches attendance end-to-end in-product**: ERP bulk-syncs records; there is no HRMS-computed-to-approve path exposed.
+* Overtime approval records are now reviewable in HRMS; source calculation and record synchronization remain ERP-owned.
 * **`leave.manage` grants allocation/type/period writes but allocation has no HTTP endpoint for org-wide bulk runs** — it is service-level only (`LeaveService.allocate_leaves`), exercised by tests.
 * **`attendance_discrepancies`** is modelled and seeded but never written by the engine.
 
@@ -1040,9 +1044,9 @@ These are verified against the current code and are the highest-value item in th
 
 | # | Decision | Options | Recommendation |
 |---|---|---|---|
-| D1 | **Is this "employees read-only + ERP writes" a temporary migration state or the target?** | (a) target — delete dead UI actions; (b) temporary — implement HRMS write endpoints guarded by `employee.update` | Pick explicitly, then make §8.1 A1/A4/A5 consistent with it. If (a): remove the buttons so users never see 405s |
+| D1 | **Is this "employees read-only + ERP writes" a temporary migration state or the target?** | (a) target — keep the HRMS views read-only; (b) temporary — implement HRMS write endpoints guarded by `employee.update` | Current implementation follows (a): dead lifecycle controls have been removed; revisit only if ownership moves from ERP. |
 | D2 | **Attendance correction governance** | (a) ERP-only confirmation (current server behaviour) — remove approve/reject from UI and stop offering employee submission; (b) allow employee submission + manager approval inside HRMS, ERP reconciles async | (b) matches the product's own permissions and queue UI, but requires deciding who wins conflicts with ERP. Ship (a) as the interim truthful UI |
-| D3 | **Overtime approval surface** | (a) add `PATCH /overtime/{id}/approve` and `/reject` + an Approvals tab + notifications; (b) leave overtime read-only | (a) — the service, permissions, and months of summary UI already exist; it is the cheapest complete workflow |
+| D3 | **Overtime approval surface** | (a) add `PATCH /overtime/{id}/approve` and `/reject` + an Approvals tab + notifications; (b) leave overtime read-only | Core scoped actions and the Approvals tab are implemented; in-app notifications remain part of §8.2 |
 | D4 | **Notifications on workflow events** | (a) emit on apply/approve/reject/cancel to the actor + approver + employee; (b) keep polling dashboards | (a) — `create_notification` already exists; wire it in the four services and reuse `link`/`reference_id` |
 | D5 | **Approver routing** | (a) keep role+scope routing; (b) use `department_approvers` | Decide before exposing more approval types; today the table is misleading |
 | ~~D6~~ | ~~**`attendance.approve_correction`**~~ **Settled** | — | Resolved by removing the code and the approve/reject routes, and gating corrections on `attendance.correct` + row scope (§2.6.2). No dead-end permission code remains |
@@ -1076,13 +1080,13 @@ These are verified against the current code and are the highest-value item in th
 **Checked in the API but granted to no role:** none — `tests/test_permission_grants.py` asserts both directions (no enforced code is ungranted; no role bundle repeats a base code).
 
 **Granted to some role but never enforced in the API** (safe to keep as forward-compatible vocabulary, hazardous to treat as a security control):
-`user.view`, `user.create`, `user.deactivate`, `employee.update`, `employee.deactivate`, `employee.view_self`, `attendance.view_self`, `designation.view/create/update/delete`, `leave.view_self`, `overtime.view_self`, `overtime.approve`, `shift.view_self`, `shift.assign`, `shift.update`, `reports.view`, `reports.overtime`, `reports.salary_cost`, `salary_cost.view_unit`, `salary_cost.view_department`, `audit.view`, `work_arrangement.apply`, `work_arrangement.view_self`.
+`user.view`, `user.create`, `user.deactivate`, `employee.update`, `employee.deactivate`, `employee.view_self`, `attendance.view_self`, `designation.view/create/update/delete`, `leave.view_self`, `overtime.view_self`, `shift.view_self`, `shift.assign`, `shift.update`, `reports.view`, `reports.overtime`, `reports.salary_cost`, `salary_cost.view_unit`, `salary_cost.view_department`, `audit.view`, `work_arrangement.apply`, `work_arrangement.view_self`.
 
 *Derived by `tests/test_permission_grants.py` (`granted − enforced`), so this list cannot drift silently.*
 
-*Frontend-only gates:* `shift.assign` / `shift.update` (nav + Shifts page) are not checked by any route — which is why the Shifts page renders create buttons whose endpoints do not exist (§8.1 A4). `attendance.correct` gates the correction dialog, and the API enforces it as well.
+*Frontend-only gates:* `shift.assign` / `shift.update` are not enforced because shift writes remain ERP-only; current Shifts UI is read-only. `attendance.correct` gates the correction dialog, and the API enforces it as well.
 
-*Enforced today (23):* `employee.view`, `employee.create`, `attendance.view` / `view_unit` / `view_department` / `process` / `correct`, `leave.apply` / `approve` / `reject` / `cancel` / `manage`, `work_arrangement.approve` / `reject` / `cancel` / `manage`, `overtime.view` / `view_department`, `reports.attendance` / `reports.leave`, `dashboard.view_organization`, `system.configure` (dashboard widget gating), `user.update` (HR password reset).
+*Enforced today (24):* `employee.view`, `employee.create`, `attendance.view` / `view_unit` / `view_department` / `process` / `correct`, `leave.apply` / `approve` / `reject` / `cancel` / `manage`, `work_arrangement.approve` / `reject` / `cancel` / `manage`, `overtime.view` / `view_department` / `approve`, `reports.attendance` / `reports.leave`, `dashboard.view_organization`, `system.configure` (dashboard widget gating), `user.update` (HR password reset).
 
 ### B. Database tables (28)
 
