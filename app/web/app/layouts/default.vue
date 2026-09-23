@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { WORKSPACES, type Workspace } from '~/composables/useWorkspace'
 /**
  * Application shell: sidebar navigation, top bar and content slot.
  *
@@ -14,31 +15,63 @@
 interface NavItem { label: string, icon: string, to: string, iconTone?: string, permissions?: string[] }
 const route = useRoute()
 const auth = useAuth()
+const workspace = useWorkspace()
+const availableWorkspaces = workspace.available
+const currentWorkspace = workspace.current
+const workspaceDefinition = computed(() => workspace.definition.value || WORKSPACES[0]!)
 const mobileOpen = ref(false)
-const navItems: NavItem[] = [
-  { label: 'Dashboard', icon: 'i-lucide-layout-dashboard', to: '/', iconTone: 'people-icon--blue' },
-  { label: 'Employees', icon: 'i-lucide-users-round', to: '/employees', iconTone: 'people-icon--mint', permissions: ['employee.view'] },
-  { label: 'Attendance', icon: 'i-lucide-calendar-check-2', to: '/attendance', iconTone: 'people-icon--blue' },
-  { label: 'Leave', icon: 'i-lucide-calendar-days', to: '/leaves', iconTone: 'people-icon--lavender' },
-  { label: 'Work arrangements', icon: 'i-lucide-briefcase-business', to: '/work-arrangements', iconTone: 'people-icon--peach' },
-  { label: 'Overtime', icon: 'i-lucide-timer', to: '/overtime', iconTone: 'people-icon--yellow' },
-  { label: 'Approvals', icon: 'i-lucide-clipboard-check', to: '/approvals', iconTone: 'people-icon--rose', permissions: ['leave.approve', 'work_arrangement.approve'] },
-  { label: 'Shifts', icon: 'i-lucide-clock-3', to: '/shifts', iconTone: 'people-icon--blue', permissions: ['shift.assign', 'shift.update'] },
-  { label: 'Holidays', icon: 'i-lucide-calendar-heart', to: '/holidays', iconTone: 'people-icon--lavender' },
-  { label: 'Organization', icon: 'i-lucide-building-2', to: '/organization', iconTone: 'people-icon--mint', permissions: ['designation.view'] },
-  { label: 'Reports', icon: 'i-lucide-chart-no-axes-combined', to: '/reports', iconTone: 'people-icon--yellow', permissions: ['reports.attendance', 'reports.leave'] }
-]
 const isTechnicalAdmin = computed(() => Boolean(auth.user.value?.is_superuser))
-// Technical admins manage master data in ERP, not here — so they only see
-// the dashboard plus system administration. Everyone else sees every item their
-// effective permissions unlock.
-const visibleItems = computed(() => isTechnicalAdmin.value
-  ? [{ label: 'Dashboard', icon: 'i-lucide-layout-dashboard', to: '/' }]
-  : navItems.filter(item => !item.permissions || item.permissions.some(auth.hasPermission)))
-const pageTitle = computed(() => route.path === '/settings'
-  ? isTechnicalAdmin.value ? 'System administration' : 'Security settings'
-  : navItems.find(item => item.to === route.path)?.label || 'People')
+const navByWorkspace: Record<string, NavItem[]> = {
+  MY: [
+    { label: 'Dashboard', icon: 'i-lucide-layout-dashboard', to: '/', iconTone: 'people-icon--blue' },
+    { label: 'Attendance', icon: 'i-lucide-calendar-check-2', to: '/attendance', iconTone: 'people-icon--blue' },
+    { label: 'Leave', icon: 'i-lucide-calendar-days', to: '/leaves', iconTone: 'people-icon--lavender' },
+    { label: 'Work arrangements', icon: 'i-lucide-briefcase-business', to: '/work-arrangements', iconTone: 'people-icon--peach' },
+    { label: 'Overtime', icon: 'i-lucide-timer', to: '/overtime', iconTone: 'people-icon--yellow' },
+    { label: 'Shifts', icon: 'i-lucide-clock-3', to: '/shifts', iconTone: 'people-icon--blue' },
+    { label: 'Holidays', icon: 'i-lucide-calendar-heart', to: '/holidays', iconTone: 'people-icon--lavender' }
+  ],
+  TEAM: [
+    { label: 'Dashboard', icon: 'i-lucide-layout-dashboard', to: '/', iconTone: 'people-icon--blue' },
+    { label: 'Employees', icon: 'i-lucide-users-round', to: '/employees', iconTone: 'people-icon--mint', permissions: ['employee.view'] },
+    { label: 'Attendance', icon: 'i-lucide-calendar-check-2', to: '/attendance', iconTone: 'people-icon--blue', permissions: ['attendance.view_department'] },
+    { label: 'Leave approvals', icon: 'i-lucide-calendar-days', to: '/leaves', iconTone: 'people-icon--lavender', permissions: ['leave.approve'] },
+    { label: 'Work arrangements', icon: 'i-lucide-briefcase-business', to: '/work-arrangements', iconTone: 'people-icon--peach', permissions: ['work_arrangement.approve'] },
+    { label: 'Overtime', icon: 'i-lucide-timer', to: '/overtime', iconTone: 'people-icon--yellow', permissions: ['overtime.view_department'] },
+    { label: 'Approvals', icon: 'i-lucide-clipboard-check', to: '/approvals', iconTone: 'people-icon--rose', permissions: ['leave.approve', 'work_arrangement.approve'] },
+    { label: 'Reports', icon: 'i-lucide-chart-no-axes-combined', to: '/reports', iconTone: 'people-icon--yellow', permissions: ['reports.attendance', 'reports.leave'] }
+  ],
+  HR: [
+    { label: 'Dashboard', icon: 'i-lucide-layout-dashboard', to: '/', iconTone: 'people-icon--blue' },
+    { label: 'Employees', icon: 'i-lucide-users-round', to: '/employees', iconTone: 'people-icon--mint', permissions: ['employee.view'] },
+    { label: 'Attendance', icon: 'i-lucide-calendar-check-2', to: '/attendance', iconTone: 'people-icon--blue', permissions: ['attendance.view', 'attendance.process'] },
+    { label: 'Leave management', icon: 'i-lucide-calendar-days', to: '/leaves', iconTone: 'people-icon--lavender', permissions: ['leave.manage', 'leave.approve'] },
+    { label: 'Work arrangements', icon: 'i-lucide-briefcase-business', to: '/work-arrangements', iconTone: 'people-icon--peach', permissions: ['work_arrangement.manage', 'work_arrangement.approve'] },
+    { label: 'Overtime', icon: 'i-lucide-timer', to: '/overtime', iconTone: 'people-icon--yellow', permissions: ['overtime.approve'] },
+    { label: 'Approvals', icon: 'i-lucide-clipboard-check', to: '/approvals', iconTone: 'people-icon--rose', permissions: ['leave.approve', 'work_arrangement.approve'] },
+    { label: 'Shifts', icon: 'i-lucide-clock-3', to: '/shifts', iconTone: 'people-icon--blue', permissions: ['shift.assign', 'shift.update'] },
+    { label: 'Holidays', icon: 'i-lucide-calendar-heart', to: '/holidays', iconTone: 'people-icon--lavender' },
+    { label: 'Organization', icon: 'i-lucide-building-2', to: '/organization', iconTone: 'people-icon--mint', permissions: ['designation.view'] },
+    { label: 'Reports', icon: 'i-lucide-chart-no-axes-combined', to: '/reports', iconTone: 'people-icon--yellow', permissions: ['reports.view', 'reports.attendance', 'reports.leave'] }
+  ],
+  EXECUTIVE: [
+    { label: 'Dashboard', icon: 'i-lucide-layout-dashboard', to: '/', iconTone: 'people-icon--blue', permissions: ['dashboard.view_organization'] },
+    { label: 'Reports', icon: 'i-lucide-chart-no-axes-combined', to: '/reports', iconTone: 'people-icon--yellow', permissions: ['reports.view', 'reports.attendance', 'reports.leave'] },
+    { label: 'Organization', icon: 'i-lucide-building-2', to: '/organization', iconTone: 'people-icon--mint', permissions: ['employee.view'] }
+  ],
+  TECHNICAL: [{ label: 'Dashboard', icon: 'i-lucide-layout-dashboard', to: '/', iconTone: 'people-icon--blue' }]
+}
+const visibleItems = computed(() => (navByWorkspace[workspace.current.value] || []).filter(item => !item.permissions || item.permissions.some(auth.hasPermission)))
+const pageTitle = computed(() => {
+  if (route.path === '/settings') return isTechnicalAdmin.value ? 'System administration' : 'Security settings'
+  if (route.path === '/profile') return 'Profile'
+  return visibleItems.value.find(item => item.to === route.path)?.label || workspaceDefinition.value.label || 'People'
+})
 const mobileItems = computed(() => visibleItems.value.filter(item => item.to !== '/').slice(0, 4))
+async function changeWorkspace(event: Event) {
+  const next = (event.target as HTMLSelectElement).value as Workspace
+  await workspace.select(next)
+}
 watch(() => route.fullPath, () => {
   // Navigating should always collapse the mobile drawer.
   mobileOpen.value = false
@@ -69,6 +102,38 @@ watch(() => route.fullPath, () => {
           @click="mobileOpen = false"
         />
       </div>
+      <div
+        v-if="availableWorkspaces.length > 1"
+        class="mt-6 px-2"
+      >
+        <label
+          for="workspace-switcher"
+          class="mb-2 block text-xs font-semibold uppercase tracking-wide text-muted"
+        >Workspace</label>
+        <div class="relative">
+          <select
+            id="workspace-switcher"
+            :value="currentWorkspace"
+            class="w-full appearance-none rounded-xl border border-[var(--people-border)] bg-[var(--people-surface)] px-3 py-2.5 pr-9 text-sm font-semibold text-highlighted outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20"
+            @change="changeWorkspace"
+          >
+            <option
+              v-for="item in availableWorkspaces"
+              :key="item"
+              :value="item"
+            >
+              {{ WORKSPACES.find(workspaceItem => workspaceItem.key === item)?.label || item }}
+            </option>
+          </select>
+          <UIcon
+            name="i-lucide-chevron-down"
+            class="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted"
+          />
+        </div>
+        <p class="mt-2 text-xs text-muted">
+          {{ workspaceDefinition.description }}
+        </p>
+      </div>
       <nav
         class="mt-9 flex-1 space-y-1"
         aria-label="Primary navigation"
@@ -76,7 +141,7 @@ watch(() => route.fullPath, () => {
         <NuxtLink
           v-for="item in visibleItems"
           :key="item.to"
-          :to="item.to"
+          :to="workspace.link(item.to)"
           class="flex min-h-11 items-center gap-3 rounded-xl px-3 text-sm font-medium transition-colors"
           :class="route.path === item.to || (item.to !== '/' && route.path.startsWith(item.to)) ? 'bg-[var(--people-lavender)] text-primary-700 dark:text-primary-300' : 'text-muted hover:bg-muted/10 hover:text-highlighted'"
         >
@@ -170,7 +235,7 @@ watch(() => route.fullPath, () => {
         <UButton
           v-for="item in mobileItems"
           :key="item.to"
-          :to="item.to"
+          :to="workspace.link(item.to)"
           :icon="item.icon"
           :color="route.path === item.to || (item.to !== '/' && route.path.startsWith(item.to)) ? 'primary' : 'neutral'"
           :variant="route.path === item.to || (item.to !== '/' && route.path.startsWith(item.to)) ? 'soft' : 'ghost'"

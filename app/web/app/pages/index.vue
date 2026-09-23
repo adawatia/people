@@ -4,15 +4,14 @@ import type { DashboardMetrics, EmployeeDashboardShift } from '#shared/types/das
 useSeoMeta({ title: 'Dashboard' })
 const auth = useAuth()
 const api = useHrmsApi()
+const workspace = useWorkspace()
 const isTechnicalAdmin = computed(() => Boolean(auth.user.value?.is_superuser))
-// The Organization Owner dashboard is a genuinely role-specific experience;
-// everything else here follows the scope the API will actually apply.
-const isOrganizationOwner = computed(() => auth.businessRole.value === 'ORGANIZATION_OWNER')
+const isExecutiveWorkspace = computed(() => workspace.current.value === 'EXECUTIVE')
 const scopeType = computed(() => auth.scopeType.value)
-const hasTeamScope = computed(() => scopeType.value !== 'SELF')
+const hasTeamScope = computed(() => workspace.current.value === 'TEAM' || workspace.current.value === 'HR')
 const teamLabel = computed(() => scopeType.value === 'ORGANIZATION' ? 'Organization members' : scopeType.value === 'UNIT' ? 'Unit members' : scopeType.value === 'DEPARTMENT' ? 'Department members' : 'Employees')
-const dashboardTitle = computed(() => isOrganizationOwner.value ? 'Organization operations at a glance.' : scopeType.value === 'ORGANIZATION' ? 'Organization operations at a glance.' : scopeType.value === 'UNIT' ? 'Unit operations at a glance.' : scopeType.value === 'DEPARTMENT' ? 'Your department at a glance.' : 'Here’s your workday at a glance.')
-const dashboardSubtitle = computed(() => isOrganizationOwner.value ? 'Monitor company-wide attendance, workforce exceptions, leave and overtime.' : scopeType.value === 'ORGANIZATION' ? 'Monitor organization-wide attendance and handle requests that need HR attention.' : scopeType.value === 'UNIT' ? 'Monitor unit attendance and handle requests that need HR attention.' : scopeType.value === 'DEPARTMENT' ? 'Review your department attendance, leave and approval workload.' : 'Review your attendance, leave balance and work schedule.')
+const dashboardTitle = computed(() => workspace.current.value === 'EXECUTIVE' ? 'Organization performance at a glance.' : workspace.current.value === 'HR' ? 'People operations at a glance.' : workspace.current.value === 'TEAM' ? 'Your team at a glance.' : 'Here’s your workday at a glance.')
+const dashboardSubtitle = computed(() => workspace.current.value === 'EXECUTIVE' ? 'Monitor company-wide attendance, workforce exceptions, leave and overtime.' : workspace.current.value === 'HR' ? `Manage people operations across your ${scopeType.value === 'ORGANIZATION' ? 'organization' : 'unit'} scope.` : workspace.current.value === 'TEAM' ? 'Review your department attendance, leave and approval workload.' : 'Review your attendance, leave balance and work schedule.')
 const greeting = computed(() => {
   const hour = new Date().getHours()
   return hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
@@ -151,7 +150,7 @@ const shiftTimeRange = (shift?: EmployeeDashboardShift | null) => shift
       </div>
     </template>
 
-    <template v-else-if="isOrganizationOwner">
+    <template v-else-if="isExecutiveWorkspace">
       <DashboardOwnerDashboard />
     </template>
 

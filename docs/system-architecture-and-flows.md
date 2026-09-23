@@ -456,7 +456,7 @@ Derived rules worth remembering:
 | `organization_overview` | `dashboard.view_organization` |
 | `system_health` | `system.configure` |
 
-`GET /dashboard/widgets` returns the visible keys; superusers get all. Note the **UI does not currently consume `/dashboard/widgets`** — `pages/index.vue` branches on `role` directly (§8.1 A9).
+`GET /dashboard/widgets` returns the visible keys; superusers get all. The UI now uses workspace context for presentation, while this endpoint remains the permission-aware source for future widget-level composition.
 
 ### 2.7 Domain services
 
@@ -635,6 +635,7 @@ app/web
 │  ├─ layouts/default.vue             # sidebar + topbar + bottom mobile nav + nav gating
 │  ├─ middleware/auth.global.ts       # route guard (session required, public paths incl. /admin/login)
 │  ├─ composables/useAuth.ts          # shared auth state, permissions, login/logout/MFA
+│  ├─ composables/useWorkspace.ts     # permission-derived workspace availability and switching
 │  ├─ composables/useHrmsApi.ts       # typed wrapper over /api/hrms/** (+ 401 → /login)
 │  ├─ components/AuthMfaChallenge.vue # shared second-factor panel (login + admin login)
 │  ├─ components/dashboard/OwnerDashboard.vue
@@ -714,26 +715,33 @@ This means **token refresh is transparent to every page**: a 15-minute access to
 
 `useHrmsApi().request()` additionally hard-handles `401` mid-session: clears `auth-user` and redirects to `/login?redirect=<current>`, then rethrows.
 
-### 3.4 Navigation & visibility — one permission gate
+`useWorkspace()` keeps identity separate from presentation. It derives available workspaces from the permission codes returned by `/users/me`, defaults to `MY`, and changes only the `workspace` query context — it never logs the user out or creates another session. The server remains authoritative for every resource and row scope; the workspace switcher is an information-architecture aid, not an authorization boundary.
 
-`layouts/default.vue` builds `navItems`, and each item may declare `permissions` (any-of). An item is visible when it holds **at least one** of them; items with no list are self-service and visible to everyone. The former `roles` gate is gone — a role is not a visibility primitive, and every capability it used to imply now corresponds to a permission.
+### 3.4 Navigation & visibility — permission-gated workspaces
+
+`layouts/default.vue` builds a navigation set for the current workspace. A workspace is available only when the user has the permissions that make it useful, and each item may declare `permissions` (any-of). An item is visible when it holds **at least one** of them; items with no list are self-service and visible to everyone. The former `roles` gate is gone — a role is not a visibility primitive, and every capability it used to imply now corresponds to a permission.
+
+One account can move between contexts without another login:
+
+| Workspace | Audience | Typical navigation |
+|---|---|---|
+| My Workspace | Every employee, including elevated users | Personal attendance, leave, work arrangements, overtime, shifts, holidays |
+| Team Workspace | Department/team review permissions | Team dashboard, employees, attendance, approvals, team reports |
+| HR Workspace | HR operations permissions | Employees, attendance processing, leave/work-arrangement management, approvals, reports, organization |
+| Executive Workspace | `dashboard.view_organization` | Organization analytics, reports, organization overview |
+| Technical Administration | Super Admin only | Technical metrics and system administration |
 
 | Nav item | permissions (any-of) | Effective audience |
 |---|---|---|
-| Dashboard | — | everyone |
-| Employees | `employee.view` | DM, HR, OWNER |
-| Attendance | — | everyone (self-scoped by the API) |
-| Leave | — | everyone |
-| Work arrangements | — | everyone |
-| Overtime | — | everyone |
-| Approvals | `leave.approve`, `work_arrangement.approve` | DM, HR |
-| Shifts | `shift.assign`, `shift.update` | HR |
-| Holidays | — | everyone |
-| Organization | `designation.view` | HR |
-| Reports | `reports.attendance`, `reports.leave` | DM, HR, OWNER |
+| Dashboard | workspace-specific | everyone, in the active workspace |
+| Employees | `employee.view` | Team / HR / Executive where permitted |
+| Attendance, Leave, Work arrangements, Overtime, Shifts, Holidays | workspace-specific + endpoint permissions | My self-service or elevated workspace scope |
+| Approvals | `leave.approve`, `work_arrangement.approve` | Team / HR |
+| Organization | `designation.view` or workspace permission | HR / Executive |
+| Reports | `reports.attendance`, `reports.leave` | Team / HR / Executive |
 | System administration (link) | superuser only | Super Admin |
 
-Action and dialog visibility follows the same rule: `pages/attendance/index.vue` gates the correction dialog on `hasPermission('attendance.correct')` rather than on the `HR_ADMIN` role, and `pages/profile.vue` derives its display label from `business_role` + `scope_type` (so unit HR and organization HR are distinguishable). Role branching survives only where the experience itself is role-specific (`pages/index.vue`'s Owner dashboard branch).
+Action and dialog visibility follows the same rule: `pages/attendance/index.vue` gates the correction dialog on `hasPermission('attendance.correct')` rather than on the `HR_ADMIN` role, and `pages/profile.vue` derives its display label from `business_role` + `scope_type` (so unit HR and organization HR are distinguishable). Dashboard presentation now follows the active workspace (`MY`, `TEAM`, `HR`, `EXECUTIVE`, or `TECHNICAL`) rather than branching directly on a role.
 
 Super Admin gets **only** Dashboard + System administration — the business nav is replaced, because master data lives in ERP.
 
@@ -747,7 +755,7 @@ Mobile: the 4 first non-dashboard visible items become the bottom bar, plus Prof
 |---|---|---|---|
 | `pages/login.vue` | `POST /api/session/login`, `/api/session/mfa` | **workforce sign-in only** (mobile / username), password reveal, second-factor step, `redirect` honouring, inline error text; a temporary-password account is sent to `/settings?change-password=1` | links to `/admin/login` and `/forgot-password` |
 | `pages/admin/login.vue` | `POST /api/session/login` (`accountType: 'super_admin'`), `/api/session/mfa` | separate technical entry point (username only), visually distinct, MFA step with first-time enrolment | business accounts are rejected by the API |
-| `pages/index.vue` | `dashboard/metrics`, `dashboard/technical-metrics` (SA only), `dashboard/owner` via component | role-specific hero copy, 4 KPI cards, shift + today's attendance cards, pending-approvals list (managers), owner analytics branch | ignores `/dashboard/widgets` |
+| `pages/index.vue` | `dashboard/metrics`, `dashboard/technical-metrics` (SA only), `dashboard/owner` via component | workspace-specific hero copy, personal/team/HR KPI cards, shift + today's attendance cards, executive analytics branch | ignores `/dashboard/widgets` |
 | `pages/employees/index.vue` | `employees/`, `org/units`, `org/departments`, `designations/` | paginated directory, filters, activate/deactivate, delete | PATCH/DELETE endpoints **do not exist** → 405 |
 | `pages/employees/[id].vue` | `employees/{id}`, `employees/{id}/work-history` | profile, org placement, work history | — |
 | `pages/attendance/index.vue` | `attendance/employee/{id}/calendar`, `…/summary`, `attendance/corrections` | month calendar, status pie, summary tiles, correction request dialog | dialog POSTs require **HR_ADMIN**; employee submits get 403 |
@@ -1005,7 +1013,7 @@ These are verified against the current code and are the highest-value item in th
 | **A6** | Holidays create/add buttons | Hidden by `canManage = false` (correct today) — the code remains and will 405 if ever enabled | Low | Frontend lead |
 | **A7** | ~~`attendance.approve_correction` is held by nobody~~ **Fixed** | The correction surfaces now gate on `attendance.correct` (which HR holds) and the approve/reject routes were removed, so `tests/test_permission_grants.py` passes with no dead-end code | Resolved | Architecture lead |
 | **A8** | `POST /attendance/checkins` + `/checkins/bulk` are 403 stubs | Intentional (ERP supplies punches) but the punch ingestion path is therefore untested through HTTP; publishing them for ERP would be cleaner than a separate ERP route | Low/Medium | Architecture lead |
-| **A9** | Dashboard widget API is unused | `GET /dashboard/widgets` exists and is permission-aware, while `pages/index.vue` still decides its own layout from `scope_type` (plus the genuinely role-specific Owner branch) — the widget API remains the single place to consolidate that | Medium | Frontend lead |
+| **A9** | Dashboard widget API is not yet consumed | `GET /dashboard/widgets` exists and is permission-aware; workspace dashboards now provide the presentation context, while widget-level composition remains a future consolidation point | Medium | Frontend lead |
 | **A10** | Invitation UI missing | `/auth/invitation/*` + email templates exist, `middleware` lists `/invitation` and `/auth/invitation` as public, but no page/route exists and no router calls `create_invitation_for_user` | Medium | Product + Frontend lead |
 
 ### 8.2 Functional gaps (backend behaviour)
