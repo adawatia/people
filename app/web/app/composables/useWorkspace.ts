@@ -67,10 +67,21 @@ export function workspacesForUser(user: CurrentUser | null): Workspace[] {
 
   const permissions = new Set(user.permissions || [])
   const workspaces: Workspace[] = ['MY']
-  if (['attendance.view_department', 'leave.approve', 'work_arrangement.approve', 'overtime.view_department'].some(permission => permissions.has(permission)) && !permissions.has('leave.manage') && !permissions.has('dashboard.view_organization')) {
+  if (
+    ['attendance.view_department', 'leave.approve', 'work_arrangement.approve', 'overtime.view_department', 'overtime.approve'].some(permission => permissions.has(permission))
+    && !permissions.has('leave.manage')
+    && !permissions.has('dashboard.view_organization')
+  ) {
     workspaces.push('TEAM')
   }
-  if (['employee.create', 'employee.update', 'leave.manage', 'attendance.process', 'work_arrangement.manage', 'system.configure'].some(permission => permissions.has(permission))) {
+  if ([
+    'user.view', 'user.create', 'user.update', 'user.deactivate',
+    'employee.create', 'employee.update', 'employee.deactivate',
+    'designation.view', 'designation.create', 'designation.update', 'designation.delete',
+    'leave.manage', 'attendance.view', 'attendance.view_unit', 'attendance.process', 'attendance.correct',
+    'work_arrangement.manage', 'shift.assign', 'shift.update', 'system.configure', 'audit.view',
+    'salary_cost.view_unit', 'salary_cost.view_department'
+  ].some(permission => permissions.has(permission))) {
     workspaces.push('HR')
   }
   if (permissions.has('dashboard.view_organization')) workspaces.push('EXECUTIVE')

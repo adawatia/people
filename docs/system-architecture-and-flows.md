@@ -721,7 +721,7 @@ This means **token refresh is transparent to every page**: a 15-minute access to
 
 ### 3.4 Navigation & visibility — permission-gated workspaces
 
-`layouts/default.vue` builds a navigation set for the current workspace. A workspace is available only when the user has the permissions that make it useful, and each item may declare `permissions` (any-of). An item is visible when it holds **at least one** of them; items with no list are self-service and visible to everyone. The former `roles` gate is gone — a role is not a visibility primitive, and every capability it used to imply now corresponds to a permission.
+`layouts/default.vue` builds a navigation set for the current workspace. A workspace is available when the user has a permission that supports its tasks. Management navigation items declare any-of permission rules; self-service items rely on workspace membership and the route's permission guard. Keep `useWorkspace.ts` route rules and sidebar item gates aligned when adding a capability so a permitted route is not hidden from navigation. The former `roles` gate is gone — a role is not a visibility primitive, and every capability it used to imply now corresponds to a permission.
 
 One account can move between contexts without another login:
 
