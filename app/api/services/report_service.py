@@ -1,12 +1,12 @@
 import calendar
 from datetime import date
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
-from db.models import AttendanceRecord, Employee
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from db.models import AttendanceRecord
 from repositories.attendance_record_repo import AttendanceRecordRepository
 from repositories.employee_repo import EmployeeRepository
+from repositories.report_repo import ReportRepository
 from schemas.reports import (
     EmployeeAttendanceRow,
     LeaveBalanceSummaryRow,
@@ -14,7 +14,6 @@ from schemas.reports import (
     MonthlyLeaveSummaryReport,
 )
 from services.leave_service import LeaveService
-
 
 STATUS_ABBREVIATIONS = {
     "PRESENT": "P",
@@ -31,6 +30,7 @@ STATUS_ABBREVIATIONS = {
 class ReportService:
     def __init__(self, session: AsyncSession):
         self.session = session
+        self.repo = ReportRepository(session)
         self.employee_repo = EmployeeRepository(session)
         self.record_repo = AttendanceRecordRepository(session)
         self.leave_service = LeaveService(session)
@@ -41,38 +41,17 @@ class ReportService:
         month: int,
         unit_id: int | None = None,
         department_id: int | None = None,
+        page: int = 1, page_size: int = 25, search: str | None = None,
+        sort_by: str | None = None, sort_order: str = "asc",
     ) -> MonthlyAttendanceMatrixReport:
         _, last_day = calendar.monthrange(year, month)
         from_date = date(year, month, 1)
         to_date = date(year, month, last_day)
 
-        # 1. Fetch filtered employees
-        stmt = (
-            select(Employee)
-            .options(selectinload(Employee.department), selectinload(Employee.designation_rel))
-            .where(Employee.status == "ACTIVE")
-            .order_by(Employee.employee_code)
-        )
-        if unit_id is not None:
-            stmt = stmt.where(Employee.unit_id == unit_id)
-        if department_id is not None:
-            stmt = stmt.where(Employee.department_id == department_id)
-
-        employees = list((await self.session.execute(stmt)).scalars().all())
-
-        # 2. Fetch all attendance records for these dates
-        records_stmt = (
-            select(AttendanceRecord)
-            .where(
-                AttendanceRecord.attendance_date >= from_date,
-                AttendanceRecord.attendance_date <= to_date,
-            )
-        )
-        if employees:
-            emp_ids = [e.id for e in employees]
-            records_stmt = records_stmt.where(AttendanceRecord.employee_id.in_(emp_ids))
-
-        records = list((await self.session.execute(records_stmt)).scalars().all())
+        query = self.repo.employees(unit_id, department_id, search)
+        result = await self.repo.employee_page(query, page, page_size, sort_by, sort_order)
+        employees = result.pop("items")
+        records = await self.repo.attendance([emp.id for emp in employees], from_date, to_date)
 
         # Group by employee_id -> day_number -> record
         rec_by_emp: dict[int, dict[int, AttendanceRecord]] = {}
@@ -145,7 +124,7 @@ class ReportService:
             month=month,
             unit_id=unit_id,
             total_days_in_month=last_day,
-            rows=rows,
+            items=rows, **result,
         )
 
     async def get_leave_balance_summary(
@@ -153,43 +132,23 @@ class ReportService:
         year: int,
         unit_id: int | None = None,
         department_id: int | None = None,
+        page: int = 1, page_size: int = 25, search: str | None = None,
+        sort_by: str | None = None, sort_order: str = "asc",
     ) -> MonthlyLeaveSummaryReport:
-        stmt = (
-            select(Employee)
-            .options(selectinload(Employee.department))
-            .where(Employee.status == "ACTIVE")
-            .order_by(Employee.employee_code)
-        )
-        if unit_id is not None:
-            stmt = stmt.where(Employee.unit_id == unit_id)
-        if department_id is not None:
-            stmt = stmt.where(Employee.department_id == department_id)
-
-        employees = list((await self.session.execute(stmt)).scalars().all())
-
-        check_date = date(year, 12, 31)
-        rows: list[LeaveBalanceSummaryRow] = []
-
-        for emp in employees:
-            balances = await self.leave_service.get_employee_leave_balances(emp.id, for_date=check_date)
-            for b in balances:
-                rows.append(
-                    LeaveBalanceSummaryRow(
-                        employee_id=emp.id,
-                        employee_code=emp.employee_code,
-                        employee_name=f"{emp.first_name} {emp.last_name}",
-                        department_name=emp.department.name if emp.department else None,
-                        leave_type_name=b.leave_type_name,
-                        leave_type_code=b.leave_type_code,
-                        allocated=b.allocated,
-                        used=b.used,
-                        pending=b.pending,
-                        available=b.available,
-                    )
-                )
-
-        return MonthlyLeaveSummaryReport(
-            year=year,
-            unit_id=unit_id,
-            rows=rows,
-        )
+        query = self.repo.employees(unit_id, department_id, search)
+        result = await self.repo.employee_page(query, page, page_size, sort_by, sort_order)
+        employees = result.pop("items")
+        by_id = {emp.id: emp for emp in employees}
+        balances = await self.repo.balances(list(by_id), year)
+        rows = []
+        for balance in balances:
+            emp = by_id[balance.employee_id]
+            rows.append(LeaveBalanceSummaryRow(
+                employee_id=emp.id, employee_code=emp.employee_code,
+                employee_name=f"{emp.first_name} {emp.last_name or ''}".strip(),
+                department_name=emp.department.name if emp.department else None,
+                leave_type_name=balance.leave_type.name, leave_type_code=balance.leave_type.code,
+                allocated=float(balance.allocated), used=float(balance.used), pending=float(balance.pending),
+                available=max(0.0, float(balance.allocated - balance.used - balance.pending))))
+        totals = await self.repo.balance_totals(query, year)
+        return MonthlyLeaveSummaryReport(year=year, unit_id=unit_id, items=rows, breakdown=totals, **result)

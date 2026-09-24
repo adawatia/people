@@ -1,9 +1,11 @@
 <script setup lang="ts">
-/* eslint-disable better-tailwindcss/no-unknown-classes */
+import type { PaginatedResponse } from '#shared/types/pagination'
+
 import type { LeaveApplication } from '#shared/types/leave'
 import type { WorkArrangement } from '#shared/types/work-arrangement'
+import type { OvertimePage, OvertimeRecord } from '#shared/types/overtime'
 
-type ApprovalTab = 'leave' | 'work'
+type ApprovalTab = 'leave' | 'work' | 'overtime'
 
 useSeoMeta({ title: 'Approvals' })
 const api = useHrmsApi()
@@ -12,29 +14,31 @@ const toast = useToast()
 const canLeave = computed(() => auth.hasPermission('leave.approve'))
 const canRejectLeave = computed(() => auth.hasPermission('leave.reject'))
 const canWork = computed(() => auth.hasPermission('work_arrangement.approve'))
-const activeTab = ref<ApprovalTab>(canLeave.value ? 'leave' : 'work')
+const canOvertime = computed(() => auth.hasPermission('overtime.approve'))
+const activeTab = ref<ApprovalTab>(canLeave.value ? 'leave' : canWork.value ? 'work' : 'overtime')
 const actionKey = ref('')
 const leaveReject = ref<LeaveApplication | null>(null)
 const workReject = ref<WorkArrangement | null>(null)
+const overtimeReject = ref<OvertimeRecord | null>(null)
 const rejectionReason = ref('')
-
-const leaveQueue = useAsyncData('leave-approval-queue', async () => {
-  if (!canLeave.value) return []
-  const [applications, cancellations] = await Promise.all([
-    api.request<LeaveApplication[]>('leaves/', { query: { status: 'PENDING' } }),
-    api.request<LeaveApplication[]>('leaves/', { query: { status: 'CANCELLATION_PENDING' } })
-  ])
-  return [...applications, ...cancellations]
-})
-
-const workQueue = useAsyncData('work-arrangement-approval-queue', async () => {
-  if (!canWork.value) return []
-  return await api.request<WorkArrangement[]>('work-arrangements/', { query: { status: 'PENDING' } })
-})
-
-const totalWaiting = computed(() => (leaveQueue.data.value?.length || 0) + (workQueue.data.value?.length || 0))
-const activePending = computed(() => activeTab.value === 'leave' ? leaveQueue.pending.value : workQueue.pending.value)
-const activeError = computed(() => activeTab.value === 'leave' ? leaveQueue.error.value : workQueue.error.value)
+const leaveList = useListState({}, 'leave_')
+const workList = useListState({}, 'work_')
+const overtimeList = useListState({}, 'overtime_')
+const leaveQueue = useAsyncData('leave-approval-queue', async (_app, { signal }) => {
+  if (!canLeave.value) return null
+  return api.request<PaginatedResponse<LeaveApplication>>('leaves/', { signal, query: { ...leaveList.query.value, status: 'PENDING,CANCELLATION_PENDING' } })
+}, { watch: [leaveList.query] })
+const workQueue = useAsyncData('work-arrangement-approval-queue', async (_app, { signal }) => {
+  if (!canWork.value) return null
+  return api.request<PaginatedResponse<WorkArrangement>>('work-arrangements/', { signal, query: { ...workList.query.value, status: 'PENDING' } })
+}, { watch: [workList.query] })
+const overtimeQueue = useAsyncData('overtime-approval-queue', async (_app, { signal }) => {
+  if (!canOvertime.value) return null
+  return api.request<OvertimePage>('overtime/', { signal, query: { ...overtimeList.query.value, status: 'PENDING' } })
+}, { watch: [overtimeList.query] })
+const totalWaiting = computed(() => (leaveQueue.data.value?.total || 0) + (workQueue.data.value?.total || 0) + (overtimeQueue.data.value?.total || 0))
+const activePending = computed(() => activeTab.value === 'leave' ? leaveQueue.pending.value : activeTab.value === 'work' ? workQueue.pending.value : overtimeQueue.pending.value)
+const activeError = computed(() => activeTab.value === 'leave' ? leaveQueue.error.value : activeTab.value === 'work' ? workQueue.error.value : overtimeQueue.error.value)
 
 function formatDate(value?: string | null) {
   if (!value) return 'Unknown date'
@@ -77,35 +81,55 @@ async function approveWork(item: WorkArrangement) {
     await workQueue.refresh()
   } catch (error) {
     toast.add({ title: 'Approval failed', description: requestError(error, 'Please try again.'), color: 'error' })
-  } finally { actionKey.value = '' }
+  } finally {
+    actionKey.value = ''
+  }
 }
 
-function startReject(item: LeaveApplication | WorkArrangement, type: ApprovalTab) {
+async function approveOvertime(item: OvertimeRecord) {
+  actionKey.value = `overtime-${item.id}`
+  try {
+    await api.request(`overtime/${item.id}/approve`, { method: 'PATCH', body: { approved_minutes: item.calculated_minutes } })
+    toast.add({ title: 'Overtime approved', description: `${item.calculated_minutes} minutes approved.`, color: 'success', icon: 'i-lucide-circle-check' })
+    await overtimeQueue.refresh()
+  } catch (error) {
+    toast.add({ title: 'Approval failed', description: requestError(error, 'Please try again.'), color: 'error' })
+  } finally {
+    actionKey.value = ''
+  }
+}
+
+function startReject(item: LeaveApplication | WorkArrangement | OvertimeRecord, type: ApprovalTab) {
   rejectionReason.value = ''
   if (type === 'leave') leaveReject.value = item as LeaveApplication
-  else workReject.value = item as WorkArrangement
+  else if (type === 'work') workReject.value = item as WorkArrangement
+  else overtimeReject.value = item as OvertimeRecord
 }
 
 function closeReject() {
   leaveReject.value = null
   workReject.value = null
+  overtimeReject.value = null
   rejectionReason.value = ''
 }
 
 async function rejectRequest() {
   if (rejectionReason.value.trim().length < 3) return
-  const type: ApprovalTab = leaveReject.value ? 'leave' : 'work'
-  const item = leaveReject.value || workReject.value
+  const type: ApprovalTab = leaveReject.value ? 'leave' : workReject.value ? 'work' : 'overtime'
+  const item = leaveReject.value || workReject.value || overtimeReject.value
   if (!item) return
   actionKey.value = `${type}-${item.id}`
   try {
     const path = type === 'leave'
       ? `leaves/${item.id}${(item as LeaveApplication).status === 'CANCELLATION_PENDING' ? '/cancellation/reject' : '/reject'}`
-      : `work-arrangements/${item.id}/reject`
-    await api.request(path, { method: 'PATCH', body: { rejection_reason: rejectionReason.value.trim() } })
-    toast.add({ title: type === 'leave' ? 'Leave rejected' : 'Work arrangement rejected', color: 'neutral', icon: 'i-lucide-circle-x' })
+      : type === 'work' ? `work-arrangements/${item.id}/reject` : `overtime/${item.id}/reject`
+    const body = type === 'overtime'
+      ? { remarks: rejectionReason.value.trim() }
+      : { rejection_reason: rejectionReason.value.trim() }
+    await api.request(path, { method: 'PATCH', body })
+    toast.add({ title: type === 'leave' ? 'Leave rejected' : type === 'work' ? 'Work arrangement rejected' : 'Overtime rejected', color: 'neutral', icon: 'i-lucide-circle-x' })
     closeReject()
-    await (type === 'leave' ? leaveQueue.refresh() : workQueue.refresh())
+    await (type === 'leave' ? leaveQueue.refresh() : type === 'work' ? workQueue.refresh() : overtimeQueue.refresh())
   } catch (error) {
     toast.add({ title: 'Rejection failed', description: requestError(error, 'Please try again.'), color: 'error' })
   } finally {
@@ -142,7 +166,7 @@ async function rejectRequest() {
         :class="activeTab === 'leave' ? 'border-primary text-primary' : 'border-transparent text-muted'"
         @click="activeTab = 'leave'"
       >
-        <UIcon name="i-lucide-calendar-days" />Leave<span class="rounded-full bg-primary/10 px-2 py-0.5 text-xs">{{ leaveQueue.data.value?.length || 0 }}</span>
+        <UIcon name="i-lucide-calendar-days" />Leave<span class="rounded-full bg-primary/10 px-2 py-0.5 text-xs">{{ leaveQueue.data.value?.total || 0 }}</span>
       </button>
       <button
         v-if="canWork"
@@ -151,12 +175,46 @@ async function rejectRequest() {
         :class="activeTab === 'work' ? 'border-primary text-primary' : 'border-transparent text-muted'"
         @click="activeTab = 'work'"
       >
-        <UIcon name="i-lucide-briefcase-business" />Work arrangements<span class="rounded-full bg-primary/10 px-2 py-0.5 text-xs">{{ workQueue.data.value?.length || 0 }}</span>
+        <UIcon name="i-lucide-briefcase-business" />Work arrangements<span class="rounded-full bg-primary/10 px-2 py-0.5 text-xs">{{ workQueue.data.value?.total || 0 }}</span>
+      </button>
+      <button
+        v-if="canOvertime"
+        type="button"
+        class="flex min-h-11 shrink-0 items-center gap-2 border-b-2 px-3 text-sm font-semibold"
+        :class="activeTab === 'overtime' ? 'border-primary text-primary' : 'border-transparent text-muted'"
+        @click="activeTab = 'overtime'"
+      >
+        <UIcon name="i-lucide-timer" />Overtime<span class="rounded-full bg-primary/10 px-2 py-0.5 text-xs">{{ overtimeQueue.data.value?.total || 0 }}</span>
       </button>
     </div>
 
+    <ListControls
+      v-if="activeTab === 'leave'"
+      v-model:search="leaveList.search.value"
+      :active="leaveList.active.value"
+      label="Filter leave approvals"
+      search-placeholder="Search employee name or code"
+      @clear="leaveList.clear"
+    />
+    <ListControls
+      v-else-if="activeTab === 'work'"
+      v-model:search="workList.search.value"
+      :active="workList.active.value"
+      label="Filter work arrangement approvals"
+      search-placeholder="Search employee name or code"
+      @clear="workList.clear"
+    />
+    <ListControls
+      v-else-if="activeTab === 'overtime'"
+      v-model:search="overtimeList.search.value"
+      :active="overtimeList.active.value"
+      label="Filter overtime approvals"
+      search-placeholder="Search employee name or code"
+      @clear="overtimeList.clear"
+    />
+
     <UAlert
-      v-if="!canLeave && !canWork"
+      v-if="!canLeave && !canWork && !canOvertime"
       class="mt-6"
       color="warning"
       variant="soft"
@@ -172,7 +230,7 @@ async function rejectRequest() {
       icon="i-lucide-coffee"
       title="Your approval queue is taking a short break"
       description="We couldn’t refresh pending requests right now. Please try again in a moment."
-      :actions="[{ label: 'Refresh approvals', onClick: () => activeTab === 'leave' ? leaveQueue.refresh() : workQueue.refresh() }]"
+      :actions="[{ label: 'Refresh approvals', onClick: () => activeTab === 'leave' ? leaveQueue.refresh() : activeTab === 'work' ? workQueue.refresh() : overtimeQueue.refresh() }]"
     />
 
     <div
@@ -189,11 +247,11 @@ async function rejectRequest() {
     </div>
 
     <div
-      v-else-if="activeTab === 'leave' && leaveQueue.data.value?.length"
+      v-else-if="activeTab === 'leave' && leaveQueue.data.value?.total"
       class="mt-6 grid gap-4 xl:grid-cols-2"
     >
       <article
-        v-for="item in leaveQueue.data.value"
+        v-for="item in leaveQueue.data.value?.items"
         :key="item.id"
         class="people-card overflow-hidden"
       >
@@ -268,11 +326,11 @@ async function rejectRequest() {
     </div>
 
     <div
-      v-else-if="activeTab === 'work' && workQueue.data.value?.length"
+      v-else-if="activeTab === 'work' && workQueue.data.value?.total"
       class="mt-6 grid gap-4 xl:grid-cols-2"
     >
       <article
-        v-for="item in workQueue.data.value"
+        v-for="item in workQueue.data.value?.items"
         :key="item.id"
         class="people-card overflow-hidden"
       >
@@ -337,8 +395,77 @@ async function rejectRequest() {
       </article>
     </div>
 
+    <section
+      v-else-if="activeTab === 'overtime' && overtimeQueue.data.value?.items.length"
+      class="mt-6 grid gap-4 xl:grid-cols-2"
+    >
+      <article
+        v-for="item in overtimeQueue.data.value.items"
+        :key="item.id"
+        class="people-card overflow-hidden"
+      >
+        <div class="flex items-start gap-4 border-b border-[var(--people-border)] p-5 sm:p-6">
+          <span class="grid size-11 shrink-0 place-items-center rounded-2xl bg-[var(--people-yellow)]"><UIcon
+            name="i-lucide-timer"
+            class="size-5"
+          /></span>
+          <div class="min-w-0 flex-1">
+            <h3 class="font-semibold">
+              {{ item.employee_name || `Employee #${item.employee_id}` }}
+            </h3>
+            <p class="mt-1 text-sm text-muted">
+              {{ item.employee_code }} · {{ item.attendance_date }}
+            </p>
+          </div>
+          <UBadge
+            label="Pending"
+            color="warning"
+            variant="soft"
+          />
+        </div>
+        <div class="p-5 sm:p-6">
+          <div class="grid gap-3 rounded-2xl bg-muted/5 p-4 sm:grid-cols-2">
+            <div>
+              <p class="text-xs font-semibold uppercase tracking-wide text-muted">
+                Calculated overtime
+              </p>
+              <p class="mt-2 text-sm font-semibold">
+                {{ item.calculated_minutes }} minutes
+              </p>
+            </div>
+            <div v-if="item.overtime_start || item.overtime_end">
+              <p class="text-xs font-semibold uppercase tracking-wide text-muted">
+                Time window
+              </p>
+              <p class="mt-2 text-sm font-semibold">
+                {{ item.overtime_start || '—' }} – {{ item.overtime_end || '—' }}
+              </p>
+            </div>
+          </div>
+          <div class="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+            <UButton
+              color="neutral"
+              variant="soft"
+              icon="i-lucide-x"
+              @click="startReject(item, 'overtime')"
+            >
+              Reject
+            </UButton>
+            <UButton
+              icon="i-lucide-check"
+              :loading="actionKey === `overtime-${item.id}`"
+              :disabled="item.calculated_minutes <= 0"
+              @click="approveOvertime(item)"
+            >
+              {{ item.calculated_minutes > 0 ? `Approve ${item.calculated_minutes} minutes` : 'No minutes to approve' }}
+            </UButton>
+          </div>
+        </div>
+      </article>
+    </section>
+
     <div
-      v-else-if="!activeError && (canLeave || canWork)"
+      v-else-if="!activeError && (canLeave || canWork || canOvertime)"
       class="people-card mt-6 flex flex-col items-center px-6 py-16 text-center"
     >
       <span class="grid size-14 place-items-center rounded-2xl bg-[var(--people-mint)]"><UIcon
@@ -351,58 +478,85 @@ async function rejectRequest() {
       </p>
     </div>
 
-    <div
-      v-if="leaveReject || workReject"
-      class="fixed inset-0 z-[70] flex items-end justify-center bg-slate-950/40 backdrop-blur-[2px] sm:items-center sm:p-6"
-      @click.self="closeReject"
+    <UModal
+      :open="!!(leaveReject || workReject || overtimeReject)"
+      title="Reject request"
+      description="Give a clear reason for rejecting this request."
+      @update:open="value => { if (!value) closeReject() }"
     >
-      <section class="w-full max-w-lg rounded-t-3xl bg-[var(--people-surface)] p-6 shadow-2xl sm:rounded-2xl sm:p-7">
-        <div class="flex items-start justify-between gap-4">
-          <div>
-            <p class="text-sm font-semibold text-rose-600">
-              Reject {{ leaveReject ? 'leave request' : 'work arrangement' }}
-            </p><h3 class="mt-1 text-xl font-semibold">
-              Add a clear reason
-            </h3>
-          </div><UButton
-            icon="i-lucide-x"
-            color="neutral"
-            variant="ghost"
-            aria-label="Close"
-            @click="closeReject"
-          />
-        </div><p class="mt-4 text-sm leading-6 text-muted">
-          The employee will see this explanation with the rejected request.
-        </p><UFormField
-          class="mt-5"
-          label="Rejection reason"
-          required
-        >
-          <UTextarea
-            v-model="rejectionReason"
-            class="w-full"
-            :rows="4"
-            placeholder="Explain why this request cannot be approved."
-            autofocus
-          />
-        </UFormField><div class="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-          <UButton
-            color="neutral"
-            variant="soft"
-            @click="closeReject"
+      <template #body>
+        <section class="w-full max-w-lg rounded-t-3xl bg-[var(--people-surface)] p-6 shadow-2xl sm:rounded-2xl sm:p-7">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <p class="text-sm font-semibold text-rose-600">
+                Reject {{ leaveReject ? 'leave request' : workReject ? 'work arrangement' : 'overtime request' }}
+              </p><h3 class="mt-1 text-xl font-semibold">
+                Add a clear reason
+              </h3>
+            </div><UButton
+              icon="i-lucide-x"
+              color="neutral"
+              variant="ghost"
+              aria-label="Close"
+              @click="closeReject"
+            />
+          </div><p class="mt-4 text-sm leading-6 text-muted">
+            The employee will see this explanation with the rejected request.
+          </p><UFormField
+            class="mt-5"
+            label="Rejection reason"
+            required
           >
-            Cancel
-          </UButton><UButton
-            color="error"
-            icon="i-lucide-circle-x"
-            :loading="Boolean(actionKey)"
-            :disabled="rejectionReason.trim().length < 3"
-            @click="rejectRequest"
-          >
-            Reject request
-          </UButton>
-        </div>
-      </section>
-    </div>
+            <UTextarea
+              v-model="rejectionReason"
+              class="w-full"
+              :rows="4"
+              placeholder="Explain why this request cannot be approved."
+              autofocus
+            />
+          </UFormField><div class="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+            <UButton
+              color="neutral"
+              variant="soft"
+              @click="closeReject"
+            >
+              Cancel
+            </UButton><UButton
+              color="error"
+              icon="i-lucide-circle-x"
+              :loading="Boolean(actionKey)"
+              :disabled="rejectionReason.trim().length < 3"
+              @click="rejectRequest"
+            >
+              Reject request
+            </UButton>
+          </div>
+        </section>
+      </template>
+    </UModal>
+    <ListPagination
+      v-if="activeTab === 'leave' && leaveQueue.data.value"
+      v-model:page="leaveList.page.value"
+      v-model:page-size="leaveList.pageSize.value"
+      :total="leaveQueue.data.value?.total || 0"
+      :total-pages="leaveQueue.data.value?.total_pages"
+      :loading="leaveQueue.pending.value"
+    />
+    <ListPagination
+      v-if="activeTab === 'work' && workQueue.data.value"
+      v-model:page="workList.page.value"
+      v-model:page-size="workList.pageSize.value"
+      :total="workQueue.data.value?.total || 0"
+      :total-pages="workQueue.data.value?.total_pages"
+      :loading="workQueue.pending.value"
+    />
+    <ListPagination
+      v-if="activeTab === 'overtime' && overtimeQueue.data.value"
+      v-model:page="overtimeList.page.value"
+      v-model:page-size="overtimeList.pageSize.value"
+      :total="overtimeQueue.data.value?.total || 0"
+      :total-pages="overtimeQueue.data.value?.total_pages"
+      :loading="overtimeQueue.pending.value"
+    />
   </div>
 </template>

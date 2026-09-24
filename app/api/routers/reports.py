@@ -41,6 +41,11 @@ async def _scoped_report_filters(
 @router.get("/attendance-matrix", response_model=MonthlyAttendanceMatrixReport)
 async def get_monthly_attendance_matrix(
     year: int = Query(..., ge=2000, le=2100),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100),
+    search: str | None = None,
+    sort_by: str | None = None,
+    sort_order: str = Query("asc", pattern="^(asc|desc)$"),
     month: int = Query(..., ge=1, le=12),
     unit_id: int | None = Query(None),
     department_id: int | None = Query(None),
@@ -51,7 +56,7 @@ async def get_monthly_attendance_matrix(
     unit_id, department_id = await _scoped_report_filters(_, session, unit_id, department_id)
     service = ReportService(session)
     return await service.get_monthly_attendance_matrix(
-        year=year,
+        year=year, page=page, page_size=page_size, search=search, sort_by=sort_by, sort_order=sort_order,
         month=month,
         unit_id=unit_id,
         department_id=department_id,
@@ -61,6 +66,11 @@ async def get_monthly_attendance_matrix(
 @router.get("/leave-summary", response_model=MonthlyLeaveSummaryReport)
 async def get_leave_summary_report(
     year: int = Query(..., ge=2000, le=2100),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100),
+    search: str | None = None,
+    sort_by: str | None = None,
+    sort_order: str = Query("asc", pattern="^(asc|desc)$"),
     unit_id: int | None = Query(None),
     department_id: int | None = Query(None),
     _: User = Depends(require_permission("reports.leave")),
@@ -70,7 +80,7 @@ async def get_leave_summary_report(
     unit_id, department_id = await _scoped_report_filters(_, session, unit_id, department_id)
     service = ReportService(session)
     return await service.get_leave_balance_summary(
-        year=year,
+        year=year, page=page, page_size=page_size, search=search, sort_by=sort_by, sort_order=sort_order,
         unit_id=unit_id,
         department_id=department_id,
     )

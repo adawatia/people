@@ -100,11 +100,55 @@ class MfaEnrollmentResponse(BaseModel):
 
     secret: str
     otpauth_uri: str = Field(..., description="otpauth:// URI to render as a QR code")
-    recovery_codes: list[str] = Field(..., description="Single-use codes, shown only once")
+    recovery_codes: list[str] = Field(
+        ...,
+        description=(
+            "Single-use codes, shown only once. Empty when replacing an existing "
+            "authenticator: the current codes stay valid until explicitly "
+            "regenerated, so an abandoned replacement cannot invalidate them."
+        ),
+    )
+    replacing_existing: bool = Field(
+        default=False,
+        description="True when an active authenticator keeps working until this one is confirmed",
+    )
+
+
+class MfaRecoveryCodesResponse(BaseModel):
+    """A freshly issued set of single-use recovery codes (shown only once)."""
+
+    recovery_codes: list[str]
+    recovery_codes_remaining: int
 
 
 class MfaStatusResponse(BaseModel):
+    """Enrolment state. Never includes the secret, its URI or the codes."""
+
     enabled: bool
     enrolled_at: datetime | None = None
     last_verified_at: datetime | None = None
     recovery_codes_remaining: int = 0
+    replacement_pending: bool = Field(
+        default=False,
+        description="A replacement authenticator has been issued but not yet confirmed",
+    )
+
+
+class PasswordRecoveryStartRequest(BaseModel):
+    identity: str = Field(..., min_length=1, max_length=120)
+
+
+class PasswordRecoveryStartResponse(BaseModel):
+    message: str
+    recovery_token: str
+    expires_in: int
+
+
+class PasswordRecoveryVerifyRequest(BaseModel):
+    recovery_token: str = Field(..., min_length=16)
+    code: str = Field(..., min_length=4, max_length=32)
+
+
+class PasswordRecoveryResetRequest(BaseModel):
+    reset_token: str = Field(..., min_length=16)
+    new_password: str = Field(..., min_length=12)

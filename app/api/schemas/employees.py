@@ -1,7 +1,9 @@
 from datetime import date, datetime
-from decimal import Decimal
 from typing import Literal
-from pydantic import BaseModel, ConfigDict, EmailStr
+
+from pydantic import BaseModel, ConfigDict
+
+from core.pagination import PaginatedResponse
 
 # Elevated business roles (``Employee.role`` remains the compatibility mirror of
 # this value; "EMPLOYEE" means "no elevation").
@@ -254,9 +256,5 @@ class EmployeeRead(EmployeeBase):
     }})
 
 
-class PaginatedEmployeesResponse(BaseModel):
-    items: list[EmployeeDirectoryRead]
-    total: int
-    page: int
-    page_size: int
-    total_pages: int
+class PaginatedEmployeesResponse(PaginatedResponse[EmployeeDirectoryRead]):
+    pass

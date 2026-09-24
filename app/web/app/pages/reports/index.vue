@@ -1,15 +1,43 @@
 <script setup lang="ts">
+const chartTheme = useChartTheme()
 /* eslint-disable better-tailwindcss/no-unknown-classes, @stylistic/max-statements-per-line */
 import type { AttendanceMatrix, LeaveSummary } from '#shared/types/report'
 
 useSeoMeta({ title: 'Reports' })
-const api = useHrmsApi(); const auth = useAuth(); const tab = ref<'attendance' | 'leave'>(auth.hasPermission('reports.attendance') ? 'attendance' : 'leave'); const month = ref(new Date().toISOString().slice(0, 7)); const year = ref(new Date().getFullYear())
-const { data, pending, error, refresh } = await useAsyncData('reports', async () => { if (tab.value === 'attendance') { const [y, m] = month.value.split('-').map(Number); return { attendance: await api.request<AttendanceMatrix>('reports/attendance-matrix', { query: { year: y, month: m } }), leave: null } } return { attendance: null, leave: await api.request<LeaveSummary>('reports/leave-summary', { query: { year: year.value } }) } }, { watch: [tab, month, year] })
+const api = useHrmsApi()
+const list = useListState({ sort_order: 'asc' })
+const auth = useAuth()
+const tab = ref<'attendance' | 'leave'>(auth.hasPermission('reports.attendance') ? 'attendance' : 'leave')
+const month = list.field('month', new Date().toISOString().slice(0, 7))
+const year = computed({
+  get: () => Number(list.field('year', String(new Date().getFullYear())).value),
+  set: value => { void list.update({ year: value }) }
+})
+const { data, pending, error, refresh } = await useAsyncData('reports', async () => {
+  if (tab.value === 'attendance') {
+    const [yearValue, monthValue] = month.value.split('-').map(Number)
+    return {
+      attendance: await api.request<AttendanceMatrix>('reports/attendance-matrix', {
+        query: { ...list.query.value, year: yearValue, month: monthValue }
+      }),
+      leave: null
+    }
+  }
+  return {
+    attendance: null,
+    leave: await api.request<LeaveSummary>('reports/leave-summary', {
+      query: { ...list.query.value, year: year.value }
+    })
+  }
+}, { watch: [tab, month, year, list.query] })
+watch([tab, month, year], () => {
+  list.page.value = 1
+})
 const days = computed(() => Array.from({ length: data.value?.attendance?.total_days_in_month || 0 }, (_, index) => index + 1))
 const statusClass = (value?: string) => ({ P: 'bg-emerald-100 text-emerald-800', A: 'bg-rose-100 text-rose-800', L: 'bg-violet-100 text-violet-800', HD: 'bg-amber-100 text-amber-800', WFH: 'bg-sky-100 text-sky-800', WO: 'bg-slate-100 text-slate-600', H: 'bg-orange-100 text-orange-800' }[value || ''] || 'text-muted')
 const leaveChartOption = computed<ECOption>(() => {
   const totals = new Map<string, { allocated: number, used: number, pending: number }>()
-  for (const row of data.value?.leave?.rows || []) {
+  for (const row of data.value?.leave?.breakdown || []) {
     const current = totals.get(row.leave_type_name) || { allocated: 0, used: 0, pending: 0 }
     current.allocated += row.allocated
     current.used += row.used
@@ -24,7 +52,7 @@ const leaveChartOption = computed<ECOption>(() => {
     xAxis: { type: 'category', data: types, axisLabel: { interval: 0, rotate: types.length > 4 ? 25 : 0 } },
     yAxis: { type: 'value', name: 'Days' },
     series: [
-      { name: 'Allocated', type: 'bar', data: types.map(type => totals.get(type)?.allocated || 0), itemStyle: { color: '#6366f1' } },
+      { name: 'Allocated', type: 'bar', data: types.map(type => totals.get(type)?.allocated || 0), itemStyle: { color: '#2563eb' } },
       { name: 'Used', type: 'bar', data: types.map(type => totals.get(type)?.used || 0), itemStyle: { color: '#10b981' } },
       { name: 'Pending', type: 'bar', data: types.map(type => totals.get(type)?.pending || 0), itemStyle: { color: '#f59e0b' } }
     ]
@@ -72,7 +100,17 @@ const leaveChartOption = computed<ECOption>(() => {
       >
         Leave summary
       </button>
-    </div><UAlert
+    </div>
+    <ListControls
+      v-model:search="list.search.value"
+      v-model:sort-by="list.sortBy.value"
+      v-model:sort-order="list.sortOrder.value"
+      :active="list.active.value"
+      :sorts="[{ label: 'Employee code', value: 'employee_code' }, { label: 'Name', value: 'name' }]"
+      search-placeholder="Search employee name or code"
+      @clear="list.clear"
+    />
+    <UAlert
       v-if="error"
       class="mt-5"
       color="error"
@@ -110,7 +148,7 @@ const leaveChartOption = computed<ECOption>(() => {
             </tr>
           </thead><tbody class="divide-y divide-[var(--people-border)]">
             <tr
-              v-for="row in data?.attendance?.rows"
+              v-for="row in data?.attendance?.items"
               :key="row.employee_id"
             >
               <td class="sticky left-0 bg-[var(--people-surface)] px-5 py-3 text-left">
@@ -151,7 +189,7 @@ const leaveChartOption = computed<ECOption>(() => {
           Totals by leave type for {{ year }}. The detailed balances remain available below.
         </p>
         <ClientOnly>
-          <VChart
+          <VChart :theme="chartTheme"
             class="mt-4 h-72 w-full"
             :option="leaveChartOption"
             autoresize
@@ -182,7 +220,7 @@ const leaveChartOption = computed<ECOption>(() => {
             </tr>
           </thead><tbody class="divide-y divide-[var(--people-border)]">
             <tr
-              v-for="row in data?.leave?.rows"
+              v-for="row in data?.leave?.items"
               :key="`${row.employee_id}-${row.leave_type_code}`"
             >
               <td class="px-6 py-4">
@@ -207,7 +245,7 @@ const leaveChartOption = computed<ECOption>(() => {
         </table>
       </div><div class="divide-y divide-[var(--people-border)] sm:hidden">
         <article
-          v-for="row in data?.leave?.rows"
+          v-for="row in data?.leave?.items"
           :key="`${row.employee_id}-${row.leave_type_code}`"
           class="p-5"
         >
@@ -227,5 +265,6 @@ const leaveChartOption = computed<ECOption>(() => {
         </article>
       </div>
     </section>
+    <ListPagination v-if="(data?.attendance || data?.leave)" v-model:page="list.page.value" v-model:page-size="list.pageSize.value" :total="(data?.attendance || data?.leave)?.total || 0" :total-pages="(data?.attendance || data?.leave)?.total_pages" :loading="pending" label="employees" />
   </div>
 </template>

@@ -5,9 +5,12 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
-    "aiosqlite>=0.22.1",
     "alembic>=1.19.1",
     "asyncpg>=0.31.0",
+    # AES-256-GCM for TOTP secrets at rest (core/secret_box.py). Declared
+    # explicitly rather than relied on as a transitive dependency: this one
+    # protects a second factor, so it must not disappear in a lockfile refresh.
+    "cryptography>=44.0",
     "fastapi-users[sqlalchemy]>=15.0.5",
     "fastapi[standard]>=0.141.1",
     "psycopg[binary]>=3.3.4",
@@ -45,3 +48,9 @@ line-length = 120
 
 [tool.ruff.lint]
 ignore = ["B008", "BLE001", "UP046", "RUF012", "S110", "F841", "SIM102", "RUF059"]
+
+# These fixtures intentionally exercise legacy naive punch timestamps.
+[tool.ruff.lint.per-file-ignores]
+"tests/test_milestone_2.py" = ["DTZ001"]
+"tests/test_milestone_3.py" = ["DTZ001"]
+"tests/test_milestone_6.py" = ["DTZ001"]

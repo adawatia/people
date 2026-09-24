@@ -78,6 +78,7 @@ def test_organization_owner_has_analytics_but_no_operational_approval_permission
 def test_login_invalid_user_does_not_crash():
     """Ensure non-existent user login returns 400 and does NOT crash with 500 UnknownHashError."""
     from fastapi.testclient import TestClient
+
     from main import app
 
     client = TestClient(app)
@@ -92,6 +93,7 @@ def test_login_invalid_user_does_not_crash():
 def test_cors_preflight_allows_expo_web_origin():
     """Ensure OPTIONS preflight from Expo Web (localhost:8081) succeeds with 200."""
     from fastapi.testclient import TestClient
+
     from main import app
 
     client = TestClient(app)

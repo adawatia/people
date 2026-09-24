@@ -4,7 +4,8 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from db.models import Shift, ShiftAssignment, now_ist
+from core.pagination import employee_search, ordered, paginate
+from db.models import Employee, Shift, ShiftAssignment, now_ist
 
 
 class ShiftRepository:
@@ -191,3 +192,54 @@ class ShiftRepository:
         if status is not None:
             stmt = stmt.where(ShiftAssignment.status == status.upper())
         return list((await self.session.execute(stmt)).scalars().all())
+
+    async def assignments_page(self, scope, page=1, page_size=25, search=None,
+                               sort_by=None, sort_order="desc", employee_id=None, shift_id=None, status=None):
+        ids = select(Employee.id)
+        if not scope.organization:
+            ids = ids.where(or_(Employee.id.in_(scope.employee_ids), Employee.unit_id.in_(scope.unit_ids),
+                                Employee.department_id.in_(scope.department_ids)))
+        ids = employee_search(ids, Employee, search)
+        query = select(ShiftAssignment).where(ShiftAssignment.employee_id.in_(ids))
+        for column, value in [(ShiftAssignment.employee_id, employee_id), (ShiftAssignment.shift_id, shift_id),
+                              (ShiftAssignment.status, status)]:
+            if value is not None:
+                query = query.where(column == value)
+        query = ordered(query, {"effective_from": ShiftAssignment.effective_from, "status": ShiftAssignment.status},
+                        sort_by, sort_order, "effective_from", ShiftAssignment.id)
+        return await paginate(self.session, query, page, page_size)
+
+    async def definitions_page(
+        self,
+        employee_id=None,
+        unit_id=None,
+        is_active=True,
+        page=1,
+        page_size=25,
+        search=None,
+        sort_by=None,
+        sort_order="asc",
+    ):
+        query = select(Shift)
+        if employee_id is not None:
+            today = now_ist().date()
+            assigned = select(ShiftAssignment.shift_id).where(
+                ShiftAssignment.employee_id == employee_id, ShiftAssignment.status == "ACTIVE",
+                ShiftAssignment.effective_from <= today + timedelta(days=14),
+                or_(ShiftAssignment.effective_to.is_(None), ShiftAssignment.effective_to >= today))
+            query = query.where(Shift.id.in_(assigned))
+        elif unit_id is not None:
+            query = query.where(or_(Shift.unit_id == unit_id, Shift.unit_id.is_(None)))
+        if is_active is not None:
+            query = query.where(Shift.is_active == is_active)
+        if search:
+            query = query.where(Shift.name.icontains(search.strip(), autoescape=True))
+        query = ordered(
+            query,
+            {"name": Shift.name, "code": Shift.code, "start_time": Shift.start_time, "id": Shift.id},
+            sort_by,
+            sort_order,
+            "name",
+            Shift.id,
+        )
+        return await paginate(self.session, query, page, page_size)

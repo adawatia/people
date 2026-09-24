@@ -4,9 +4,8 @@ from typing import Literal
 from fastapi_users.schemas import BaseUser, BaseUserCreate, BaseUserUpdate
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from core.pagination import PaginatedResponse
 from core.mobile import normalize_indian_mobile
-
+from core.pagination import PaginatedResponse
 
 # User schemas. Business role and scope are ERP-owned fields on Employee.
 

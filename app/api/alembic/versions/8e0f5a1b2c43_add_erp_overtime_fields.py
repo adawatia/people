@@ -1,7 +1,8 @@
 """add ERP overtime synchronization fields"""
 
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 revision = "8e0f5a1b2c43"
 down_revision = "7d9e4f0a2b31"

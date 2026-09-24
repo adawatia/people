@@ -3,6 +3,8 @@ from functools import lru_cache
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from core.secret_box import DEVELOPMENT_KEY as DEVELOPMENT_MFA_KEY
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -98,6 +100,16 @@ class Settings(BaseSettings):
     mfa_required_for_super_admin: bool = Field(default=False, alias="MFA_REQUIRED_FOR_SUPER_ADMIN")
     mfa_issuer: str = Field(default="People HRMS", alias="MFA_ISSUER")
     mfa_challenge_ttl_seconds: int = Field(default=300, ge=60, le=900, alias="MFA_CHALLENGE_TTL_SECONDS")
+    password_recovery_ttl_seconds: int = Field(default=600, ge=60, le=1800, alias="PASSWORD_RECOVERY_TTL_SECONDS")
+    mfa_pending_ttl_seconds: int = Field(default=900, ge=60, le=86400, alias="MFA_PENDING_TTL_SECONDS")
+    # AES-256 key protecting TOTP seeds at rest (base64).  This key must live
+    # outside the database - a dump that also contains the key protects nothing -
+    # and it is separate from the JWT key on purpose: rotating a signing key, or
+    # configuring MFA on a deployment that signs with a different secret, must
+    # not destroy every enrolled authenticator.  Empty means "not set" and falls
+    # back to the development key, so a copied .env.example behaves exactly like
+    # an absent variable instead of silently failing every MFA write.
+    mfa_encryption_key: str = Field(default="", alias="MFA_ENCRYPTION_KEY")
 
     # ── Password policy ───────────────────────────────────────────────────────
     password_min_length: int = Field(default=12, ge=12, alias="PASSWORD_MIN_LENGTH")
@@ -138,6 +150,7 @@ class Settings(BaseSettings):
             "ERP_API_KEY": not self.erp_api_key,
             "AUTH_THROTTLE_BACKEND": self.auth_throttle_backend != "redis",
             "REDIS_URL": self.auth_throttle_backend == "redis" and not self.redis_url,
+            "MFA_ENCRYPTION_KEY": self.mfa_secret_key() == DEVELOPMENT_MFA_KEY,
         }
         missing = [name for name, is_insecure in insecure.items() if is_insecure]
         if missing:
@@ -160,12 +173,27 @@ class Settings(BaseSettings):
             warnings.append("MFA_REQUIRED_FOR_SUPER_ADMIN=false: Super Admin MFA is optional")
         if self.password_breach_check == "remote" and not self.password_breach_check_url:
             warnings.append("PASSWORD_BREACH_CHECK=remote without PASSWORD_BREACH_CHECK_URL falls back to the local list")
+        if self.mfa_secret_key() == DEVELOPMENT_MFA_KEY:
+            warnings.append(
+                "MFA_ENCRYPTION_KEY is the development default: enrolled authenticator secrets "
+                "are encrypted with a key that is public in the repository"
+            )
         if not self.trust_proxy_headers:
             warnings.append(
                 "TRUST_PROXY_HEADERS=false: every request behind a proxy/BFF shares one "
                 "client IP, so per-IP throttling treats the whole deployment as one source"
             )
         return warnings
+
+    def mfa_secret_key(self) -> str:
+        """The key used to encrypt TOTP seeds at rest.
+
+        A single accessor so exactly one place decides *which* key protects
+        seeds: an unset (or empty) variable resolves to the development key here
+        rather than at every call site, and production validation compares the
+        resolved value.
+        """
+        return (self.mfa_encryption_key or "").strip() or DEVELOPMENT_MFA_KEY
 
     def resolved_database_url(self) -> str:
         configured_database_url = self.database_url.strip()

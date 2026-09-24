@@ -5,7 +5,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import verify_erp_api_key
 from core.database import get_async_session
-from schemas.shifts import BulkShiftAssignmentCreate, ShiftAssignmentCreate, ShiftAssignmentRead, ShiftCreate, ShiftRead, ShiftUpdate
+from schemas.shifts import (
+    BulkShiftAssignmentCreate,
+    ShiftAssignmentCreate,
+    ShiftAssignmentRead,
+    ShiftCreate,
+    ShiftRead,
+    ShiftUpdate,
+)
 from services.shift_service import ShiftService
 
 router = APIRouter(prefix="/integrations/erp/shifts", tags=["erp-shifts"])

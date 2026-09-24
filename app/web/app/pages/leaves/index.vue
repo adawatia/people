@@ -1,47 +1,45 @@
 <script setup lang="ts">
-/* eslint-disable better-tailwindcss/no-unknown-classes */
+import type { PaginatedResponse } from '#shared/types/pagination'
+
 import type { LeaveApplication, LeaveBalance, LeaveType } from '#shared/types/leave'
 
 useSeoMeta({ title: 'Leave' })
 const auth = useAuth()
+const workspace = useWorkspace()
 const api = useHrmsApi()
 const toast = useToast()
 const employeeId = computed(() => auth.user.value?.employee_id)
+const managementMode = computed(() => workspace.current.value === 'TEAM' || workspace.current.value === 'HR')
 const applyOpen = ref(false)
 const submitting = ref(false)
 const cancellingId = ref<number | null>(null)
-const filter = ref('ALL')
+const list = useListState({ status: 'ALL', sort_order: 'desc' })
+const filter = list.field('status')
 const today = new Date().toISOString().slice(0, 10)
 const form = reactive({ leave_type_id: 0, from_date: today, to_date: today, half_day: false, reason: '' })
 
-const { data, pending, error, refresh } = await useAsyncData('my-leave', async () => {
-  if (!employeeId.value) return null
-  const [balances, applications, types] = await Promise.all([
-    api.request<LeaveBalance[]>(`leaves/balance/employee/${employeeId.value}`),
-    api.request<LeaveApplication[]>('leaves/', { query: { employee_id: employeeId.value } }),
-    api.request<LeaveType[]>('leaves/types', { query: { is_active: true } })
-  ])
-  return { balances, applications, types }
-}, { watch: [employeeId] })
+const { data, pending, error, refresh } = await useAsyncData('my-leave', async (_app, { signal }) => {
+  if (!managementMode.value && !employeeId.value) return null
+  const balanceRequest = !managementMode.value && employeeId.value
+    ? api.request<LeaveBalance[]>(`leaves/balance/employee/${employeeId.value}`)
+    : Promise.resolve([])
+  const applicationsRequest = api.request<PaginatedResponse<LeaveApplication>>('leaves/', {
+    signal, query: { ...list.query.value, status: filter.value === 'ALL' ? undefined : filter.value, employee_id: managementMode.value ? undefined : employeeId.value }
+  })
+  const typesRequest = api.request<PaginatedResponse<LeaveType>>('leaves/types', { query: { is_active: true } })
+  const [balances, applications, types] = await Promise.all([balanceRequest, applicationsRequest, typesRequest])
+  return { balances, applications, types: types.items }
+}, { watch: [employeeId, managementMode, list.query, filter] })
 
-const filteredApplications = computed(() => (data.value?.applications || []).filter(item => filter.value === 'ALL' || item.status === filter.value))
-const pendingDaysByType = computed(() => {
-  const totals = new Map<number, number>()
-  for (const application of data.value?.applications || []) {
-    if (application.status === 'PENDING') {
-      totals.set(application.leave_type_id, (totals.get(application.leave_type_id) || 0) + application.days_count)
-    }
-  }
-  return totals
-})
+const filteredApplications = computed(() => data.value?.applications.items || [])
 function displayPending(balance: LeaveBalance) {
-  return pendingDaysByType.value.get(balance.leave_type_id) ?? balance.pending
+  return balance.pending
 }
 function displayAvailable(balance: LeaveBalance) {
-  return Math.max(0, balance.allocated - balance.used - displayPending(balance))
+  return balance.available
 }
-function balanceIsSyncing(balance: LeaveBalance) {
-  return displayPending(balance) !== balance.pending
+function balanceIsSyncing(_balance: LeaveBalance) {
+  return false
 }
 const selectedBalance = computed(() => data.value?.balances.find(item => item.leave_type_id === form.leave_type_id))
 const estimatedDays = computed(() => {
@@ -51,6 +49,11 @@ const estimatedDays = computed(() => {
   return form.half_day ? 0.5 : Math.floor((to.getTime() - from.getTime()) / 86400000) + 1
 })
 const formValid = computed(() => form.leave_type_id > 0 && estimatedDays.value > 0 && form.reason.trim().length >= 3)
+
+watch(managementMode, () => {
+  applyOpen.value = false
+  filter.value = 'ALL'
+})
 
 function openApplication() {
   const first = data.value?.balances.find(item => item.available > 0) || data.value?.balances[0]
@@ -104,14 +107,21 @@ async function submitApplication() {
   }
 }
 
-async function cancelApplication(application: LeaveApplication) {
+const cancelTarget = ref<LeaveApplication | null>(null)
+const cancelReason = ref('')
+function cancelApplication(application: LeaveApplication) {
+  cancelReason.value = ''
+  cancelTarget.value = application
+}
+async function confirmCancellation() {
+  const application = cancelTarget.value
+  if (!application) return
   const leaveHasStarted = application.status === 'APPROVED' && application.from_date <= today && today <= application.to_date
   let body: { effective_date?: string, reason?: string } | undefined
   if (leaveHasStarted) {
-    const reason = prompt('Why are you returning from leave today? This will be sent to your approver.')
-    if (!reason || reason.trim().length < 3) return
-    body = { effective_date: today, reason: reason.trim() }
-  } else if (!confirm(`Cancel your ${application.leave_type_name || 'leave'} request?`)) return
+    if (cancelReason.value.trim().length < 3) return
+    body = { effective_date: today, reason: cancelReason.value.trim() }
+  }
   cancellingId.value = application.id
   try {
     await api.request(`leaves/${application.id}/cancel`, { method: 'PATCH', body })
@@ -121,6 +131,7 @@ async function cancelApplication(application: LeaveApplication) {
       color: 'neutral',
       icon: leaveHasStarted ? 'i-lucide-clock-3' : 'i-lucide-ban'
     })
+    cancelTarget.value = null
     await refresh()
   } catch (cancelError) {
     const candidate = cancelError as { data?: { statusMessage?: string } }
@@ -136,14 +147,15 @@ async function cancelApplication(application: LeaveApplication) {
     <div class="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
       <div>
         <p class="text-sm font-medium text-primary">
-          Time away
+          {{ managementMode ? (workspace.current.value === 'TEAM' ? 'Team Workspace' : 'HR Workspace') : 'My Workspace' }}
         </p><h2 class="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">
-          Leave
+          {{ managementMode ? 'Leave requests' : 'Leave' }}
         </h2><p class="mt-2 max-w-2xl text-sm leading-6 text-muted">
-          See your available balance, request time off, and follow every approval.
+          {{ managementMode ? 'Review leave requests visible within your assigned scope.' : 'See your available balance, request time off, and follow every approval.' }}
         </p>
       </div>
       <UButton
+        v-if="!managementMode"
         size="lg"
         icon="i-lucide-plus"
         :disabled="!employeeId || !data?.types.length"
@@ -153,8 +165,18 @@ async function cancelApplication(application: LeaveApplication) {
       </UButton>
     </div>
 
+    <ListControls
+      v-model:search="list.search.value"
+      v-model:sort-by="list.sortBy.value"
+      v-model:sort-order="list.sortOrder.value"
+      :active="list.active.value"
+      :sorts="[{ label: 'Applied date', value: 'applied_at' }, { label: 'Status', value: 'status' }]"
+      search-placeholder="Search employee name or code"
+      @clear="list.clear"
+    />
+
     <UAlert
-      v-if="!employeeId"
+      v-if="!managementMode && !employeeId"
       class="mt-6"
       color="warning"
       variant="soft"
@@ -173,7 +195,7 @@ async function cancelApplication(application: LeaveApplication) {
       :actions="[{ label: 'Refresh leave board', onClick: () => refresh() }]"
     />
 
-    <template v-if="employeeId">
+    <template v-if="employeeId && !managementMode">
       <section class="mt-7">
         <div class="mb-4 flex items-center justify-between">
           <div>
@@ -381,7 +403,7 @@ async function cancelApplication(application: LeaveApplication) {
         </div>
 
         <div
-          v-if="!pending && !filteredApplications.length && !data?.applications.length"
+          v-if="!pending && !filteredApplications.length && !data?.applications.total"
           class="px-6 py-14 text-center"
         >
           <UIcon
@@ -416,6 +438,88 @@ async function cancelApplication(application: LeaveApplication) {
       </section>
     </template>
 
+    <section
+      v-if="managementMode"
+      class="people-card mt-7 overflow-hidden"
+    >
+      <div class="flex items-center justify-between border-b border-[var(--people-border)] p-5 sm:px-6">
+        <div>
+          <h3 class="font-semibold">
+            Scoped leave requests
+          </h3>
+          <p class="mt-1 text-sm text-muted">
+            Employees and requests are limited by your server-assigned scope.
+          </p>
+        </div>
+        <UButton
+          :to="workspace.link('/approvals')"
+          icon="i-lucide-clipboard-check"
+          color="neutral"
+          variant="soft"
+        >
+          Open approvals
+        </UButton>
+      </div>
+      <div
+        v-if="pending"
+        class="space-y-3 p-5"
+      >
+        <USkeleton
+          v-for="index in 5"
+          :key="index"
+          class="h-14 w-full"
+        />
+      </div>
+      <UAlert
+        v-else-if="error"
+        class="m-5"
+        color="warning"
+        variant="soft"
+        title="Requests could not be loaded"
+        description="Refresh to try again."
+        :actions="[{ label: 'Refresh', onClick: () => refresh() }]"
+      />
+      <div
+        v-else-if="filteredApplications.length"
+        class="divide-y divide-[var(--people-border)]"
+      >
+        <article
+          v-for="application in filteredApplications"
+          :key="application.id"
+          class="flex flex-wrap items-center gap-3 p-5 sm:px-6"
+        >
+          <div class="min-w-0 flex-1">
+            <p class="font-semibold">
+              {{ application.employee_name || `Employee #${application.employee_id}` }} <span class="font-normal text-muted">· {{ application.leave_type_name || `Leave #${application.leave_type_id}` }}</span>
+            </p>
+            <p class="mt-1 text-sm text-muted">
+              {{ formatDate(application.from_date) }}<span v-if="application.to_date !== application.from_date"> – {{ formatDate(application.to_date) }}</span> · {{ application.days_count }} day(s)
+            </p>
+          </div>
+          <UBadge
+            :label="application.status"
+            :color="statusConfig(application.status).color"
+            variant="soft"
+          />
+          <UButton
+            v-if="['PENDING', 'CANCELLATION_PENDING'].includes(application.status)"
+            :to="workspace.link('/approvals')"
+            size="sm"
+            color="neutral"
+            variant="soft"
+          >
+            Review
+          </UButton>
+        </article>
+      </div>
+      <div
+        v-else
+        class="p-10 text-center text-sm text-muted"
+      >
+        No leave requests are visible in this scope.
+      </div>
+    </section>
+
     <div
       v-if="applyOpen"
       class="fixed inset-0 z-[70] flex items-end justify-center bg-slate-950/40 backdrop-blur-[2px] sm:items-center sm:p-6"
@@ -445,18 +549,12 @@ async function cancelApplication(application: LeaveApplication) {
             label="Leave type"
             required
           >
-            <select
-              v-model.number="form.leave_type_id"
-              class="h-12 w-full rounded-lg border border-[var(--people-border)] bg-[var(--people-surface)] px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
-            >
-              <option
-                v-for="type in data?.types"
-                :key="type.id"
-                :value="type.id"
-              >
-                {{ type.name }} ({{ type.code }})
-              </option>
-            </select>
+            <RemoteSelect
+              v-model="form.leave_type_id"
+              endpoint="leaves/types"
+              label="Select leave type"
+              :filters="{ is_active: true }"
+            />
           </UFormField>
           <UFormField
             label="From"
@@ -544,5 +642,55 @@ async function cancelApplication(application: LeaveApplication) {
         </div>
       </section>
     </div>
+    <ListPagination
+      v-if="data?.applications"
+      v-model:page="list.page.value"
+      v-model:page-size="list.pageSize.value"
+      :total="data?.applications?.total || 0"
+      :total-pages="data?.applications?.total_pages"
+      :loading="pending"
+      label="requests"
+    />
+    <UModal
+      :open="!!cancelTarget"
+      title="Cancel request"
+      description="Confirm cancellation. Approved leave that has started requires an early-return decision from your approver."
+      @update:open="value => { if (!value && !cancellingId) cancelTarget = null }"
+    >
+      <template #body>
+        <p class="text-sm text-muted">
+          This changes the request status and may restore unused leave or remove the work arrangement.
+        </p>
+        <UFormField
+          v-if="cancelTarget?.status === 'APPROVED' && cancelTarget.from_date <= today && today <= cancelTarget.to_date"
+          label="Early-return reason"
+          required
+          class="mt-4"
+        >
+          <UTextarea
+            v-model="cancelReason"
+            class="w-full"
+          />
+        </UFormField>
+      </template>
+      <template #footer>
+        <UButton
+          color="neutral"
+          variant="outline"
+          :disabled="!!cancellingId"
+          @click="cancelTarget = null"
+        >
+          Keep request
+        </UButton>
+        <UButton
+          color="error"
+          :loading="!!cancellingId"
+          :disabled="(cancelTarget?.status === 'APPROVED' && cancelTarget.from_date <= today && today <= cancelTarget.to_date) && cancelReason.trim().length < 3"
+          @click="confirmCancellation"
+        >
+          Confirm cancellation
+        </UButton>
+      </template>
+    </UModal>
   </div>
 </template>

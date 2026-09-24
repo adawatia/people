@@ -4,7 +4,19 @@ from datetime import date, datetime, time
 from zoneinfo import ZoneInfo
 
 from fastapi_users.db import SQLAlchemyBaseUserTable
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, Time, UniqueConstraint
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    Date,
+    DateTime,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    Time,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -19,7 +31,7 @@ class Base(DeclarativeBase):
 
 
 class User(SQLAlchemyBaseUserTable[int], Base):
-    """HRMS portal user. Login via email or mobile_number + password."""
+    """HRMS portal user. Login via username or mobile_number + password."""
 
     __tablename__ = "users"
     __table_args__ = {"comment": "HRMS portal users"}
@@ -41,13 +53,25 @@ class User(SQLAlchemyBaseUserTable[int], Base):
     invitation_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Multi-factor authentication (TOTP + single-use recovery codes).  The seed
-    # is a secret: it is never returned after enrolment and never logged.
-    mfa_secret: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # is a secret: it is encrypted at rest (``core/secret_box.py``), never
+    # returned after enrolment and never logged.  255 leaves room for the
+    # version prefix, nonce and tag around a base32 seed.
+    mfa_secret: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # A replacement factor awaiting proof of possession.  Held separately from the
+    # active seed so a half-finished reset cannot destroy (or, worse, disable) a
+    # working authenticator: the swap happens only when the new secret is proven.
+    mfa_pending_secret: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    mfa_pending_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     mfa_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="false")
     mfa_enrolled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # The TOTP time step of the last accepted code, making each code single-use
+    # for the rest of its (and any drift window's) validity.
+    mfa_last_used_step: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     # JSON array of SHA-256 hashes of the recovery codes.
     mfa_recovery_code_hashes: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_mfa_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    password_recovery_token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    password_recovery_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     @property
     def is_super_admin(self) -> bool:

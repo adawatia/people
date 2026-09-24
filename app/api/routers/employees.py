@@ -1,16 +1,18 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi_users import exceptions as fu_exceptions
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import UserManager, fastapi_users, get_user_manager, require_permission
-from core.employee_access import get_employee_scope, require_employee_access
-from fastapi_users import exceptions as fu_exceptions
 from core.database import get_async_session
+from core.employee_access import get_employee_scope, require_employee_access
+from core.pagination import PaginatedResponse
 from db.models import User
 from schemas.employees import (
-    EmployeeOnboardingCreate,
+    EmployeeCreate,
     EmployeeDirectoryRead,
+    EmployeeOnboardingCreate,
     EmployeeRead,
     EmployeeWorkHistoryRead,
     PaginatedEmployeesResponse,
@@ -23,8 +25,11 @@ router = APIRouter(prefix="/employees", tags=["employees"])
 @router.get("/", response_model=PaginatedEmployeesResponse)
 async def list_employees(
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page_size: int = Query(25, ge=1, le=100),
+    search: str | None = None,
     q: str | None = None,
+    sort_by: str | None = None,
+    sort_order: str = Query("asc", pattern="^(asc|desc)$"),
     unit_id: int | None = None,
     department_id: int | None = None,
     designation_id: int | None = None,
@@ -58,7 +63,7 @@ async def list_employees(
     return await service.list_employees(
         page=page,
         page_size=page_size,
-        q=q,
+        q=search if search is not None else q, sort_by=sort_by, sort_order=sort_order,
         unit_id=unit_id,
         department_id=department_id,
         designation_id=designation_id,
@@ -160,13 +165,25 @@ async def get_employee(
     return service.enrich_directory(emp)
 
 
-@router.get("/{emp_id}/work-history", response_model=list[EmployeeWorkHistoryRead])
+@router.get("/{emp_id}/work-history", response_model=PaginatedResponse[EmployeeWorkHistoryRead])
 async def get_employee_work_history(
     emp_id: int,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100),
+    search: str | None = None,
+    sort_by: str | None = None,
+    sort_order: str = Query("desc", pattern="^(asc|desc)$"),
     current_user: User = Depends(fastapi_users.current_user(active=True)),
     session: AsyncSession = Depends(get_async_session),
-) -> list[EmployeeWorkHistoryRead]:
+) -> PaginatedResponse[EmployeeWorkHistoryRead]:
     service = EmployeeService(session)
     employee = await service.get_employee(emp_id)
     await require_employee_access(current_user, employee, "employee.view", session, allow_self=True)
-    return await service.get_work_history(emp_id)
+    return await service.work_history_page(
+        emp_id,
+        page,
+        page_size,
+        search=search,
+        sort_by=sort_by,
+        sort_order=sort_order,
+    )

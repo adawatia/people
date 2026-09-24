@@ -1,7 +1,7 @@
 """
 core/auth.py — Authentication wiring, password policy and permission helpers.
 
-Built on fastapi-users. Login accepts email, username, or Indian mobile
+Built on fastapi-users. Login accepts username or Indian mobile
 number; passwords are enforced by ``core.password_policy``; API access is
 authorized through an effective permission set — the implicit
 ``BASE_EMPLOYEE_PERMISSIONS`` every employee holds plus the bundle of an
@@ -81,49 +81,33 @@ class UserManager(IntegerIDMixin, BaseUserManager[User, int]):
         return None
 
     async def authenticate(self, credentials):
-        """Override to support login by email OR mobile_number OR username.
+        """Override to support login by mobile_number OR username.
 
         fastapi-users sends the form `username` field. We treat it as:
-          1. email  — if it contains '@'
-          2. mobile / username — lookup
+          mobile / username — lookup
         """
-        """Override to support login by email OR mobile_number OR username.
-
-        fastapi-users sends the form `username` field. We treat it as:
-          1. email  — if it contains '@'
-          2. mobile / username — lookup
-        """
-        from fastapi_users.exceptions import UserNotExists
 
         login_value: str = credentials.username.strip()
 
-        # Resolve the user by email, mobile, or username
+        # Resolve the user by mobile or username. Email is not a login identity.
         user: User | None = None
-        if "@" in login_value:
+        from sqlalchemy import select as sa_select
+
+        from core.database import get_async_session as _get_session
+
+        async for session in _get_session():
+            normalized_mobile = None
             try:
-                user = await self.get_by_email(login_value)
-            except UserNotExists:
-                user = None
-
-        if user is None:
-            # Try username or mobile_number lookup
-            from sqlalchemy import select as sa_select
-
-            from core.database import get_async_session as _get_session
-
-            async for session in _get_session():
-                normalized_mobile = None
-                try:
-                    normalized_mobile = normalize_indian_mobile(login_value)
-                except ValueError:
-                    pass
-                filters = [User.username == login_value]
-                if normalized_mobile:
-                    filters.append(User.mobile_number == normalized_mobile)
-                stmt = sa_select(User).where(or_(*filters))
-                result = await session.execute(stmt)
-                user = result.scalar_one_or_none()
-                break
+                normalized_mobile = normalize_indian_mobile(login_value)
+            except ValueError:
+                pass
+            filters = [User.username == login_value]
+            if normalized_mobile:
+                filters.append(User.mobile_number == normalized_mobile)
+            stmt = sa_select(User).where(or_(*filters))
+            result = await session.execute(stmt)
+            user = result.scalar_one_or_none()
+            break
 
         if user is None:
             # Run dummy hash to mitigate timing attacks (matching BaseUserManager pattern):

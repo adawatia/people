@@ -9,6 +9,7 @@ export type AttendanceStatus
     | 'WORK_FROM_HOME'
 
 export interface AttendanceRecord {
+  has_pending_correction: boolean
   id: number
   employee_id: number
   attendance_date: string

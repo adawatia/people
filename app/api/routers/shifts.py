@@ -1,12 +1,13 @@
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import fastapi_users
 from core.business_roles import resolve_business_access
 from core.database import get_async_session
-from core.employee_access import get_current_employee
+from core.employee_access import get_current_employee, get_employee_scope
+from core.pagination import PaginatedResponse
 from db.models import User
 from schemas.shifts import (
     EmployeeShiftScheduleRead,
@@ -43,33 +44,49 @@ async def _employee_visible_shifts(service: ShiftService, employee_id: int) -> l
     return [ShiftRead.model_validate(shift) for shift in shifts]
 
 
-@router.get("/", response_model=list[ShiftRead])
+@router.get("/", response_model=PaginatedResponse[ShiftRead])
 async def list_shifts(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100),
+    search: str | None = None,
+    sort_by: str | None = None,
+    sort_order: str = Query("asc", pattern="^(asc|desc)$"),
     unit_id: int | None = None,
     is_active: bool | None = True,
     user: User = Depends(fastapi_users.current_user(active=True)),
     session: AsyncSession = Depends(get_async_session),
-) -> list[ShiftRead]:
+) -> PaginatedResponse[ShiftRead]:
     service = ShiftService(session)
     employee = await _employee_self_scope(user, session)
-    if employee:
-        return await _employee_visible_shifts(service, employee.id)
-    return await service.list_shifts(unit_id=unit_id, is_active=is_active)
+    return await service.definitions_page(
+        employee_id=employee.id if employee else None,
+        unit_id=unit_id,
+        is_active=is_active,
+        page=page,
+        page_size=page_size,
+        search=search,
+        sort_by=sort_by,
+        sort_order=sort_order,
+    )
 
 
-@router.get("/assignments", response_model=list[ShiftAssignmentRead])
+@router.get("/assignments", response_model=PaginatedResponse[ShiftAssignmentRead])
 async def list_shift_assignments(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100),
+    search: str | None = None,
+    sort_by: str | None = None,
+    sort_order: str = Query("desc", pattern="^(asc|desc)$"),
     shift_id: int | None = None,
     employee_id: int | None = None,
     status: str | None = None,
     user: User = Depends(fastapi_users.current_user(active=True)),
     session: AsyncSession = Depends(get_async_session),
-) -> list[ShiftAssignmentRead]:
+) -> PaginatedResponse[ShiftAssignmentRead]:
     service = ShiftService(session)
-    employee = await _employee_self_scope(user, session)
-    if employee:
-        employee_id = employee.id
-    return await service.list_assignments(shift_id=shift_id, employee_id=employee_id, status=status)
+    scope = await get_employee_scope(user, session)
+    return await service.assignments_page(scope, page=page, page_size=page_size, search=search,
+        sort_by=sort_by, sort_order=sort_order, shift_id=shift_id, employee_id=employee_id, status=status)
 
 
 @router.get("/assignments/{assignment_id}", response_model=ShiftAssignmentRead)
@@ -83,6 +100,9 @@ async def get_shift_assignment(
     employee = await _employee_self_scope(user, session)
     if employee and assignment.employee_id != employee.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have access to this shift assignment")
+    target = await service.employee_repo.get_by_id(assignment.employee_id)
+    if target is None or not (await get_employee_scope(user, session)).allows(target):
+        raise HTTPException(403, "You do not have access to this shift assignment")
     return assignment
 
 
@@ -97,6 +117,11 @@ async def get_employee_shift_schedule(
     employee = await _employee_self_scope(user, session)
     if employee and emp_id != employee.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You can only view your own shift schedule")
+    target = await service.employee_repo.get_by_id(emp_id)
+    if target is None:
+        raise HTTPException(404, "Employee not found")
+    if not (await get_employee_scope(user, session)).allows(target):
+        raise HTTPException(403, "You do not have access to this shift schedule")
     return await service.get_employee_shift_schedule(emp_id, for_timestamp=for_timestamp)
 
 

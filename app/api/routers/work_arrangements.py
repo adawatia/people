@@ -1,4 +1,5 @@
 from datetime import date
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -9,6 +10,7 @@ from core.employee_access import (
     get_permission_scope,
     require_employee_access,
 )
+from core.pagination import PaginatedResponse
 from db.models import User
 from schemas.work_arrangements import (
     WorkArrangementAction,
@@ -20,18 +22,22 @@ from services.work_arrangement_service import WorkArrangementService
 router = APIRouter(prefix="/work-arrangements", tags=["work-arrangements"])
 
 
-@router.get("/", response_model=list[WorkArrangementRead])
+@router.get("/", response_model=PaginatedResponse[WorkArrangementRead])
 async def list_work_arrangements(
     employee_id: int | None = None,
     status_filter: str | None = Query(None, alias="status"),
     arrangement_type: str | None = None,
     from_date: date | None = None,
     to_date: date | None = None,
+    search: str | None = None,
+    sort_by: str | None = None,
+    sort_order: str = Query("desc", pattern="^(asc|desc)$"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100),
     current_user: User = Depends(fastapi_users.current_user(active=True)),
     session: AsyncSession = Depends(get_async_session),
-) -> list[WorkArrangementRead]:
+) -> PaginatedResponse[WorkArrangementRead]:
     service = WorkArrangementService(session)
-    current_employee = await get_current_employee(current_user, session)
     scope = await get_permission_scope(current_user, "work_arrangement.manage", session)
     scope.include(
         await get_permission_scope(current_user, "work_arrangement.approve", session)
@@ -55,9 +61,11 @@ async def list_work_arrangements(
             allow_self=True,
         )
     elif scope.self_only:
-        employee_id = current_employee.id
+        employee_id = (await get_current_employee(current_user, session)).id
 
-    return await service.list_requests(
+    return await service.list_requests_page(
+        page=page, page_size=page_size,
+        search=search, sort_by=sort_by, sort_order=sort_order,
         employee_id=employee_id,
         status=status_filter,
         arrangement_type=arrangement_type,

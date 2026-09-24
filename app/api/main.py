@@ -1,9 +1,9 @@
 import asyncio
 import os
+import sys
 import time
 import uuid
 import warnings
-import sys
 from contextlib import asynccontextmanager
 
 if sys.platform == "win32":
@@ -17,15 +17,15 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.openapi.utils import get_openapi
+
 from core.auth import (
-    fastapi_users,
     limiter,
     setup_rate_limits,
 )
-from routers import auth_mfa, auth_sessions
 from core.database import check_database_connection
 from core.logging import setup_logging
 from core.settings import get_settings
+from routers import auth_mfa, auth_sessions
 
 APP_START_TIME = time.monotonic()
 
@@ -156,27 +156,27 @@ async def log_requests(request: Request, call_next):
 
 
 from routers import (
+    attendance,
     auth_login,
     dashboard,
-    notifications,
-    users,
-    org,
     designations,
     employees,
-    shifts,
-    attendance,
     erp_attendance,
-    erp_shifts,
-    erp_leaves,
-    erp_holidays,
-    erp_overtime,
     erp_employees,
+    erp_holidays,
+    erp_leaves,
     erp_master_data,
-    leaves,
-    overtime,
+    erp_overtime,
+    erp_shifts,
     holidays,
-    work_arrangements,
+    leaves,
+    notifications,
+    org,
+    overtime,
     reports,
+    shifts,
+    users,
+    work_arrangements,
 )
 
 api_router = APIRouter(prefix="/api/v1")

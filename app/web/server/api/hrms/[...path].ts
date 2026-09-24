@@ -29,6 +29,7 @@ export default defineEventHandler(async (event) => {
     method: method as 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
     query,
     body,
+    retry: 0,
     headers: { Authorization: `Bearer ${token}` }
   })
 
@@ -39,14 +40,20 @@ export default defineEventHandler(async (event) => {
     const refresh = getCookie(event, REFRESH_COOKIE)
     // The refresh route is itself the recovery path — never recurse into it.
     if (status === 401 && refresh && path !== 'auth/session/refresh') {
+      let refreshed
       try {
-        const refreshed = await refreshSession(event, refresh)
-        setAccessCookie(event, refreshed.access_token, refreshed.expires_in)
-        setRefreshCookie(event, refreshed.refresh_token, refreshed.absolute_expires_at)
+        refreshed = await refreshSession(event, refresh)
+      } catch (refreshError) {
+        if ([400, 401, 403].includes(upstreamStatus(refreshError))) clearSessionCookies(event)
+        throw upstreamError(refreshError)
+      }
+      setAccessCookie(event, refreshed.access_token, refreshed.expires_in)
+      setRefreshCookie(event, refreshed.refresh_token, refreshed.absolute_expires_at)
+      try {
         return await call(refreshed.access_token)
-      } catch {
-        // Refresh failed (expired, revoked, or replay detected): the session is
-        // over, so fall through and clear both cookies.
+      } catch (retryError) {
+        if (upstreamStatus(retryError) === 401) clearSessionCookies(event)
+        throw upstreamError(retryError)
       }
     }
     if (status === 401) clearSessionCookies(event)

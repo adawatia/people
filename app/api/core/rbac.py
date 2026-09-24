@@ -9,8 +9,7 @@ behaviour: it only maps a widget key to the permission that unlocks it.
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import get_user_permissions
-from db.models import Employee, User
-
+from db.models import User
 
 DASHBOARD_WIDGETS: list[dict[str, str | None]] = [
     {"key": "my_profile", "permission": None},

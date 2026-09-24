@@ -1,7 +1,8 @@
 """add updated_at to ERP-owned master data"""
 
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 revision = "5b7c2d8e1a90"
 down_revision = "4f2c1a7d9b10"

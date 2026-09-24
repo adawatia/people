@@ -1,16 +1,20 @@
 <script setup lang="ts">
-/* eslint-disable better-tailwindcss/no-unknown-classes */
+import type { PaginatedResponse } from '#shared/types/pagination'
+
 import type { WorkArrangement, WorkArrangementType } from '#shared/types/work-arrangement'
 
 useSeoMeta({ title: 'Work arrangements' })
 const auth = useAuth()
+const workspace = useWorkspace()
 const api = useHrmsApi()
 const toast = useToast()
 const employeeId = computed(() => auth.user.value?.employee_id)
+const selfService = computed(() => workspace.current.value === 'MY')
 const requestOpen = ref(false)
 const submitting = ref(false)
 const cancellingId = ref<number | null>(null)
-const filter = ref('ALL')
+const list = useListState({ status: 'ALL', sort_order: 'desc' })
+const filter = list.field('status')
 const today = new Date().toISOString().slice(0, 10)
 const form = reactive({ arrangement_type: 'WORK_FROM_HOME' as WorkArrangementType, from_date: today, to_date: today, reason: '', destination_location: '', contact_phone: '' })
 
@@ -21,17 +25,25 @@ const typeConfig: Record<WorkArrangementType, { label: string, description: stri
   OFFICE: { label: 'Office', description: 'Temporary office-based arrangement', icon: 'i-lucide-briefcase-business', tone: 'var(--people-mint)' }
 }
 
-const { data: requests, pending, error, refresh } = await useAsyncData('my-work-arrangements', async () => {
-  if (!employeeId.value) return []
-  return await api.request<WorkArrangement[]>('work-arrangements/', { query: { employee_id: employeeId.value } })
-}, { watch: [employeeId] })
-const filtered = computed(() => (requests.value || []).filter(item => filter.value === 'ALL' || item.status === filter.value))
+const { data: requests, pending, error, refresh } = await useAsyncData('my-work-arrangements', async (_app, { signal }) => {
+  if (selfService.value && !employeeId.value) return null
+  return await api.request<PaginatedResponse<WorkArrangement>>('work-arrangements/', {
+    signal, query: { ...list.query.value, status: filter.value === 'ALL' ? undefined : filter.value, employee_id: selfService.value ? employeeId.value : undefined }
+  })
+}, { watch: [employeeId, selfService, list.query, filter] })
+const filtered = computed(() => requests.value?.items || [])
 const requestDays = computed(() => {
   const from = new Date(`${form.from_date}T00:00:00`)
   const to = new Date(`${form.to_date}T00:00:00`)
   return to >= from ? Math.floor((to.getTime() - from.getTime()) / 86400000) + 1 : 0
 })
 const formValid = computed(() => requestDays.value > 0 && form.reason.trim().length >= 5)
+
+watch(selfService, (isSelfService) => {
+  requestOpen.value = false
+  filter.value = 'ALL'
+  if (isSelfService && !employeeId.value) requests.value = null
+})
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(`${value}T00:00:00`))
@@ -65,19 +77,31 @@ async function submitRequest() {
   } catch (submitError) {
     const message = (submitError as { data?: { statusMessage?: string } }).data?.statusMessage
     toast.add({ title: 'Could not submit request', description: message || 'Check the dates and try again.', color: 'error' })
-  } finally { submitting.value = false }
+  } finally {
+    submitting.value = false
+  }
 }
-async function cancelRequest(item: WorkArrangement) {
-  if (!confirm(`Cancel this ${typeConfig[item.arrangement_type].label.toLowerCase()} request?`)) return
+const cancelTarget = ref<WorkArrangement | null>(null)
+const cancelReason = ref('')
+function cancelRequest(item: WorkArrangement) {
+  cancelReason.value = ''
+  cancelTarget.value = item
+}
+async function confirmCancellation() {
+  const item = cancelTarget.value
+  if (!item) return
   cancellingId.value = item.id
   try {
     await api.request(`work-arrangements/${item.id}/cancel`, { method: 'PATCH' })
     toast.add({ title: 'Request cancelled', color: 'neutral', icon: 'i-lucide-ban' })
+    cancelTarget.value = null
     await refresh()
   } catch (cancelError) {
     const message = (cancelError as { data?: { statusMessage?: string } }).data?.statusMessage
     toast.add({ title: 'Could not cancel request', description: message || 'Please try again.', color: 'error' })
-  } finally { cancellingId.value = null }
+  } finally {
+    cancellingId.value = null
+  }
 }
 </script>
 
@@ -86,13 +110,14 @@ async function cancelRequest(item: WorkArrangement) {
     <div class="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
       <div>
         <p class="text-sm font-medium text-primary">
-          Flexible work
+          {{ selfService ? 'My Workspace' : workspace.current.value === 'TEAM' ? 'Team Workspace' : 'HR Workspace' }}
         </p><h2 class="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">
           Work arrangements
         </h2><p class="mt-2 max-w-2xl text-sm leading-6 text-muted">
-          Request to work from home and follow the status of your requests.
+          {{ selfService ? 'Request to work from home and follow the status of your requests.' : 'Review work arrangement requests within your authorized scope.' }}
         </p>
       </div><UButton
+        v-if="selfService"
         size="lg"
         icon="i-lucide-plus"
         :disabled="!employeeId"
@@ -101,8 +126,18 @@ async function cancelRequest(item: WorkArrangement) {
         New request
       </UButton>
     </div>
+
+    <ListControls
+      v-model:search="list.search.value"
+      v-model:sort-by="list.sortBy.value"
+      v-model:sort-order="list.sortOrder.value"
+      :active="list.active.value"
+      :sorts="[{ label: 'Request date', value: 'created_at' }, { label: 'Status', value: 'status' }]"
+      search-placeholder="Search employee name or code"
+      @clear="list.clear"
+    />
     <UAlert
-      v-if="!employeeId"
+      v-if="selfService && !employeeId"
       class="mt-6"
       color="warning"
       variant="soft"
@@ -121,7 +156,7 @@ async function cancelRequest(item: WorkArrangement) {
       :actions="[{ label: 'Refresh requests', onClick: () => refresh() }]"
     />
     <UAlert
-      v-else
+      v-else-if="selfService"
       class="mt-6"
       color="info"
       variant="soft"
@@ -130,7 +165,7 @@ async function cancelRequest(item: WorkArrangement) {
       description="This feature is being built step by step. For now, you can submit and track work-from-home requests here."
     />
 
-    <template v-if="employeeId">
+    <template v-if="selfService && employeeId">
       <div class="mt-7 max-w-xl">
         <article class="people-card p-5">
           <span
@@ -247,6 +282,65 @@ async function cancelRequest(item: WorkArrangement) {
       </section>
     </template>
 
+    <section
+      v-else-if="!selfService"
+      class="people-card mt-7 overflow-hidden"
+    >
+      <div
+        v-if="pending"
+        class="space-y-3 p-5"
+      >
+        <USkeleton
+          v-for="index in 5"
+          :key="index"
+          class="h-14 w-full"
+        />
+      </div>
+      <UAlert
+        v-else-if="error"
+        class="m-5"
+        color="warning"
+        variant="soft"
+        title="Requests could not be loaded"
+        description="Refresh to try again. The list is restricted to your assigned scope."
+        :actions="[{ label: 'Refresh', onClick: () => refresh() }]"
+      />
+      <div
+        v-else-if="filtered.length"
+        class="divide-y divide-[var(--people-border)]"
+      >
+        <article
+          v-for="item in filtered"
+          :key="item.id"
+          class="flex flex-wrap items-center gap-3 p-5 sm:px-6"
+        >
+          <UAvatar :text="(item.employee_name || `E${item.employee_id}`).split(/\s+/).map(part => part[0]).join('').slice(0, 2)" />
+          <div class="min-w-0 flex-1">
+            <p class="font-semibold">
+              {{ item.employee_name || `Employee #${item.employee_id}` }}
+            </p>
+            <p class="text-xs text-muted">
+              {{ typeConfig[item.arrangement_type].label }} · {{ formatDate(item.from_date) }}<span v-if="item.to_date !== item.from_date"> – {{ formatDate(item.to_date) }}</span>
+            </p>
+            <p class="mt-1 text-sm text-muted">
+              {{ item.reason }}
+            </p>
+          </div>
+          <UBadge
+            :label="item.status"
+            :color="statusColor(item.status)"
+            variant="soft"
+          />
+        </article>
+      </div>
+      <div
+        v-else
+        class="p-10 text-center text-sm text-muted"
+      >
+        No work arrangement requests are visible in this scope.
+      </div>
+    </section>
+
     <div
       v-if="requestOpen"
       class="fixed inset-0 z-[70] flex items-end justify-center bg-slate-950/40 backdrop-blur-[2px] sm:items-center sm:p-6"
@@ -334,5 +428,43 @@ async function cancelRequest(item: WorkArrangement) {
         </div>
       </section>
     </div>
+    <ListPagination
+      v-if="requests"
+      v-model:page="list.page.value"
+      v-model:page-size="list.pageSize.value"
+      :total="requests?.total || 0"
+      :total-pages="requests?.total_pages"
+      :loading="pending"
+      label="requests"
+    />
+    <UModal
+      :open="!!cancelTarget"
+      title="Cancel request"
+      description="Confirm cancellation. The work arrangement will no longer apply."
+      @update:open="value => { if (!value && !cancellingId) cancelTarget = null }"
+    >
+      <template #body>
+        <p class="text-sm text-muted">
+          This cancels the request and removes any approved work arrangement for its dates.
+        </p>
+      </template>
+      <template #footer>
+        <UButton
+          color="neutral"
+          variant="outline"
+          :disabled="!!cancellingId"
+          @click="cancelTarget = null"
+        >
+          Keep request
+        </UButton>
+        <UButton
+          color="error"
+          :loading="!!cancellingId"
+          @click="confirmCancellation"
+        >
+          Confirm cancellation
+        </UButton>
+      </template>
+    </UModal>
   </div>
 </template>

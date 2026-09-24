@@ -64,6 +64,6 @@ export default defineEventHandler(async (event): Promise<LoginResult> => {
       headers: { Authorization: `Bearer ${auth.access_token}` }
     })
   } catch (error) {
-    throw upstreamError(error)
+    throw upstreamError(error, event)
   }
 })

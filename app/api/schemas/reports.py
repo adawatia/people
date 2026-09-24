@@ -1,5 +1,7 @@
-from datetime import date
-from pydantic import BaseModel, ConfigDict
+
+from pydantic import BaseModel
+
+from core.pagination import PaginatedResponse
 
 
 class EmployeeAttendanceRow(BaseModel):
@@ -19,12 +21,14 @@ class EmployeeAttendanceRow(BaseModel):
     total_overtime_minutes: int = 0
 
 
-class MonthlyAttendanceMatrixReport(BaseModel):
+class MonthlyAttendanceMatrixReport(PaginatedResponse[EmployeeAttendanceRow]):
     year: int
     month: int
     unit_id: int | None = None
     total_days_in_month: int
-    rows: list[EmployeeAttendanceRow]
+    @property
+    def rows(self):
+        return self.items
 
 
 class LeaveBalanceSummaryRow(BaseModel):
@@ -40,7 +44,11 @@ class LeaveBalanceSummaryRow(BaseModel):
     available: float
 
 
-class MonthlyLeaveSummaryReport(BaseModel):
+class MonthlyLeaveSummaryReport(PaginatedResponse[LeaveBalanceSummaryRow]):
     year: int
     unit_id: int | None = None
-    rows: list[LeaveBalanceSummaryRow]
+    breakdown: list[dict] = []
+
+    @property
+    def rows(self):
+        return self.items

@@ -6,12 +6,12 @@
 }
 
 :root {
-  --people-canvas: #f7f8fb;
+  --people-canvas: #f6f7f6;
   --people-surface: #ffffff;
-  --people-border: #e6e8ef;
+  --people-border: #d5dce0;
   --people-text: #202332;
   --people-muted: #697083;
-  --people-lavender: #eee9fa;
+  --people-lavender: #e5f1f3;
   --people-mint: #e5f5eb;
   --people-peach: #fbebdd;
   --people-blue: #e5eeff;
@@ -19,7 +19,7 @@
   --people-rose: #fde8ee;
   --people-blue-ink: #3156a8;
   --people-mint-ink: #17734c;
-  --people-lavender-ink: #6a4bb5;
+  --people-lavender-ink: #176475;
   --people-peach-ink: #a85528;
   --people-yellow-ink: #9a6700;
   --people-rose-ink: #be3455;
@@ -29,11 +29,11 @@ html, body { background: var(--people-canvas); }
 body { color: var(--people-text); }
 button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
 
-.people-card {
+@utility people-card {
   border: 1px solid var(--people-border);
-  border-radius: 1rem;
+  border-radius: 0.625rem;
   background: color-mix(in srgb, var(--people-surface) 96%, transparent);
-  box-shadow: 0 1px 2px rgb(28 32 45 / 0.04), 0 10px 32px rgb(28 32 45 / 0.035);
+  box-shadow: 2px 2px 0 color-mix(in srgb, var(--people-border) 70%, transparent);
 }
 
 @utility people-icon {
@@ -55,7 +55,7 @@ button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
   --people-border: #292c38;
   --people-text: #f0f1f6;
   --people-muted: #a4a9b8;
-  --people-lavender: #2b253c;
+  --people-lavender: #193239;
   --people-mint: #183228;
   --people-peach: #36291f;
   --people-blue: #202d48;
@@ -63,8 +63,10 @@ button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
   --people-rose: #3a202a;
   --people-blue-ink: #a9c3ff;
   --people-mint-ink: #8ee6ba;
-  --people-lavender-ink: #d0bcff;
+  --people-lavender-ink: #91d4df;
   --people-peach-ink: #ffc19d;
   --people-yellow-ink: #f8d57a;
   --people-rose-ink: #ffb0c1;
 }
+
+:focus-visible { outline: 2px solid var(--ui-primary); outline-offset: 3px; }

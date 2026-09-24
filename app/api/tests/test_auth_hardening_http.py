@@ -40,6 +40,7 @@ from tests.auth_helpers import (
     create_account,
     ensure_org_structure,
     login,
+    next_code,
     refresh,
     run_async,
 )
@@ -151,6 +152,13 @@ def test_super_admin_login_rejects_identifiers_that_are_not_usernames(unique_suf
         for identity in (f"tech.{unique_suffix}@people-hrms.co.in", "9876543210"):
             response = instance.post(f"{API}/auth/super-admin/login", data={"username": identity, "password": PASSWORD})
             assert response.status_code == 400
+
+
+def test_business_login_rejects_email_and_accepts_username_or_mobile(unique_suffix):
+    _seed(unique_suffix, label="emp")
+    with client() as instance:
+        assert login(instance, f"emp.{unique_suffix}@people-hrms.co.in").status_code == 400
+        assert login(instance, f"emp.{unique_suffix}").status_code == 200
 
 
 # ── enumeration resistance ────────────────────────────────────────────────────
@@ -420,9 +428,10 @@ def test_super_admin_sign_in_requires_and_completes_mfa(unique_suffix, monkeypat
         )
         assert wrong.status_code == 400
 
+        activation_code = totp_at(secret, now_ist())
         activated = instance.post(
             f"{API}/auth/mfa/activate",
-            json={"mfa_token": body["mfa_token"], "code": totp_at(secret, now_ist())},
+            json={"mfa_token": body["mfa_token"], "code": activation_code},
         )
         assert activated.status_code == 200, activated.text
         session = activated.json()
@@ -433,9 +442,16 @@ def test_super_admin_sign_in_requires_and_completes_mfa(unique_suffix, monkeypat
         # Next sign-in: password, then the factor (no enrolment this time).
         again = login(instance, f"root.{unique_suffix}", super_admin=True).json()
         assert again["mfa_enrollment_required"] is False
+        # The code that completed enrolment is spent: a code is single-use, so
+        # re-presenting it at sign-in must not authenticate.
         assert instance.post(
             f"{API}/auth/mfa/verify",
-            json={"mfa_token": again["mfa_token"], "code": totp_at(secret, now_ist())},
+            json={"mfa_token": again["mfa_token"], "code": activation_code},
+        ).status_code == 401
+        # The next code from the app signs in normally.
+        assert instance.post(
+            f"{API}/auth/mfa/verify",
+            json={"mfa_token": again["mfa_token"], "code": next_code(secret)},
         ).status_code == 200
 
         # A recovery code works exactly once.
@@ -494,7 +510,7 @@ def test_employee_mfa_is_opt_in_and_always_honoured_once_enrolled(unique_suffix)
 
         signed_in = instance.post(
             f"{API}/auth/mfa/verify",
-            json={"mfa_token": challenge.json()["mfa_token"], "code": totp_at(secret, now_ist())},
+            json={"mfa_token": challenge.json()["mfa_token"], "code": next_code(secret)},
         ).json()
         removed = instance.post(
             f"{API}/auth/mfa/disable",

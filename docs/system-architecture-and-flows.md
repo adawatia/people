@@ -194,8 +194,11 @@ Notes that matter operationally:
 | `AUTH_REFRESH_MAX_FAILURES` | `20` | budget for the refresh scope (looser: the token is unguessable) |
 | `AUTH_THROTTLE_BACKEND` / `REDIS_URL` | `memory` / `""` | `redis` is **required** for more than one worker; asking for it without `REDIS_URL` (or without the `redis` package) fails loudly |
 | `TRUST_PROXY_HEADERS` | `false` | honour `X-Forwarded-For`; only enable behind a proxy you control |
-| `MFA_ENABLED` / `MFA_REQUIRED_FOR_SUPER_ADMIN` | `true` / `false` | opt-in enforcement so an existing operator can enrol first; startup logs a warning while it is off |
+| `MFA_ENABLED` / `MFA_REQUIRED_FOR_SUPER_ADMIN` | `true` / `false` | global MFA kill switch / privileged-account enforcement; startup logs a warning while MFA is off |
 | `MFA_ISSUER` / `MFA_CHALLENGE_TTL_SECONDS` | `People HRMS` / `300` | authenticator label and challenge-token lifetime |
+| `MFA_ENCRYPTION_KEY` | development key | AES-256 key (base64 or hex) encrypting TOTP seeds at rest. Empty means "unset" and resolves to the development key. **Production refuses the development default at startup** — a seed dump protected by a key sitting in the repository protects nothing. Rotating it invalidates enrolled factors (they must re-enrol), so treat it like a database credential |
+| `MFA_PENDING_TTL_SECONDS` | `900` | lifetime of an unconfirmed replacement authenticator; expired pending secrets are cleared when accessed |
+| `PASSWORD_RECOVERY_TTL_SECONDS` | `600` | lifetime of the authenticator-based password recovery and one-time reset capability |
 | `PASSWORD_MIN_LENGTH` / `PASSWORD_MAX_LENGTH` | `12` / `256` | floors/ceilings are validated, so they cannot be lowered accidentally |
 | `PASSWORD_BREACH_CHECK` / `_URL` | `local` / `""` | `off` \| `local` \| `remote` (k-anonymity, fail-open) |
 
@@ -212,7 +215,7 @@ Notes that matter operationally:
 **Identity & access**
 | Table | Key points |
 |---|---|
-| `users` | `user_id` PK, unique `username`, unique nullable `mobile_number` (E.164), `must_change_password`, `created_by`, invitation metadata (hash, sent/expires/used), fastapi-users fields (`is_active`, `is_verified`, `is_superuser`), MFA columns (`mfa_enabled`, `mfa_secret`, `mfa_enrolled_at`, `last_mfa_verified_at`, `mfa_recovery_code_hashes` — hashes only) |
+| `users` | `user_id` PK, unique `username`, unique nullable `mobile_number` (E.164), `must_change_password`, `created_by`, invitation metadata (hash, sent/expires/used), fastapi-users fields (`is_active`, `is_verified`, `is_superuser`), MFA columns (`mfa_enabled`, `mfa_secret` — AES-GCM ciphertext, `mfa_pending_secret` + expiry — a replacement awaiting proof, `mfa_last_used_step` — the last spent TOTP step, `mfa_enrolled_at`, `last_mfa_verified_at`, `mfa_recovery_code_hashes` — hashes only) |
 | `auth_sessions` | Only the **SHA-256 hash** of the refresh token; `expires_at` (30 d outer bound), `absolute_expires_at` (hard end of the chain), `last_used_at` (idle timeout), `revoked_at` + `revoked_reason` (`rotated`, `logout`, `logout_all`, `password_changed`, `password_reset:*`, `reuse_detected`, `idle_timeout`, `account_inactive`), `replaced_by_id` (rotation chain), `ip_address`, `user_agent` (device list) |
 | `audit_logs` | Append-only: actor, action, entity, `filters_json`, `request_id`, `ip_address` |
 
@@ -260,7 +263,7 @@ Authentication answers *who you are*; a business role never selects a login endp
 
 | Endpoint | Tag | Identity accepted | Extra rule |
 |---|---|---|---|
-| `POST /api/v1/auth/employee/login` | `auth-employee` | Indian mobile (any input is normalized to E.164) or email or username | **must** have a linked `Employee`, else `403 "This account is a technical account. Use the technical sign-in."` — reachable only with a *correct* password, so it cannot be used to probe for accounts |
+| `POST /api/v1/auth/employee/login` | `auth-employee` | Indian mobile (any input is normalized to E.164) or username | **must** have a linked `Employee`, else `403 "This account is a technical account. Use the technical sign-in."` — reachable only with a *correct* password, so it cannot be used to probe for accounts |
 | `POST /api/v1/auth/super-admin/login` | `auth-super-admin` | username **only** (rejects `@`, digits, `+` → `400`) | must have `is_superuser`; otherwise the same generic `401 "Invalid login credentials"` as a wrong password |
 
 Both are OAuth2 password-form endpoints and **both issue a session directly** — there is no intermediate long-lived bearer token any more (§2.5.3). Response shape:
@@ -273,7 +276,7 @@ Both are OAuth2 password-form endpoints and **both issue a session directly** �
 {"mfa_required": true, "mfa_enrollment_required": false, "mfa_token": "…", "mfa_expires_in": 300}
 ```
 
-`UserManager.authenticate()` resolves `email → username → normalized mobile` and performs a **dummy hash** for unknown users so the timing of a failed lookup resembles a failed password check (§2.5.7).
+`UserManager.authenticate()` resolves `username → normalized mobile` and performs a **dummy hash** for unknown users so the timing of a failed lookup resembles a failed password check (§2.5.7).
 
 #### 2.5.2 Login and refresh throttling
 
@@ -312,7 +315,19 @@ Split so a stolen password alone can never replace an existing factor:
 * **Challenge endpoints** (unauthenticated, require the short-lived challenge token issued *after* a correct password): `POST /auth/mfa/enroll` (first-time only — returns the secret, `otpauth://` URI and 10 single-use recovery codes, shown once), `POST /auth/mfa/activate` (confirm the new secret and sign in), `POST /auth/mfa/verify` (TOTP or recovery code).
 * **Management endpoints** (authenticated **and** password re-verified): `POST /auth/mfa/reset` (new secret), `POST /auth/mfa/confirm` (activate from an existing session), `POST /auth/mfa/disable`, `GET /auth/mfa/status`.
 
-A second factor is requested when the account's *policy* mandates it **or** the account has already enrolled — an enrolled authenticator is always used, otherwise opting in from account settings would protect nothing. `MFA_REQUIRED_FOR_SUPER_ADMIN` defaults to `false` so enabling it is a deliberate, communicated rollout; `MFA_ENABLED=false` disables the feature. Verification is constant-time with a ±1 step (30 s) drift window, and recovery codes are stored as SHA-256 hashes like refresh tokens. Enrolled already? `disable` is refused while policy requires MFA.
+A second factor is requested when the account's *policy* mandates it **or** the account has already enrolled — an enrolled authenticator is always used, otherwise opting in from account settings would protect nothing. `MFA_REQUIRED_FOR_SUPER_ADMIN` defaults to `false` so enabling it is a deliberate, communicated rollout; `MFA_ENABLED=false` disables MFA enforcement, including for previously enrolled accounts. Verification is constant-time with a ±1 step (30 s) drift window, and recovery codes are stored as SHA-256 hashes like refresh tokens. Enrolled already? `disable` is refused while policy requires MFA.
+
+**Forgot-password recovery** is separate from normal login: the user enters a username or mobile number, proves possession of the enrolled TOTP authenticator (or a recovery code), and receives a short-lived one-time password-reset capability. The flow never creates a session, revokes every existing session after the new password is saved, keeps MFA enrolled, and is throttled and audited. Reused TOTP steps are reported separately from mistyped codes, while an expired or replaced recovery capability returns the UI to the identity step.
+
+**Every code is single-use.** A successful verification records the TOTP *step it matched* (`users.mfa_last_used_step`) and any later submission of that step or an earlier one is refused with a distinct message, so an observed code cannot be replayed for the remainder of its window — including the ±1 step of drift either side. The matched step is recorded rather than "now" on purpose: attributing a lagging client's code to the current step would either block a legitimate sign-in or leave the window open, which is exactly how replay was possible before. A spent code is reported as *spent* rather than invalid, so the user is told to wait for the next code instead of hunting for a typo that does not exist.
+
+**Seeds are encrypted, not hashed** (`core/secret_box.py`): AES-256-GCM with a fresh nonce per write, stored as `v1:<base64url(nonce‖ciphertext‖tag)>` under `MFA_ENCRYPTION_KEY`, which never lives in the database. A seed must be recoverable to verify future codes, unlike a password or a refresh token, so the protection is encryption plus a key held elsewhere — a database dump alone yields no usable second factor. A value without the `v1:` prefix predates this and is read as-is, then re-encrypted on the next write, so the upgrade cannot lock anyone out; a value that cannot be decrypted (wrong or rotated key) fails **closed** — the account falls back to its recovery codes and re-enrolment rather than accepting codes derived from garbage.
+
+**A replacement factor is proven before it replaces anything.** `start_enrollment` writes only `mfa_pending_secret`; the active seed, `mfa_enabled` and the recovery codes are untouched until a code from the new secret is accepted (`activate` / `confirm`), at which point the pending seed is promoted and the replay counter resets. This matters because the obvious implementation — clearing the live secret and `mfa_enabled` at the start — lets an abandoned "issue a new secret" disable the second factor entirely *and* kill the authenticator in the user's hand. Recovery codes are issued only with a first factor: replacing one keeps the existing set valid, and `POST /auth/mfa/recovery/regenerate` issues a fresh set (password re-verified) when the user actually wants one.
+
+**QR setup is rendered in the browser.** Enrolment returns the `otpauth://` URI and the API never re-displays it; the Nuxt side draws the QR client-side from that URI, so the seed travels only in the JSON body it arrived in and never into a URL or query string where it would be written to access logs and browser history. Manual entry stays available as a fallback for the key.
+
+The spec vocabulary maps onto the implemented routes as: `totp/setup` → `POST /auth/mfa/enroll` (first factor, challenge token) or `POST /auth/mfa/reset` (replacement, password re-verified); `totp/enable` → `POST /auth/mfa/activate` (login-time) or `POST /auth/mfa/confirm` (from a session); `challenge/totp` and `challenge/recovery` → `POST /auth/mfa/verify` (one endpoint accepts either, and a valid TOTP code never consumes a recovery code); `recovery/regenerate` → `POST /auth/mfa/recovery/regenerate`; status → `GET /auth/mfa/status`. Every one of them is throttled on the account, the source IP and the pair.
 
 #### 2.5.5 Password policy (enforced on register, change, and HR/ERP temporary-password set)
 
@@ -334,7 +349,7 @@ Unknown accounts get a dummy hash instead of a fast `return None`, all credentia
 
 #### 2.5.8 Security audit events
 
-`services/auth_service.py` writes to the existing append-only `audit_logs` table (no second audit framework): `AUTH_LOGIN_SUCCESS` / `AUTH_LOGIN_FAILED`, `SUPER_ADMIN_LOGIN_SUCCESS` / `_FAILED`, `AUTH_LOGOUT`, `AUTH_SESSION_CREATED`, `AUTH_SESSION_REFRESHED`, `AUTH_REFRESH_FAILED`, `AUTH_REFRESH_REUSE_DETECTED`, `AUTH_SESSION_REVOKED`, `AUTH_ALL_SESSIONS_REVOKED`, `AUTH_PASSWORD_CHANGED`, `AUTH_PASSWORD_RESET`, `AUTH_USERNAME_CHANGED`, `AUTH_MFA_CHALLENGE` / `_ENROLLED` / `_SUCCESS` / `_FAILED`. Records carry `user_id` (when known), session id, `request_id`, IP, user agent and a reason category. The correlation id is minted by the request-logging middleware (an inbound `X-Request-ID` / `X-Correlation-ID` is preserved), stored on `request.state` and echoed on the response as `X-Request-ID`, so one id ties a user-visible failure to the API log line *and* the audit rows it produced. **Never** logged: passwords, raw access/refresh tokens, TOTP secrets or recovery codes — identities in failure events are stored as truncated hashes.
+`services/auth_service.py` writes to the existing append-only `audit_logs` table (no second audit framework): `AUTH_LOGIN_SUCCESS` / `AUTH_LOGIN_FAILED`, `SUPER_ADMIN_LOGIN_SUCCESS` / `_FAILED`, `AUTH_LOGOUT`, `AUTH_SESSION_CREATED`, `AUTH_SESSION_REFRESHED`, `AUTH_REFRESH_FAILED`, `AUTH_REFRESH_REUSE_DETECTED`, `AUTH_SESSION_REVOKED`, `AUTH_ALL_SESSIONS_REVOKED`, `AUTH_PASSWORD_CHANGED`, `AUTH_PASSWORD_RESET`, `AUTH_USERNAME_CHANGED`, `AUTH_MFA_CHALLENGE` / `_ENROLLED` / `_SUCCESS` / `_FAILED` / `_RECOVERY_REGENERATED`. Records carry `user_id` (when known), session id, `request_id`, IP, user agent and a reason category (`invalid` versus `replayed` on an MFA failure, and `activate` versus `verify` for the stage). The correlation id is minted by the request-logging middleware (an inbound `X-Request-ID` / `X-Correlation-ID` is preserved), stored on `request.state` and echoed on the response as `X-Request-ID`, so one id ties a user-visible failure to the API log line *and* the audit rows it produced. **Never** logged: passwords, raw access/refresh tokens, TOTP secrets or recovery codes — identities in failure events are stored as truncated hashes.
 
 #### 2.5.9 Session lifecycle (state machine)
 
@@ -392,9 +407,9 @@ if employee.business_role:
 | `BASE_EMPLOYEE_PERMISSIONS` | self-service: `employee.view_self`, `attendance.view_self`, `leave.apply` / `view_self` / `cancel`, `work_arrangement.apply` / `view_self` / `cancel`, `overtime.view_self`, `shift.view_self` |
 | `DEPARTMENT_MANAGER` | `employee.view`, `attendance.view_department`, `leave.approve` / `reject`, `work_arrangement.approve` / `reject`, `overtime.view_department` / `approve`, `reports.attendance` / `reports.leave` |
 | `HR_ADMIN` | user + employee administration, designation CRUD, `attendance.view` / `view_unit` / `view_department` / `process` / `correct`, `leave.manage` / `approve` / `reject`, `work_arrangement.manage` / `approve` / `reject`, `shift.assign` / `update`, `overtime.approve` / `view_department`, all `reports.*`, `system.configure`, `audit.view`, `salary_cost.view_unit` / `view_department` |
-| `ORGANIZATION_OWNER` | read/analytics only: `employee.view`, `attendance.view` / `view_unit` / `view_department`, `overtime.view` / `view_department`, `reports.view` / `attendance` / `leave` / `overtime`, `dashboard.view_organization` |
+| `ORGANIZATION_OWNER` | read/analytics additions: `employee.view`, `attendance.view` / `view_unit` / `view_department`, `overtime.view` / `view_department`, `reports.view` / `attendance` / `leave` / `overtime`, `dashboard.view_organization`; like all workforce roles, also receives base self-service permissions |
 
-**Unit HR and organization HR receive the same `HR_ADMIN` bundle** — only the scope differs (§2.6.2). The Organization Owner is deliberately *not* a superset of HR: it has organization-wide visibility and no operational HR or manager approval capability. Roles are not hierarchical.
+**Unit HR and organization HR receive the same `HR_ADMIN` bundle** — only the scope differs (§2.6.2). The Organization Owner is deliberately *not* a superset of HR: it has organization-wide analytics and no HR operations or manager approval capability. It still has the base self-service permissions, as every workforce role does. Roles are not hierarchical.
 
 #### 2.6.2 Business role → scope resolution
 
@@ -441,7 +456,7 @@ Derived rules worth remembering:
 | `organization_overview` | `dashboard.view_organization` |
 | `system_health` | `system.configure` |
 
-`GET /dashboard/widgets` returns the visible keys; superusers get all. Note the **UI does not currently consume `/dashboard/widgets`** — `pages/index.vue` branches on `role` directly (§8.1 A9).
+`GET /dashboard/widgets` returns the visible keys; superusers get all. The UI now uses workspace context for presentation, while this endpoint remains the permission-aware source for future widget-level composition.
 
 ### 2.7 Domain services
 
@@ -507,7 +522,7 @@ Config: `create_period`, `create_type`, `update_type`, `allocate_leaves` (writes
 
 #### 2.7.6 Overtime (`services/overtime_service.py`)
 
-`list_overtime`, `get_overtime`, `get_overtime_summary` (month filtering, approved minutes only), `approve_overtime` / `reject_overtime` with self-approval prevention and an `overtime_approvals` audit row. **The approve/reject service methods are not exposed by any router** (§8.1 A2).
+`list_overtime`, `get_overtime`, `get_overtime_summary` (month filtering, approved minutes only), `approve_overtime` / `reject_overtime` with row locking, self-approval prevention, state validation, an approved-minutes ceiling, and an `overtime_approvals` audit row for approvals. The router exposes approval/rejection only to `overtime.approve` users within their assigned employee scope.
 
 #### 2.7.7 Reports (`services/report_service.py`)
 
@@ -517,8 +532,8 @@ Config: `create_period`, `create_type`, `update_type`, `allocate_leaves` (writes
 #### 2.7.8 Notifications & audit
 
 * `routers/notifications.py` exposes `create_notification()` for services plus `GET /notifications`, `GET /notifications/unread-count`, `PATCH /notifications/{id}/read`, `POST /notifications/mark-all-read`.
-* Visibility filter: superuser sees all; everyone else sees `user_id == me` **or** `target_role ∈ {ALL, STAFF, HR, MANAGER, EMPLOYEE}` **or** `notification_type == "system"`.
-* `mark_notification_read` forbids marking another user's notification.
+* Visibility filter: superuser sees all; everyone else sees direct notifications, `ALL`/`STAFF`, only the linked employee's current business-role audience, and unscoped global `system` notifications. Accounts without a linked employee do not receive employee/HR/manager/owner broadcasts.
+* `mark_notification_read` applies the same audience rules as listing, preventing guessed IDs from reading or mutating another user's or role's notification.
 * Audit: `GET /dashboard/owner` and `/dashboard/owner/exceptions` write `ORGANIZATION_DASHBOARD_VIEWED` / `ORGANIZATION_EXCEPTION_DRILLDOWN_VIEWED` rows with filters, request id and IP.
 
 #### 2.7.9 Background work
@@ -559,7 +574,7 @@ Every tag below is also an OpenAPI tag declared in `main.py`. Auth column: **E**
 |---|---|---|---|
 | **account** | `GET /users/me` | Any | returns permissions + employee_id/code + resolved `business_role` / `scope_type` (the scope id is not exposed) |
 | | `GET /users/me/permissions` | Any | — |
-| **auth** | `POST /auth/employee/login` | public, throttled | mobile/email/username → session (or MFA challenge) |
+| **auth** | `POST /auth/employee/login` | public, throttled | mobile/username → session (or MFA challenge) |
 | | `POST /auth/super-admin/login` | public, throttled | username only → session (or MFA challenge) |
 | | `POST /auth/change-password` | Any | clears `must_change_password` **and revokes every session** (`reauthentication_required: true`) |
 | | `PATCH /auth/super-admin/username` | SA + password step-up | conflict-checked |
@@ -597,6 +612,7 @@ Every tag below is also an OpenAPI tag declared in `main.py`. Auth column: **E**
 | | `POST /`, `PATCH /{id}/cancel` | Any | self via apply/cancel |
 |  | `PATCH /{id}/approve\|reject` | perm(`work_arrangement.approve`/`reject`) | scope + no self-approval |
 | **overtime** | `GET /overtime/`, `/{id}`, `/employee/{id}/summary` | Any | business-role scope, self fallback |
+| | `PATCH /{id}/approve`, `PATCH /{id}/reject` | perm(`overtime.approve`) | employee scope + no self-action; approval cannot exceed calculated minutes |
 | **reports** | `GET /reports/attendance-matrix`, `/leave-summary` | perm(`reports.attendance`/`reports.leave`) | scope-forced filters inside the route (org scope may choose unit/department) |
 | **notifications** | `GET /notifications`, `/unread-count`, `PATCH /{id}/read`, `POST /mark-all-read` | Any | user + role broadcasts |
 | **health** | `GET /health` (10/min), `GET /db-health`, `GET /` | public | DB probe + uptime |
@@ -619,7 +635,9 @@ app/web
 │  ├─ layouts/auth.vue                # split-screen unauthenticated shell (currently unused: login.vue sets layout:false)
 │  ├─ layouts/default.vue             # sidebar + topbar + bottom mobile nav + nav gating
 │  ├─ middleware/auth.global.ts       # route guard (session required, public paths incl. /admin/login)
+│  ├─ middleware/workspace.global.ts # route visibility guard for the active workspace
 │  ├─ composables/useAuth.ts          # shared auth state, permissions, login/logout/MFA
+│  ├─ composables/useWorkspace.ts     # permission-derived workspace availability and switching
 │  ├─ composables/useHrmsApi.ts       # typed wrapper over /api/hrms/** (+ 401 → /login)
 │  ├─ components/AuthMfaChallenge.vue # shared second-factor panel (login + admin login)
 │  ├─ components/dashboard/OwnerDashboard.vue
@@ -685,7 +703,7 @@ This means **token refresh is transparent to every page**: a 15-minute access to
 |---|---|
 | `displayName`, `initials` | display helpers |
 | `hasPermission(code)` | true when `is_superuser` **or** `permissions` contains the code |
-| `businessRole` | the resolved elevated business role (or `null`) — for role-specific experiences such as the Organization Owner dashboard |
+| `businessRole` | the resolved elevated business role (or `null`) — used for descriptive labels; workspace availability and actions are permission-derived |
 | `scopeType` | `SELF` \| `DEPARTMENT` \| `UNIT` \| `ORGANIZATION`, used to adapt copy and layout; the scope *identifier* stays server-side |
 | `fetchUser(force = false)` | one `GET /api/session/me` per request; errors ⇒ signed-out state (never throws) |
 | `login(payload)` | posts to the BFF; returns the user, **or** an `MfaChallenge` the caller must complete before a session exists |
@@ -695,54 +713,67 @@ This means **token refresh is transparent to every page**: a 15-minute access to
 | `logout()` | revokes session, clears state, `navigateTo('/login')` |
 | `clear()` | forgets client state without calling the API (used after a password change, which has already killed every session) |
 
-`middleware/auth.global.ts` runs on every navigation: `await fetchUser()` → unauthenticated and not a public path ⇒ `/login?redirect=<fullPath>`; authenticated visiting a sign-in page ⇒ `/`. Public paths: `/login`, `/admin/login`, `/forgot-password`, `/reset-password`, `/invitation`, `/verify-email`, `/auth/invitation`.
+`middleware/auth.global.ts` runs on every navigation: `await fetchUser()` → unauthenticated and not a public path ⇒ `/login?redirect=<fullPath>`; authenticated visiting a sign-in page ⇒ `/`. Public paths: `/login`, `/admin/login`, `/forgot-password`, `/reset-password`, `/invitation`, `/verify-email`, `/auth/invitation`. `middleware/workspace.global.ts` then redirects a signed-in user from a route that is unavailable in the active workspace to that workspace's dashboard; API permission and row-scope checks remain authoritative.
 
 `useHrmsApi().request()` additionally hard-handles `401` mid-session: clears `auth-user` and redirects to `/login?redirect=<current>`, then rethrows.
 
-### 3.4 Navigation & visibility — one permission gate
+`useWorkspace()` keeps identity separate from presentation. It derives available workspaces from the permission codes returned by `/users/me`, defaults to `MY`, and changes only the `workspace` query context — it never logs the user out or creates another session. The selected workspace is kept in a preference cookie for refreshes and is revalidated against the currently signed-in user's permissions. The server remains authoritative for every resource and row scope; the workspace switcher is an information-architecture aid, not an authorization boundary.
 
-`layouts/default.vue` builds `navItems`, and each item may declare `permissions` (any-of). An item is visible when it holds **at least one** of them; items with no list are self-service and visible to everyone. The former `roles` gate is gone — a role is not a visibility primitive, and every capability it used to imply now corresponds to a permission.
+### 3.4 Navigation & visibility — permission-gated workspaces
+
+`layouts/default.vue` builds a navigation set for the current workspace. A workspace is available when the user has a permission that supports its tasks. Management navigation items declare any-of permission rules; self-service items rely on workspace membership and the route's permission guard. Keep `useWorkspace.ts` route rules and sidebar item gates aligned when adding a capability so a permitted route is not hidden from navigation. The former `roles` gate is gone — a role is not a visibility primitive, and every capability it used to imply now corresponds to a permission.
+
+One account can move between contexts without another login:
+
+| Workspace | Audience | Typical navigation |
+|---|---|---|
+| My Workspace | Every employee, including elevated users | Personal attendance, leave, work arrangements, overtime, shifts, holidays |
+| Team Workspace | Department/team review permissions | Team dashboard, scoped employees/attendance/leave/work-arrangement/overtime records, approvals, reports |
+| HR Workspace | HR operations permissions | Scoped workforce/attendance/leave/work-arrangement/overtime records, approvals, reports, organization |
+| Executive Workspace | `dashboard.view_organization` | Organization analytics, reports, organization overview |
+| Technical Administration | Super Admin only | Technical metrics and system administration |
 
 | Nav item | permissions (any-of) | Effective audience |
 |---|---|---|
-| Dashboard | — | everyone |
-| Employees | `employee.view` | DM, HR, OWNER |
-| Attendance | — | everyone (self-scoped by the API) |
-| Leave | — | everyone |
-| Work arrangements | — | everyone |
-| Overtime | — | everyone |
-| Approvals | `leave.approve`, `work_arrangement.approve` | DM, HR |
-| Shifts | `shift.assign`, `shift.update` | HR |
-| Holidays | — | everyone |
-| Organization | `designation.view` | HR |
-| Reports | `reports.attendance`, `reports.leave` | DM, HR, OWNER |
+| Dashboard | workspace-specific | everyone, in the active workspace |
+| Employees | `employee.view` | Team / HR / Executive where permitted |
+| Attendance, Leave, Work arrangements, Overtime, Shifts, Holidays | workspace-specific + endpoint permissions | My self-service or elevated workspace scope |
+| Approvals | `leave.approve`, `work_arrangement.approve` | Team / HR |
+| Organization | `designation.view` or workspace permission | HR / Executive |
+| Reports | `reports.attendance`, `reports.leave` | Team / HR / Executive |
 | System administration (link) | superuser only | Super Admin |
 
-Action and dialog visibility follows the same rule: `pages/attendance/index.vue` gates the correction dialog on `hasPermission('attendance.correct')` rather than on the `HR_ADMIN` role, and `pages/profile.vue` derives its display label from `business_role` + `scope_type` (so unit HR and organization HR are distinguishable). Role branching survives only where the experience itself is role-specific (`pages/index.vue`'s Owner dashboard branch).
+Action and dialog visibility follows the same rule: `pages/attendance/index.vue` gates the correction dialog on `hasPermission('attendance.correct')` rather than on the `HR_ADMIN` role, and `pages/profile.vue` derives its display label from `business_role` + `scope_type` (so unit HR and organization HR are distinguishable). Dashboard presentation now follows the active workspace (`MY`, `TEAM`, `HR`, `EXECUTIVE`, or `TECHNICAL`) rather than branching directly on a role.
 
-Super Admin gets **only** Dashboard + System administration — the business nav is replaced, because master data lives in ERP.
+Navigation is grouped by purpose inside each workspace (for example Workforce, Requests & approvals, Time & compensation, Organization, and Insights in HR). Group headings are high-contrast and each group is visually bounded, so the active workspace's operational areas are distinguishable at a glance. Team/HR dashboards show scoped KPIs and approval work only; personal shift and attendance cards appear only in My Workspace. Approval shortcuts are rendered only when the user has a matching approval capability. Super Admin gets **only** Dashboard + System administration — the business nav is replaced, because master data lives in ERP.
 
-Mobile: the 4 first non-dashboard visible items become the bottom bar, plus Profile; the sidebar collapses into a drawer.
+The shared Approvals page is available when the user can approve leave, work arrangements, **or overtime**; overtime approval must not depend on also granting one of the other approval permissions.
 
-**Important consequence:** the nav gate is *presentation only*. Every endpoint re-checks permission and row scope (§2.6), so a hidden link is convenience, never security. Conversely, an item without a permission list (Attendance, Leave, Work arrangements, Overtime, Holidays) is visible to plain employees and must be self-service-safe on the server — which it is today.
+Mobile has exactly four primary destinations: **Home**, **Workspace**, the permission-filtered contextual section (My: Leave; Team: Approvals; HR: Employees; Executive: Reports; Technical: Settings), and **More**. Workspace opens a Nuxt UI slideover that identifies the active workspace; More holds remaining pages and account actions. The desktop sidebar retains one workspace selector and grouped navigation.
+
+The workspace route guard resolves the **destination** query and validated saved preference using pure helpers. It does not instantiate reactive workspace watchers inside middleware or read the previous page's route. Owners receive My + Executive, managers My + Team, HR My + HR, and technical administrators only Technical. Regression checks: `node --test tests/workspace.test.mjs` from `app/web` (Node 24).
+
+The employee directory starts master-data and paginated directory requests independently using lazy loading, allowing client navigation to show its skeleton immediately. Changing unit resets the department filter, and leaving the page clears the search debounce timer.
+
+The workspace middleware keeps hidden routes out of the current workspace and returns users to its dashboard. It is a user-experience guard only: every endpoint still re-checks permission and row scope (§2.6). Collection views in Attendance, Leave, Work arrangements and Overtime choose self-service employee filters in `MY`, and omit the employee filter in `TEAM`/`HR` so the backend applies the manager's department or HR's unit/organization scope. Self-service actions are hidden in management views.
 
 ### 3.5 Page inventory → API map
 
 | Page | Primary endpoint(s) | Key UI capabilities | Broken/limited (see §8) |
 |---|---|---|---|
-| `pages/login.vue` | `POST /api/session/login`, `/api/session/mfa` | **workforce sign-in only** (mobile / email / username), password reveal, second-factor step, `redirect` honouring, inline error text; a temporary-password account is sent to `/settings?change-password=1` | link to `/admin/login`; no forgot-password page (copy says "Password reset: contact HR") |
+| `pages/login.vue` | `POST /api/session/login`, `/api/session/mfa` | **workforce sign-in only** (mobile / username), password reveal, second-factor step, `redirect` honouring, inline error text; a temporary-password account is sent to `/settings?change-password=1` | links to `/admin/login` and `/forgot-password` |
 | `pages/admin/login.vue` | `POST /api/session/login` (`accountType: 'super_admin'`), `/api/session/mfa` | separate technical entry point (username only), visually distinct, MFA step with first-time enrolment | business accounts are rejected by the API |
-| `pages/index.vue` | `dashboard/metrics`, `dashboard/technical-metrics` (SA only), `dashboard/owner` via component | role-specific hero copy, 4 KPI cards, shift + today's attendance cards, pending-approvals list (managers), owner analytics branch | ignores `/dashboard/widgets` |
-| `pages/employees/index.vue` | `employees/`, `org/units`, `org/departments`, `designations/` | paginated directory, filters, activate/deactivate, delete | PATCH/DELETE endpoints **do not exist** → 405 |
+| `pages/index.vue` | `dashboard/metrics`, `dashboard/technical-metrics` (SA only), `dashboard/owner` via component | workspace-specific KPIs; personal shift/attendance cards only in MY; scoped approvals only when permitted | ignores `/dashboard/widgets` |
+| `pages/employees/index.vue` | `employees/`, `org/units`, `org/departments`, `designations/` | paginated, filtered read-only directory; ERP ownership is stated in the page | Provisioning/lifecycle writes are ERP-owned and not offered in this UI |
 | `pages/employees/[id].vue` | `employees/{id}`, `employees/{id}/work-history` | profile, org placement, work history | — |
-| `pages/attendance/index.vue` | `attendance/employee/{id}/calendar`, `…/summary`, `attendance/corrections` | month calendar, status pie, summary tiles, correction request dialog | dialog POSTs require **HR_ADMIN**; employee submits get 403 |
-| `pages/leaves/index.vue` | `leaves/`, `leaves/types`, `leaves/balance/employee/{id}` | apply leave (type/date/reason/half-day), balance cards, own history, cancel/early-return | — |
-| `pages/work-arrangements/index.vue` | `work-arrangements/` | request WFH, list, cancel | only WFH accepted server-side |
-| `pages/approvals/index.vue` | `attendance/corrections`, `attendance/records/{id}`, `leaves/?status=PENDING`, `leaves/?status=CANCELLATION_PENDING`, `work-arrangements/?status=PENDING` | tabs per queue (permission-driven), approve, reject with reason modal | attendance tab approve → 403 ERP; no overtime tab |
-| `pages/shifts/index.vue` | `shifts/`, `shifts/assignments`, `org/units`, `employees/` | shift definitions + assignments tables, "New shift"/"Assign shift" dialogs | POST endpoints **do not exist** → 405 |
+| `pages/attendance/index.vue` | My: `attendance/employee/{id}/calendar`, `…/summary`, `attendance/corrections`; Team/HR: `attendance/` | My calendar and summary; correction request is shown only to `attendance.correct` users; Team/HR scoped records table | scoped collection currently identifies employees by ID; row-level API scope applies |
+| `pages/leaves/index.vue` | My: `leaves/`, `leaves/types`, `leaves/balance/employee/{id}`; Team/HR: `leaves/` | My balance/apply/history; Team/HR scoped request list linking to approvals | — |
+| `pages/work-arrangements/index.vue` | `work-arrangements/` | My request/list/cancel; Team/HR scoped request list | only WFH accepted server-side |
+| `pages/approvals/index.vue` | Leave, work-arrangement, and overtime queues | queues and controls gated by matching permissions; rejection requires a reason; overtime approval defaults to calculated minutes | attendance corrections are ERP-confirmed, not approved here; overtime rows currently show employee IDs |
+| `pages/shifts/index.vue` | `shifts/`, `shifts/assignments`, `org/units`, `employees/` | read-only shift definitions and assignments synchronized from ERP | writes intentionally not offered; ERP owns the source data |
 | `pages/holidays/index.vue` | `holidays/lists`, `org/units` | calendar + holiday list viewer | `canManage` hard-coded `false` (correct, ERP-owned) |
-| `pages/organization/index.vue` | `org/organization`, `org/units`, `org/departments`, `designations/` | tabs per entity, enable/disable, delete | PATCH/DELETE are ERP-only → 405 |
-| `pages/overtime/index.vue` | `overtime/`, `overtime/employee/{id}/summary` | own + scoped overtime records and monthly summary | read-only (no approve path) |
+| `pages/organization/index.vue` | `org/organization`, `org/units`, `org/departments`, `designations/` | read-only tabs for organization structure synchronized from ERP | writes intentionally not offered |
+| `pages/overtime/index.vue` | My: `overtime/`, `overtime/employee/{id}/summary`; Team/HR: `overtime/` | My monthly summary and records; Team/HR scoped records | management collection has no employee name or date filters yet |
 | `pages/reports/index.vue` | `reports/attendance-matrix`, `reports/leave-summary` | month picker, attendance matrix, leave summary; tabs gated by permission | — |
 | `pages/notifications.vue` | `notifications`, `notifications/{id}/read`, `notifications/mark-all-read` | list, read, mark-all | — |
 | `pages/profile.vue` | `users/me` (via composable) | identity, role label, employee code | — |
@@ -752,8 +783,8 @@ Mobile: the 4 first non-dashboard visible items become the bottom bar, plus Prof
 
 * Tokens in `app/assets/css/main.css` (`--people-canvas`, `--people-surface`, `--people-border`, `--people-blue/mint/lavender/peach/yellow` + `-ink` pairs) drive every card/icon tone; `people-card`, `people-icon`, `people-icon--*` are the shared class contracts.
 * Every page header follows: eyebrow label → `h2` title → one-line subtitle → right-aligned primary action.
-* Skeletons (`USkeleton`) for first paint, `UAlert` "taking a short break" pattern with a retry action for failed dashboards, `UToast` for action results, `confirm()` for destructive actions.
-* Breakpoints: single column → `sm:grid-cols-2` → `xl:grid-cols-3/4`; sidebar is fixed ≥ `lg`, drawer below; bottom nav < `lg`; `min-h-11` tap targets; safe-area padding on mobile nav.
+* Skeletons (`USkeleton`) for first paint, `UAlert` "taking a short break" pattern with a retry action for failed dashboards, `UToast` for action results, and Nuxt UI confirmation modals for destructive actions.
+* Breakpoints: single column → `sm:grid-cols-2` → `xl:grid-cols-3/4`; sidebar is fixed ≥ `lg`; grouped bottom navigation and bottom sheets below `lg`; `min-h-11` tap targets; safe-area padding on mobile nav.
 * Dark mode via `UColorModeButton`; charts use `nuxt-echarts` with SVG/canvas renderers registered in `nuxt.config.ts`.
 
 ---
@@ -804,9 +835,9 @@ On approval, each day becomes `WORK_FROM_HOME` in attendance, so the calendar st
 * approved, already started ⇒ becomes `CANCELLATION_PENDING` (reason + today's date required) and waits for the manager; the UI labels the toast accordingly.
 
 **Attendance (`/attendance`).** `GET /attendance/employee/{id}/calendar` + `/summary` + `attendance/corrections` → month grid, status pie, tiles.
-⚠️ Tapping **Request correction** POSTs to `POST /attendance/corrections`, which requires the `HR_ADMIN` **role** → `403 "HR Admin access required"` for an employee today (§8.1 A3).
+The correction-request action is not available to a plain employee: it is hidden unless the user has `attendance.correct`, and the API independently enforces that permission and row scope. Authorized HR users can submit corrections from the personal attendance view; ERP reconciliation remains the final confirmation (§8.1 A3).
 
-**Overtime (`/overtime`).** `GET /overtime/` self-scoped + monthly summary (approved minutes only). Read-only.
+**Overtime (`/overtime`).** `GET /overtime/` self-scoped + monthly summary (approved minutes only). Approvers process the scoped pending queue in `/approvals`; self-action is rejected and approval minutes cannot exceed the ERP-calculated amount.
 
 **Notifications (`/notifications`).** `GET /notifications` (user + role broadcasts), `PATCH …/{id}/read`, `POST …/mark-all-read`; server prunes with the retention rules in §2.7.9.
 
@@ -814,9 +845,7 @@ On approval, each day becomes `WORK_FROM_HOME` in attendance, so the calendar st
 
 ### 4.2 F2 — DEPARTMENT_MANAGER (approve & report for one department)
 
-**Login/Dashboard.** Same door; `hasPermission('leave.approve')` and `employee.view` make it a "manager".
-`GET /dashboard/metrics` → `has_mgr_access = true`; scope = **their department** (`get_employee_scope` ⇒ `dept_scope_ids`), thus: headcount, today's attendance breakdown, attendance rate, today/month OT hours, pending leave + correction counts (excluding self), and up to 5 items *each* from leave, correction, overtime and work-arrangement queues merged into `pendingApprovals` with `type`, employee name/code, department, detail, `timeAgo`.
-UI: 4 KPI cards (department members, present, on leave, needs attention) + *Pending approvals* card linking to `/approvals`.
+**Login/Dashboard.** Same door; `hasPermission('leave.approve')` and `employee.view` make the Team workspace available. In `MY`, the user sees personal metrics and shift/attendance cards. In `TEAM`, `GET /dashboard/metrics` returns data scoped to **their department** (`get_employee_scope` ⇒ `dept_scope_ids`): headcount, attendance breakdown, overtime and pending-work indicators. Personal cards are not shown in this workspace; approval summaries/shortcuts appear only if the user holds leave or work-arrangement approval permission.
 
 **Approvals (`/approvals`).** Tabs are permission-driven: `leave.approve` (+`leave.reject` for the reject button) and `work_arrangement.approve`; the attendance tab is a read-only queue (ERP confirms corrections).
 * Leave queue loads `PENDING` **and** `CANCELLATION_PENDING` in parallel and picks the right endpoint per row (`/approve` vs `/cancellation/approve`).
@@ -830,9 +859,11 @@ UI: 4 KPI cards (department members, present, on leave, needs attention) + *Pend
 
 ### 4.3 F3 — HR_ADMIN (unit operations, or organization-wide when scoped so)
 
-**Dashboard.** Scope = **their unit** (`unit_scope_ids`). KPI labels switch to "Unit members"; same 4 cards, but `pendingApprovals` includes unit-wide leave/correction/overtime/WFH items minus their own.
+**Dashboard.** In `MY`, HR sees personal metrics and shift/attendance cards. In `HR`, dashboard metrics use the configured `UNIT` or `ORGANIZATION` scope and label the headcount accordingly; personal cards are not mixed into the HR view.
 
-**Employees (`/employees`).** Unit-limited directory with search/filters, pagination (`page_size` ≤ 100), detail page with work history. Provisioning is ERP-only: `POST /employees/onboard` returns `410`, and the page's own activate/deactivate/delete buttons hit non-existent routes (§8.1 A1).
+**Employees (`/employees`).** Unit-limited directory with search/filters, pagination (`page_size` ≤ 100), detail page with separately paginated work history. Provisioning is ERP-only: `POST /employees/onboard` returns `410`, and the page explains ERP ownership without exposing unsupported activate, deactivate, delete, or edit actions.
+
+**Growing-list contract.** Nuxt-facing business lists use `page` (default 1), `page_size` (default 25, maximum 100), `search`, `sort_by`, `sort_order`, and their domain filters. Responses use `PaginatedResponse` navigation metadata. Authorization and filters are applied before counts; sort fields are endpoint allowlists and SQL ordering always appends the row identifier. Employee-month calendars, aggregate summaries, effective schedule windows, leave balances by configured type, one holiday list's entries, and policy-limited session lists are bounded collections rather than business-list exceptions. ERP ingestion and change-feed response shapes remain integration contracts and are unchanged.
 
 **Attendance (`/attendance`).** Read scope covers `attendance.view`, `view_unit`, `view_department`; can run the engine with `POST /attendance/process` (`attendance.process`) for an authorized unit/employee, and can raise corrections for records inside their scope (`attendance.correct` + `require_employee_access` → 403 `"You do not have access to this employee"` otherwise).
 
@@ -848,7 +879,7 @@ UI: 4 KPI cards (department members, present, on leave, needs attention) + *Pend
 
 ### 4.4 F4 — ORGANIZATION_OWNER (analytics only)
 
-**Dashboard (`/`)** renders `components/dashboard/OwnerDashboard.vue` instead of the standard stats grid, and never the approvals card.
+The owner can switch between `My Workspace` and `Executive Workspace`. `MY` shows employee self-service; the Executive dashboard renders `components/dashboard/OwnerDashboard.vue` and has no approval actions.
 
 ```
 GET /dashboard/owner            (from_date, to_date, unit_id)
@@ -863,7 +894,7 @@ GET /dashboard/owner/exceptions (kind, target_date, unit_id, page, page_size)
 
 GET /org/units                  → unit filter options
 ```
-Owner permissions deliberately exclude every approval and self-service permission (`test_organization_owner_has_analytics_but_no_operational_approval_permissions` asserts this). Reports give them whole-organization attendance/leave/overtime.
+Owner permissions exclude approval and HR operations permissions. The Owner still receives base self-service permissions. Reports give them whole-organization attendance/leave/overtime.
 
 ### 4.5 F5 — SUPER_ADMIN (technical administrator)
 
@@ -917,7 +948,9 @@ AttendanceCorrectionRequest  status: PENDING (one per attendance_record) ──�
 
 ShiftAssignment  ACTIVE ──cancel──▶ CANCELLED   ·   no overlapping ACTIVE windows per employee.
 
-OvertimeRecord  PENDING ──approve/reject──▶ (service only; no HTTP surface today)
+OvertimeRecord  PENDING ──approve/reject──▶ APPROVED | REJECTED
+  Actions require overtime.approve + row scope; a row lock prevents competing decisions;
+  approved_minutes must be positive and no greater than calculated_minutes.
 ```
 
 ---
@@ -946,9 +979,10 @@ OvertimeRecord  PENDING ──approve/reject──▶ (service only; no HTTP sur
 |---|---|
 | `test_main.py` | root + health endpoints |
 | `test_auth_setup.py` | limiter wiring, user schemas, OWNER permission boundary, invalid-login robustness, CORS preflight |
-| `test_auth_primitives.py` | token/crypto primitives (refresh entropy + hash-only storage, audience separation, expiry, wrong key), TOTP accept/reject, password policy (weak, personal-info, passphrase, breach-checker selection + fail-open), and the throttle rules: per-pair blocking, geometric growth with a cap, short delay for a typo, one employee cannot lock out colleagues, success clears counters, separate refresh budget, key normalisation, store-backend misconfiguration, counter expiry |
+| `test_auth_primitives.py` | token/crypto primitives (refresh entropy + hash-only storage, audience separation, expiry, wrong key), TOTP accept/reject, drift attribution (`match_totp_step` reports the step that matched, and `is_totp_replay` treats only a spent step as reuse), secret-box round-trip/nonce-uniqueness/legacy-plaintext/tamper-and-wrong-key failure, password policy (weak, personal-info, passphrase, breach-checker selection + fail-open), and the throttle rules: per-pair blocking, geometric growth with a cap, short delay for a typo, one employee cannot lock out colleagues, success clears counters, separate refresh budget, key normalisation, store-backend misconfiguration, counter expiry |
 | `test_auth_sessions.py` | session lifecycle over HTTP: direct session issuance at login, rotation + old-token rejection, replay of a logged-out token not destroying sibling sessions, logout-everywhere, device listing, idle timeout, absolute timeout that refreshing cannot extend, refresh-TTL expiry, the concurrent-refresh race (exactly one winner), audited reuse detection, malformed tokens |
 | `test_auth_hardening_http.py` | every workforce role through one business endpoint, technical↔business door separation, no account enumeration, secret-free auth audit events, login throttling + recovery, refresh-abuse throttling, password change ending all sessions, access token surviving until expiry, HR temporary-password reset revocation + forced change, must-change-password clearing, Super Admin MFA challenge completion, challenge token not usable as an access token, employee MFA opt-in |
+| `test_mfa_totp.py` | the second factor's own guarantees: a code authenticates exactly once (and a replay says so), a drifted code is accepted once and then spent, recovery codes are unaffected by TOTP single use, an abandoned replacement keeps the existing factor working (the regression where it used to turn MFA off), confirming a replacement promotes the new seed and retires the old one, a Super Admin is never forced to re-enrol after an abandoned reset, seeds are ciphertext at rest and absent from every response, and recovery codes regenerate/step-up correctly |
 | `test_business_role_authorization.py` | the authorization matrix: base permissions for everyone, manager/unit-HR/org-HR/owner/super-admin reach, HR bundle identical across scopes, org scope not conferring owner analytics |
 | `test_business_role_provisioning.py` | role assignment/transfer reconciliation (a moved unit HR cannot keep the old unit's scope), legacy-only rows repaired on write, explicit `null` beating a stale legacy `role`, audited role changes |
 | `test_permission_grants.py` | static guard: every permission code in the catalog is granted, and every role bundle key is a real role |
@@ -963,6 +997,7 @@ OvertimeRecord  PENDING ──approve/reject──▶ (service only; no HTTP sur
 | `test_milestone_5.py` | WFH creation/overlap, approval + attendance marking, rejection & cancellation |
 | `test_milestone_6.py` | attendance matrix report, leave balance summary report |
 | `test_notifications.py` | notification lifecycle |
+| `test_notification_audience.py` | role-scoped notification listing and mark-read authorization |
 | `test_audit_and_workflows.py` | self-approval prevention (leave/correction/overtime/WFH), early-return day accounting, overtime self-approval + monthly summary filtering, WFH-aware processor, org CRUD validation, detail endpoints, notification + manager dashboard |
 | `test_shift_schedule_batching.py` | batched schedule context equals per-date resolution, fallback outside context, upcoming search + schema, single-query employee shift listing |
 | `test_migration_setup.py` | Postgres config + Alembic files present |
@@ -981,23 +1016,24 @@ These are verified against the current code and are the highest-value item in th
 
 | # | Symptom | Root cause | Severity | Decision owner |
 |---|---|---|---|---|
-| **A1** | Employees page "activate/deactivate" and "delete" fail | `routers/employees.py` exposes only `GET /`, `POST /onboard` (410), `GET /{id}`, `GET /{id}/work-history`. Lifecycle writes exist only at `/integrations/erp/employees/{id}/deactivate` and `…/activate`. Delete exists only in `EmployeeService.delete_employee` (unused by any router) | High | Backend + Frontend lead |
-| **A2** | Overtime can never be approved in the product | `OvertimeService.approve_overtime/reject_overtime` are unreachable: `routers/overtime.py` is read-only and the Approvals page has no overtime tab even though DM/HR hold `overtime.approve` | High | Product + Backend lead |
-| **A3** | "Request correction" in Attendance fails for employees | Intentional: `POST /attendance/corrections` requires `attendance.correct` plus row scope, so a plain employee gets 403 and the attendance page hides the dialog for them. The Approvals → Attendance approve/reject endpoints have been removed entirely, because ERP confirmation is the approval | Low | Product (governance) + Frontend lead |
-| **A4** | Shifts page create/assign fail | `routers/shifts.py` is read-only; writes live at `/integrations/erp/shifts/**` | Medium | Backend lead |
-| **A5** | Organization page enable/disable/delete fail | `org/units`, `org/departments` and `designations/` routers expose GET only; writes are ERP-only | Medium | Frontend lead |
+| **A1** | ~~Employees page exposes lifecycle actions that fail~~ **Resolved** | Current directory is read-only and explicitly identifies ERP as the source of truth; the HRMS UI no longer offers activate/deactivate/delete actions. Backend lifecycle operations remain ERP-owned. | Resolved | Frontend lead |
+| **A2** | ~~Overtime approval methods were unreachable~~ **Resolved** | Scoped `PATCH /overtime/{id}/approve` and `/reject` routes and an `overtime.approve` queue tab now expose the existing workflow. State is locked during action; zero/negative/over-calculated approvals are rejected; self-action is blocked. | Resolved | Backend + Frontend |
+| **A3** | ~~Plain employees could see an attendance correction action they could not use~~ **Resolved** | The current UI hides correction submission unless `attendance.correct` is present, and the API enforces the same permission plus row scope. Correction approval is ERP-confirmed; no HRMS approve/reject routes are exposed. | Resolved | Frontend + Backend |
+| **A4** | ~~Shifts page create/assign fail~~ **Resolved** | Current Shifts UI only reads ERP-synchronized definitions and assignments; it does not offer create/assign controls. | Resolved | Frontend lead |
+| **A5** | ~~Organization page enable/disable/delete fail~~ **Resolved** | Current Organization UI is explicitly read-only; write controls are not rendered because organization master data is ERP-owned. | Resolved | Frontend lead |
 | **A6** | Holidays create/add buttons | Hidden by `canManage = false` (correct today) — the code remains and will 405 if ever enabled | Low | Frontend lead |
 | **A7** | ~~`attendance.approve_correction` is held by nobody~~ **Fixed** | The correction surfaces now gate on `attendance.correct` (which HR holds) and the approve/reject routes were removed, so `tests/test_permission_grants.py` passes with no dead-end code | Resolved | Architecture lead |
 | **A8** | `POST /attendance/checkins` + `/checkins/bulk` are 403 stubs | Intentional (ERP supplies punches) but the punch ingestion path is therefore untested through HTTP; publishing them for ERP would be cleaner than a separate ERP route | Low/Medium | Architecture lead |
-| **A9** | Dashboard widget API is unused | `GET /dashboard/widgets` exists and is permission-aware, while `pages/index.vue` still decides its own layout from `scope_type` (plus the genuinely role-specific Owner branch) — the widget API remains the single place to consolidate that | Medium | Frontend lead |
+| **A9** | Dashboard widget API is not yet consumed | `GET /dashboard/widgets` exists and is permission-aware; workspace dashboards now provide the presentation context, while widget-level composition remains a future consolidation point | Medium | Frontend lead |
 | **A10** | Invitation UI missing | `/auth/invitation/*` + email templates exist, `middleware` lists `/invitation` and `/auth/invitation` as public, but no page/route exists and no router calls `create_invitation_for_user` | Medium | Product + Frontend lead |
+| **A11** | ~~Mobile Attendance showed “Correction pending” when no correction existed~~ **Resolved** | The mobile row now renders that state only when an actual pending correction matches the record; its correction action also uses the same status/permission conditions as desktop. | Resolved | Frontend |
 
 ### 8.2 Functional gaps (backend behaviour)
 
 * **No notification is created for any workflow** — `create_notification` is only used by tests. Applying/approving/rejecting leave or WFH notifies nobody in-app; approvers rely on dashboard/queue polling.
 * **`department_approvers` is decorative** — the table exists but no leave/WFH/shift/expense routing consults it; approvals are driven purely by role + unit/department scope.
 * **Attendance processing is manual** — no scheduler calls `process_attendance_batch`; someone (or a cron outside this repo) must POST `/attendance/process`.
-* **Overtime never reaches attendance end-to-end in-product**: ERP bulk-syncs records; there is no HRMS-computed-to-approve path exposed.
+* Overtime approval records are now reviewable in HRMS; source calculation and record synchronization remain ERP-owned.
 * **`leave.manage` grants allocation/type/period writes but allocation has no HTTP endpoint for org-wide bulk runs** — it is service-level only (`LeaveService.allocate_leaves`), exercised by tests.
 * **`attendance_discrepancies`** is modelled and seeded but never written by the engine.
 
@@ -1006,7 +1042,8 @@ These are verified against the current code and are the highest-value item in th
 * **Stateless access tokens bound the revocation window.** A password change or "sign out everywhere" ends every refresh chain immediately, but an access token already issued stays valid until it expires (15 min business, 5 min privileged) because JWT validation cannot consult the session row. This is deliberate (no per-request session lookup, no cached permissions) and the reason the TTL is minutes — see §2.5.3. A denylist/`jti` check is the upgrade path if that window is ever judged too wide (D7).
 * **Super Admin has organization-wide read scope** via `get_permission_scope`; production posture depends on keeping that account break-glass only. Set `MFA_REQUIRED_FOR_SUPER_ADMIN=true` and enrol before going live — the API logs a startup warning while it is off.
 * **Throttling is only as shared as its store.** `AUTH_THROTTLE_BACKEND=memory` (the default) means each worker counts separately; production validates against this at startup (D9), but a single-worker deployment still has a single point of failure for the counters.
-* **A throttled login tells the user *that* they must wait, not *how long*.** The API returns a correct `429` with `Retry-After: <seconds>`, but the BFF's `upstreamError` rebuilds the error from the body, so the countdown is dropped and the sign-in toast can only show the generic message. Forwarding the header (and rendering it in the login page) is a small, self-contained follow-up if the countdown is wanted.
+* **Login throttling feedback**: the BFF forwards the upstream `Retry-After` header and includes the retry countdown in the sign-in error message. The displayed time is the server's retry interval; it is not a client-side lockout timer.
+* **Notification audience isolation**: role broadcasts are limited to the linked employee's current business role; global `system` visibility applies only when no target role is set. Listing, unread counts, mark-all, and single mark-read share the same authorization predicate.
 * **Anonymous `/health`** leaks DB reachability + uptime (rate-limited to 10/min).
 * `ensure_permission(email, path, method)` in `core/auth.py` returns `bool(email)` for everything — dead/placeholder authorization helper; do not build on it.
 * Seed defaults (`SuperAdmin@123`, dev JWT secret) are guarded by `validate_runtime_secrets()`; the development shortcut is an explicit allow-list of environment names, so a typo such as `ENVIRONMENT=Production` no longer disables the checks.
@@ -1017,9 +1054,9 @@ These are verified against the current code and are the highest-value item in th
 
 | # | Decision | Options | Recommendation |
 |---|---|---|---|
-| D1 | **Is this "employees read-only + ERP writes" a temporary migration state or the target?** | (a) target — delete dead UI actions; (b) temporary — implement HRMS write endpoints guarded by `employee.update` | Pick explicitly, then make §8.1 A1/A4/A5 consistent with it. If (a): remove the buttons so users never see 405s |
+| D1 | **Is this "employees read-only + ERP writes" a temporary migration state or the target?** | (a) target — keep the HRMS views read-only; (b) temporary — implement HRMS write endpoints guarded by `employee.update` | Current implementation follows (a): dead lifecycle controls have been removed; revisit only if ownership moves from ERP. |
 | D2 | **Attendance correction governance** | (a) ERP-only confirmation (current server behaviour) — remove approve/reject from UI and stop offering employee submission; (b) allow employee submission + manager approval inside HRMS, ERP reconciles async | (b) matches the product's own permissions and queue UI, but requires deciding who wins conflicts with ERP. Ship (a) as the interim truthful UI |
-| D3 | **Overtime approval surface** | (a) add `PATCH /overtime/{id}/approve` and `/reject` + an Approvals tab + notifications; (b) leave overtime read-only | (a) — the service, permissions, and months of summary UI already exist; it is the cheapest complete workflow |
+| D3 | **Overtime approval surface** | (a) add `PATCH /overtime/{id}/approve` and `/reject` + an Approvals tab + notifications; (b) leave overtime read-only | Core scoped actions and the Approvals tab are implemented; in-app notifications remain part of §8.2 |
 | D4 | **Notifications on workflow events** | (a) emit on apply/approve/reject/cancel to the actor + approver + employee; (b) keep polling dashboards | (a) — `create_notification` already exists; wire it in the four services and reuse `link`/`reference_id` |
 | D5 | **Approver routing** | (a) keep role+scope routing; (b) use `department_approvers` | Decide before exposing more approval types; today the table is misleading |
 | ~~D6~~ | ~~**`attendance.approve_correction`**~~ **Settled** | — | Resolved by removing the code and the approve/reject routes, and gating corrections on `attendance.correct` + row scope (§2.6.2). No dead-end permission code remains |
@@ -1053,13 +1090,13 @@ These are verified against the current code and are the highest-value item in th
 **Checked in the API but granted to no role:** none — `tests/test_permission_grants.py` asserts both directions (no enforced code is ungranted; no role bundle repeats a base code).
 
 **Granted to some role but never enforced in the API** (safe to keep as forward-compatible vocabulary, hazardous to treat as a security control):
-`user.view`, `user.create`, `user.deactivate`, `employee.update`, `employee.deactivate`, `employee.view_self`, `attendance.view_self`, `designation.view/create/update/delete`, `leave.view_self`, `overtime.view_self`, `overtime.approve`, `shift.view_self`, `shift.assign`, `shift.update`, `reports.view`, `reports.overtime`, `reports.salary_cost`, `salary_cost.view_unit`, `salary_cost.view_department`, `audit.view`, `work_arrangement.apply`, `work_arrangement.view_self`.
+`user.view`, `user.create`, `user.deactivate`, `employee.update`, `employee.deactivate`, `employee.view_self`, `attendance.view_self`, `designation.view/create/update/delete`, `leave.view_self`, `overtime.view_self`, `shift.view_self`, `shift.assign`, `shift.update`, `reports.view`, `reports.overtime`, `reports.salary_cost`, `salary_cost.view_unit`, `salary_cost.view_department`, `audit.view`, `work_arrangement.apply`, `work_arrangement.view_self`.
 
 *Derived by `tests/test_permission_grants.py` (`granted − enforced`), so this list cannot drift silently.*
 
-*Frontend-only gates:* `shift.assign` / `shift.update` (nav + Shifts page) are not checked by any route — which is why the Shifts page renders create buttons whose endpoints do not exist (§8.1 A4). `attendance.correct` gates the correction dialog, and the API enforces it as well.
+*Frontend-only gates:* `shift.assign` / `shift.update` are not enforced because shift writes remain ERP-only; current Shifts UI is read-only. `attendance.correct` gates the correction dialog, and the API enforces it as well.
 
-*Enforced today (23):* `employee.view`, `employee.create`, `attendance.view` / `view_unit` / `view_department` / `process` / `correct`, `leave.apply` / `approve` / `reject` / `cancel` / `manage`, `work_arrangement.approve` / `reject` / `cancel` / `manage`, `overtime.view` / `view_department`, `reports.attendance` / `reports.leave`, `dashboard.view_organization`, `system.configure` (dashboard widget gating), `user.update` (HR password reset).
+*Enforced today (24):* `employee.view`, `employee.create`, `attendance.view` / `view_unit` / `view_department` / `process` / `correct`, `leave.apply` / `approve` / `reject` / `cancel` / `manage`, `work_arrangement.approve` / `reject` / `cancel` / `manage`, `overtime.view` / `view_department` / `approve`, `reports.attendance` / `reports.leave`, `dashboard.view_organization`, `system.configure` (dashboard widget gating), `user.update` (HR password reset).
 
 ### B. Database tables (28)
 

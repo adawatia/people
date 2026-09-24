@@ -36,6 +36,8 @@ ACCESS_TOKEN_AUDIENCE = "fastapi-users:auth"
 MFA_CHALLENGE_AUDIENCE = "hrms:mfa"
 ACCESS_TOKEN_PURPOSE = "access"
 MFA_CHALLENGE_PURPOSE = "mfa"
+PASSWORD_RECOVERY_AUDIENCE = "hrms:password-recovery"
+PASSWORD_RECOVERY_PURPOSE = "password-recovery"
 # 48 random bytes → 64 URL-safe characters ≈ 384 bits of entropy.
 REFRESH_TOKEN_BYTES = 48
 
@@ -100,6 +102,33 @@ def create_mfa_challenge_token(
         "aud": [MFA_CHALLENGE_AUDIENCE],
         "typ": MFA_CHALLENGE_PURPOSE,
         "enrol": bool(enrollment_required),
+        "iat": now,
+        "exp": now + timedelta(seconds=ttl_seconds),
+    }
+    return jwt.encode(payload, secret, algorithm=algorithm)
+
+
+def create_password_recovery_token(
+    *,
+    subject: str | int,
+    secret: str,
+    ttl_seconds: int,
+    now: datetime,
+    recoverable: bool,
+    nonce: str,
+    algorithm: str = "HS256",
+) -> str:
+    """Mint a short-lived, single-purpose password-recovery token.
+
+    ``recoverable`` is false for unknown/un-enrolled accounts, keeping the start
+    response shape identical without exposing account existence.
+    """
+    payload: dict[str, Any] = {
+        "sub": str(subject),
+        "aud": [PASSWORD_RECOVERY_AUDIENCE],
+        "typ": PASSWORD_RECOVERY_PURPOSE,
+        "ok": bool(recoverable),
+        "nonce": nonce,
         "iat": now,
         "exp": now + timedelta(seconds=ttl_seconds),
     }

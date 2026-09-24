@@ -51,7 +51,7 @@ function baseCookieOptions() {
 export function setAccessCookie(event: H3Event, token: string, expiresInSeconds?: number | null) {
   setCookie(event, SESSION_COOKIE, token, {
     ...baseCookieOptions(),
-    maxAge: Math.max(60, Math.floor(expiresInSeconds ?? 900))
+    maxAge: Math.max(0, Math.floor(expiresInSeconds ?? 900))
   })
 }
 
@@ -63,7 +63,7 @@ export function setAccessCookie(event: H3Event, token: string, expiresInSeconds?
 export function setRefreshCookie(event: H3Event, token: string, absoluteExpiresAt?: string | null) {
   const deadline = absoluteExpiresAt ? Date.parse(absoluteExpiresAt) : Number.NaN
   const maxAge = Number.isFinite(deadline)
-    ? Math.max(60, Math.floor((deadline - Date.now()) / 1000))
+    ? Math.max(0, Math.floor((deadline - Date.now()) / 1000))
     : 60 * 60 * 24 * 30
   setCookie(event, REFRESH_COOKIE, token, { ...baseCookieOptions(), maxAge })
 }
@@ -105,12 +105,30 @@ export function refreshSession(event: H3Event, refreshToken: string): Promise<Re
   return pending
 }
 
-export function upstreamError(error: unknown) {
-  const candidate = error as { statusCode?: number, status?: number, data?: { detail?: unknown }, message?: string }
+export function upstreamError(error: unknown, event?: H3Event) {
+  const candidate = error as {
+    statusCode?: number
+    status?: number
+    data?: { detail?: unknown }
+    message?: string
+    response?: { headers?: Headers }
+  }
+  const retryAfter = candidate.response?.headers?.get('retry-after')
+  const retryAfterSeconds = retryAfter && /^\d+$/.test(retryAfter) ? Number(retryAfter) : null
+  if (event && retryAfterSeconds !== null) setResponseHeader(event, 'Retry-After', retryAfterSeconds)
+  if (upstreamStatus(error) >= 500) return createError({ statusCode: upstreamStatus(error), statusMessage: 'The HRMS service could not complete this request. Please try again.' })
   const detail = candidate.data?.detail
-  const message = typeof detail === 'string'
+  const validationMessage = Array.isArray(detail)
+    ? detail.find((item): item is { msg?: unknown } => typeof item === 'object' && item !== null && 'msg' in item)?.msg
+    : undefined
+  const upstreamMessage = typeof detail === 'string'
     ? detail
-    : (typeof detail === 'object' && detail && 'reason' in detail ? String((detail as { reason: unknown }).reason) : candidate.message)
+    : (typeof validationMessage === 'string'
+        ? validationMessage
+        : (typeof detail === 'object' && detail && 'reason' in detail ? String((detail as { reason: unknown }).reason) : candidate.message))
+  const message = retryAfterSeconds === null
+    ? upstreamMessage
+    : `${upstreamMessage || 'Too many attempts.'} Try again in ${retryAfterSeconds} seconds.`
   return createError({
     statusCode: candidate.statusCode || candidate.status || 502,
     statusMessage: message || 'The HRMS service could not complete this request.',

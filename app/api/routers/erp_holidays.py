@@ -1,3 +1,5 @@
+from db.models import now_ist
+
 """ERP-owned organization-wide holiday synchronization."""
 
 from datetime import date
@@ -32,8 +34,8 @@ async def sync_holidays_bulk(
     if calendar is None:
         calendar = HolidayList(
             name="ERP Holiday Calendar",
-            from_date=date(date.today().year, 1, 1),
-            to_date=date(date.today().year, 12, 31),
+            from_date=date(now_ist().date().year, 1, 1),
+            to_date=date(now_ist().date().year, 12, 31),
             weekly_off_day="Sunday",
             is_default=True,
         )

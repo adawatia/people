@@ -1,4 +1,5 @@
 import pytest
+
 from core.database import async_session_maker
 from db.models import Notification
 from routers.notifications import create_notification

@@ -1,17 +1,18 @@
 from datetime import date, datetime, time, timedelta
+
 from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.pagination import PaginatedResponse
 from db.models import (
     AttendanceCorrectionRequest,
-    now_ist,
     AttendancePunch,
     AttendanceRecord,
     Employee,
     LeaveApplication,
-    User,
     WorkArrangementRequest,
+    now_ist,
 )
 from repositories.attendance_punch_repo import AttendancePunchRepository
 from repositories.attendance_record_repo import AttendanceRecordRepository
@@ -550,6 +551,38 @@ class AttendanceService:
         )
         return [AttendanceRecordRead.model_validate(r) for r in records]
 
+    async def list_attendance_page(
+        self,
+        employee_id: int | None = None,
+        from_date: date | None = None,
+        to_date: date | None = None,
+        status_filter: str | None = None,
+        page: int = 1,
+        page_size: int = 25,
+        unit_ids: set[int] | None = None,
+        department_ids: set[int] | None = None,
+        search: str | None = None,
+        sort_by: str | None = None,
+        sort_order: str = "desc",
+    ) -> PaginatedResponse[AttendanceRecordRead]:
+        if from_date and to_date and from_date > to_date:
+            raise HTTPException(422, "Start date must not be after end date")
+        result = await self.record_repo.list_records_page(
+            search=search, sort_by=sort_by, sort_order=sort_order,
+            employee_id=employee_id,
+            from_date=from_date,
+            to_date=to_date,
+            status=status_filter,
+            page=page,
+            page_size=page_size,
+            unit_ids=unit_ids,
+            department_ids=department_ids,
+        )
+        pending_ids = await self.record_repo.pending_correction_ids([r.id for r in result["items"]])
+        items = [AttendanceRecordRead.model_validate(r).model_copy(update={"has_pending_correction": r.id in pending_ids}) for r in result["items"]]
+
+        return PaginatedResponse[AttendanceRecordRead](**dict(result, items=items))
+
     async def get_attendance_record(self, record_id: int) -> AttendanceRecordRead:
         record = await self.record_repo.get_by_id(record_id)
         if not record:
@@ -572,7 +605,8 @@ class AttendanceService:
             to_date = date(year, month + 1, 1) - timedelta(days=1)
 
         records = await self.record_repo.get_month_records(emp_id, from_date, to_date)
-        return [AttendanceRecordRead.model_validate(r) for r in records]
+        pending_ids = await self.record_repo.pending_correction_ids([r.id for r in records])
+        return [AttendanceRecordRead.model_validate(r).model_copy(update={"has_pending_correction": r.id in pending_ids}) for r in records]
 
     async def get_attendance_summary(
         self,
@@ -624,3 +658,30 @@ class AttendanceService:
             department_ids=department_ids,
         )
         return [AttendanceCorrectionRead.model_validate(c) for c in corrections]
+
+    async def list_corrections_page(
+        self,
+        status: str | None = None,
+        employee_id: int | None = None,
+        unit_ids: set[int] | None = None,
+        department_ids: set[int] | None = None,
+        search: str | None = None,
+        sort_by: str | None = None,
+        sort_order: str = "desc",
+        page: int = 1,
+        page_size: int = 25,
+    ) -> PaginatedResponse[AttendanceCorrectionRead]:
+        result = await self.record_repo.list_corrections_page(
+            page=page, page_size=page_size,
+            search=search, sort_by=sort_by, sort_order=sort_order,
+            status=status,
+            employee_id=employee_id,
+            unit_ids=unit_ids,
+            department_ids=department_ids,
+        )
+        items = [AttendanceCorrectionRead.model_validate(c) for c in result["items"]]
+
+        return PaginatedResponse[AttendanceCorrectionRead](**dict(result, items=items))
+
+    async def list_punches_page(self, **filters):
+        return await self.punch_repo.list_punches_page(**filters)

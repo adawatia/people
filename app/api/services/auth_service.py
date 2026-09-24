@@ -21,21 +21,26 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import NoReturn
 
 import jwt
 from fastapi import HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.audit import add_audit_event
+from core.secret_box import SecretBoxError, decrypt_secret, encrypt_secret, is_encrypted
 from core.session_policy import SessionPolicy, is_privileged, policy_for
 from core.settings import Settings, get_settings
 from core.tokens import (
     MFA_CHALLENGE_AUDIENCE,
     MFA_CHALLENGE_PURPOSE,
+    PASSWORD_RECOVERY_AUDIENCE,
+    PASSWORD_RECOVERY_PURPOSE,
     create_access_token,
     create_mfa_challenge_token,
+    create_password_recovery_token,
     decode_token,
     generate_refresh_token,
     hash_refresh_token,
@@ -45,8 +50,9 @@ from core.totp import (
     generate_recovery_codes,
     generate_secret,
     hash_recovery_code,
+    is_totp_replay,
+    match_totp_step,
     provisioning_uri,
-    verify_totp,
 )
 from db.models import User, now_ist
 from repositories.auth_session_repo import AuthSessionRepository
@@ -58,6 +64,9 @@ logger = logging.getLogger("hrms.auth")
 INVALID_CREDENTIALS = "Invalid login credentials"
 SESSION_ENDED = "Your session has ended. Please sign in again."
 REFRESH_REUSE = "Refresh token reuse detected"
+# Distinguished from "invalid" so a spent code reads as a timing problem the user
+# can act on, rather than looking like a typo they cannot fix.
+TOTP_ALREADY_USED = "That code has already been used. Wait for the next code and try again."
 
 
 class AuditAction:
@@ -81,6 +90,7 @@ class AuditAction:
     MFA_DISABLED = "AUTH_MFA_DISABLED"
     MFA_SUCCESS = "AUTH_MFA_SUCCESS"
     MFA_FAILED = "AUTH_MFA_FAILED"
+    MFA_RECOVERY_REGENERATED = "AUTH_MFA_RECOVERY_REGENERATED"
 
 
 @dataclass(frozen=True)
@@ -116,6 +126,20 @@ class MfaChallenge:
     token: str
     expires_in: int
     enrollment_required: bool
+
+
+@dataclass(frozen=True)
+class MfaVerification:
+    """Outcome of a second-factor check.
+
+    ``replayed`` is kept separate from a plain failure so the caller can tell a
+    user to wait for the next code rather than to re-check one that was correct
+    when it was issued.
+    """
+
+    ok: bool
+    method: str | None = None
+    replayed: bool = False
 
 
 @dataclass(frozen=True)
@@ -537,7 +561,7 @@ class AuthService:
         enrolled authenticator is always used, otherwise opting into MFA from
         account settings would silently protect nothing.
         """
-        return bool(user.mfa_enabled or self.policy_requires_mfa(user))
+        return bool(self.settings.mfa_enabled and (user.mfa_enabled or self.policy_requires_mfa(user)))
 
     async def begin_mfa_challenge(
         self,
@@ -588,18 +612,87 @@ class AuthService:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid verification token")
         return int(payload["sub"]), bool(payload.get("enrol"))
 
-    async def start_enrollment(self, user: User) -> MfaEnrollment:
-        """Create (or replace) a TOTP secret plus recovery codes.
+    def create_password_recovery_challenge(self, user_id: int, *, recoverable: bool) -> str:
+        """Create a uniform-shaped recovery-start token.
 
-        The account is *not* MFA-enabled until the user proves possession of the
-        secret via ``activate_enrollment``.
+        The token is deliberately unusable unless the account exists and has an
+        active factor. This avoids returning different response shapes for known
+        and unknown identifiers.
+        """
+        import secrets
+
+        return create_password_recovery_token(
+            subject=user_id,
+            secret=self.settings.jwt_secret,
+            ttl_seconds=self.settings.password_recovery_ttl_seconds,
+            now=now_ist(),
+            recoverable=recoverable,
+            nonce=secrets.token_urlsafe(24),
+        )
+
+    def resolve_password_recovery(self, token: str) -> tuple[int, str]:
+        try:
+            payload = decode_token(token, secret=self.settings.jwt_secret, audience=PASSWORD_RECOVERY_AUDIENCE)
+        except jwt.PyJWTError as exc:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Recovery session expired") from exc
+        if payload.get("typ") != PASSWORD_RECOVERY_PURPOSE or not payload.get("ok"):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Recovery session is not valid")
+        user_id = int(payload["sub"])
+        nonce = str(payload.get("nonce") or "")
+        if not nonce:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Recovery session is not valid")
+        return user_id, nonce
+
+    def _secret_key(self) -> str:
+        return self.settings.mfa_secret_key()
+
+    async def _active_secret(self, user: User) -> str | None:
+        """The seed currently protecting the account (decrypted), if any."""
+        if not user.mfa_secret:
+            return None
+        try:
+            secret = decrypt_secret(user.mfa_secret, self._secret_key())
+            if not is_encrypted(user.mfa_secret):
+                # Legacy deployments stored the seed in plaintext. Upgrade it
+                # opportunistically during the first successful read, without
+                # requiring a risky bulk rewrite or exposing the seed in logs.
+                user.mfa_secret = encrypt_secret(secret, self._secret_key())
+                await self.session.flush()
+            return secret
+        except SecretBoxError:
+            # Wrong key or tampered value. Fail closed rather than treating the
+            # ciphertext as the seed: the account falls back to recovery codes
+            # and re-enrolment instead of accepting codes derived from garbage.
+            logger.warning(
+                "stored MFA secret could not be decrypted",
+                extra={"event": "mfa_secret_undecryptable", "user_id": user.id},
+            )
+            return None
+
+    async def start_enrollment(self, user: User) -> MfaEnrollment:
+        """Issue a TOTP secret for enrolment, plus recovery codes when new.
+
+        The seed is written to ``mfa_pending_secret`` and nothing else changes: an
+        account that already has a factor keeps it - and keeps needing it at
+        sign-in - until the replacement is proven, so abandoning this flow can no
+        longer disable a second factor or invalidate an authenticator the user is
+        still holding.
+
+        Recovery codes are issued only for a first factor.  Replacing a factor
+        keeps the existing codes valid (regenerating them is a separate, explicit
+        action) so a half-finished reset cannot invalidate codes the user wrote
+        down and may need tomorrow.
         """
         secret = generate_secret()
-        recovery_codes = generate_recovery_codes()
-        user.mfa_secret = secret
-        user.mfa_enabled = False
-        user.mfa_enrolled_at = None
-        user.mfa_recovery_code_hashes = _encode_recovery_hashes(recovery_codes)
+        if user.mfa_pending_secret and user.mfa_pending_expires_at and user.mfa_pending_expires_at <= now_ist():
+            user.mfa_pending_secret = None
+            user.mfa_pending_expires_at = None
+        user.mfa_pending_secret = encrypt_secret(secret, self._secret_key())
+        user.mfa_pending_expires_at = now_ist() + timedelta(seconds=self.settings.mfa_pending_ttl_seconds)
+        first_factor = not user.mfa_secret
+        recovery_codes = generate_recovery_codes() if first_factor else []
+        if first_factor:
+            user.mfa_recovery_code_hashes = _encode_recovery_hashes(recovery_codes)
         account = user.username or user.email or str(user.id)
         await self.session.commit()
         return MfaEnrollment(
@@ -607,6 +700,24 @@ class AuthService:
             otpauth_uri=provisioning_uri(secret=secret, account=account, issuer=self.settings.mfa_issuer),
             recovery_codes=recovery_codes,
         )
+
+    async def regenerate_recovery_codes(self, user: User) -> list[str]:
+        """Replace every recovery code with a fresh set (step-up protected)."""
+        if not user.mfa_secret:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT, detail="Set up an authenticator before generating recovery codes"
+            )
+        codes = generate_recovery_codes()
+        user.mfa_recovery_code_hashes = _encode_recovery_hashes(codes)
+        self._audit(
+            actor=user,
+            action=AuditAction.MFA_RECOVERY_REGENERATED,
+            entity_type="user",
+            entity_id=str(user.id),
+            filters={"count": len(codes)},
+        )
+        await self.session.commit()
+        return codes
 
     async def activate_enrollment(
         self,
@@ -616,24 +727,59 @@ class AuthService:
         ip_address: str | None = None,
         request_id: str | None = None,
     ) -> None:
-        """Confirm possession of the new secret and enable MFA."""
-        if not user.mfa_secret:
+        """Prove possession of the pending secret, then promote it to active.
+
+        Proof comes first and the swap is atomic with it: the active seed, its
+        replay counter and the recovery codes are only replaced once a code from
+        the new authenticator has been accepted.
+        """
+        locked_user = await self.session.scalar(select(User).where(User.id == user.id).with_for_update())
+        if locked_user is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=SESSION_ENDED)
+        user = locked_user
+        pending = None
+        if user.mfa_pending_secret:
+            if user.mfa_pending_expires_at and user.mfa_pending_expires_at <= now_ist():
+                user.mfa_pending_secret = None
+                user.mfa_pending_expires_at = None
+                await self.session.commit()
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="MFA enrolment expired; start again")
+            try:
+                pending = decrypt_secret(user.mfa_pending_secret, self._secret_key())
+            except SecretBoxError:
+                pending = None
+        if not pending:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Start MFA enrolment first")
-        if not verify_totp(code, user.mfa_secret, now_ist()):
+
+        matched_step = match_totp_step(code, pending, now_ist())
+        # The replay counter belongs to the active secret. A pending enrollment
+        # is a different factor even though its TOTP counter has the same
+        # time-based value. Comparing the pending code with the active secret's
+        # counter rejects every replacement confirmed in the same 30-second
+        # interval as the sign-in that opened Settings.
+        if matched_step is None:
             self._audit(
                 actor=user,
                 action=AuditAction.MFA_FAILED,
                 entity_type="user",
                 entity_id=str(user.id),
-                filters={"stage": "activate"},
+                filters={"stage": "activate", "reason": "invalid"},
                 ip_address=ip_address,
                 request_id=request_id,
             )
             await self.session.commit()
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="That code is not valid")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="That code is not valid. Check that your device time is set automatically and try the current code.",
+            )
+
+        user.mfa_secret = user.mfa_pending_secret
+        user.mfa_pending_secret = None
+        user.mfa_pending_expires_at = None
         user.mfa_enabled = True
         user.mfa_enrolled_at = now_ist()
         user.last_mfa_verified_at = now_ist()
+        user.mfa_last_used_step = matched_step
         self._audit(
             actor=user,
             action=AuditAction.MFA_ENROLLED,
@@ -652,12 +798,32 @@ class AuthService:
         *,
         ip_address: str | None = None,
         request_id: str | None = None,
-    ) -> bool:
-        """Verify a TOTP code or a single-use recovery code."""
+    ) -> MfaVerification:
+        """Verify a TOTP code or a single-use recovery code.
+
+        A code is accepted once.  Having matched, its time step is recorded and
+        the same step can never be accepted again, so an observed or intercepted
+        code cannot be replayed for the rest of its validity (including the drift
+        window either side of it).
+
+        Returns *why* a submission failed, not just that it did: a spent code and
+        a wrong one call for different advice ("wait for the next code" versus
+        "check the code"), and collapsing them would send users hunting for a
+        typing mistake that does not exist.
+        """
+        locked_user = await self.session.scalar(select(User).where(User.id == user.id).with_for_update())
+        if locked_user is None:
+            return MfaVerification(ok=False)
+        user = locked_user
         submitted = (code or "").strip()
+        secret = await self._active_secret(user)
+        matched_step = match_totp_step(submitted, secret, now_ist()) if secret else None
+        replayed = matched_step is not None and is_totp_replay(matched_step, user.mfa_last_used_step)
+
         # A TOTP match short-circuits: a recovery code is only consumed when the
-        # app code did not match, so a valid code never burns a single-use code.
-        verified = bool(user.mfa_secret and verify_totp(submitted, user.mfa_secret, now_ist()))
+        # app code did not match (or was already spent), so a valid code never
+        # burns a single-use recovery code either.
+        verified = matched_step is not None and not replayed
         used_recovery_code = False
         if not verified:
             used_recovery_code = await self._consume_recovery_code(user, submitted)
@@ -669,25 +835,28 @@ class AuthService:
                 action=AuditAction.MFA_FAILED,
                 entity_type="user",
                 entity_id=str(user.id),
-                filters={"stage": "verify"},
+                filters={"stage": "verify", "reason": "replayed" if replayed else "invalid"},
                 ip_address=ip_address,
                 request_id=request_id,
             )
             await self.session.commit()
-            return False
+            return MfaVerification(ok=False, replayed=replayed)
 
+        if matched_step is not None:
+            user.mfa_last_used_step = matched_step
         user.last_mfa_verified_at = now_ist()
+        method = "recovery_code" if used_recovery_code else "totp"
         self._audit(
             actor=user,
             action=AuditAction.MFA_SUCCESS,
             entity_type="user",
             entity_id=str(user.id),
-            filters={"method": "recovery_code" if used_recovery_code else "totp"},
+            filters={"method": method},
             ip_address=ip_address,
             request_id=request_id,
         )
         await self.session.commit()
-        return True
+        return MfaVerification(ok=True, method=method)
 
     async def _consume_recovery_code(self, user: User, code: str) -> bool:
         """Redeem a recovery code, removing it so it cannot be reused."""
@@ -702,11 +871,55 @@ class AuthService:
         await self.session.flush()
         return True
 
+    async def issue_password_recovery_reset(self, user: User) -> str:
+        """Persist a one-time password-reset capability after MFA succeeds."""
+        import secrets
+
+        raw = secrets.token_urlsafe(48)
+        user.password_recovery_token_hash = hash_refresh_token(raw)
+        user.password_recovery_expires_at = now_ist() + timedelta(seconds=self.settings.password_recovery_ttl_seconds)
+        self._audit(
+            actor=user,
+            action="AUTH_PASSWORD_RECOVERY_VERIFIED",
+            entity_type="user",
+            entity_id=str(user.id),
+            filters={"method": "mfa"},
+        )
+        await self.session.commit()
+        return raw
+
+    async def reset_password_with_token(self, raw_token: str, new_password_hash: str) -> User:
+        """Consume a password reset token under a row lock and revoke sessions."""
+        now = now_ist()
+        user = await self.session.scalar(
+            select(User)
+            .where(
+                User.password_recovery_token_hash == hash_refresh_token(raw_token),
+                User.password_recovery_expires_at > now,
+            )
+            .with_for_update()
+        )
+        if user is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Recovery session expired")
+        user.hashed_password = new_password_hash
+        user.must_change_password = False
+        user.password_recovery_token_hash = None
+        user.password_recovery_expires_at = None
+        await self.revoke_all(
+            user,
+            reason="password_recovery",
+            action=AuditAction.PASSWORD_RESET,
+        )
+        return user
+
     async def disable_mfa(self, user: User, *, ip_address: str | None = None, request_id: str | None = None) -> None:
         """Remove the second factor (requires a fresh password re-check upstream)."""
         user.mfa_enabled = False
         user.mfa_secret = None
+        user.mfa_pending_secret = None
+        user.mfa_pending_expires_at = None
         user.mfa_enrolled_at = None
+        user.mfa_last_used_step = None
         user.mfa_recovery_code_hashes = None
         self._audit(
             actor=user,

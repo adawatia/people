@@ -11,6 +11,7 @@ from core.employee_access import (
     get_permission_scope,
     require_employee_access,
 )
+from core.pagination import PaginatedResponse
 from db.models import User
 from schemas.attendance import (
     AttendanceCorrectionCreate,
@@ -61,17 +62,21 @@ async def record_bulk_checkins(
     raise HTTPException(status_code=403, detail="Attendance punches are supplied by ERP")
 
 
-@router.get("/checkins", response_model=list[AttendancePunchRead])
+@router.get("/checkins", response_model=PaginatedResponse[AttendancePunchRead])
 async def list_checkins(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100),
+    search: str | None = None,
+    sort_by: str | None = None,
+    sort_order: str = Query("desc", pattern="^(asc|desc)$"),
     employee_id: int | None = None,
     from_time: datetime | None = None,
     to_time: datetime | None = None,
     is_processed: bool | None = None,
     current_user: User = Depends(fastapi_users.current_user(active=True)),
     session: AsyncSession = Depends(get_async_session),
-) -> list[AttendancePunchRead]:
+) -> PaginatedResponse[AttendancePunchRead]:
     service = AttendanceService(session)
-    current_employee = await get_current_employee(current_user, session)
     scope = await _attendance_read_scope(current_user, session)
     if employee_id is not None:
         employee = await service.employee_repo.get_by_id(employee_id)
@@ -85,8 +90,13 @@ async def list_checkins(
             allow_self=True,
         )
     elif scope.self_only:
-        employee_id = current_employee.id
-    return await service.list_punches(
+        employee_id = (await get_current_employee(current_user, session)).id
+    return await service.list_punches_page(
+        page=page,
+        page_size=page_size,
+        search=search,
+        sort_by=sort_by,
+        sort_order=sort_order,
         employee_id=employee_id,
         from_time=from_time,
         to_time=to_time,
@@ -96,19 +106,21 @@ async def list_checkins(
     )
 
 
-@router.get("/", response_model=list[AttendanceRecordRead])
+@router.get("/", response_model=PaginatedResponse[AttendanceRecordRead])
 async def list_attendance(
     employee_id: int | None = None,
     from_date: date | None = None,
     to_date: date | None = None,
     status_filter: str | None = Query(None, alias="status"),
-    page: int = 1,
-    page_size: int = 50,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100),
+    search: str | None = None,
+    sort_by: str | None = None,
+    sort_order: str = Query("desc", pattern="^(asc|desc)$"),
     current_user: User = Depends(fastapi_users.current_user(active=True)),
     session: AsyncSession = Depends(get_async_session),
-) -> list[AttendanceRecordRead]:
+) -> PaginatedResponse[AttendanceRecordRead]:
     service = AttendanceService(session)
-    current_employee = await get_current_employee(current_user, session)
     scope = await _attendance_read_scope(current_user, session)
     if employee_id is not None:
         employee = await service.employee_repo.get_by_id(employee_id)
@@ -122,8 +134,9 @@ async def list_attendance(
             allow_self=True,
         )
     elif scope.self_only:
-        employee_id = current_employee.id
-    return await service.list_attendance(
+        employee_id = (await get_current_employee(current_user, session)).id
+    return await service.list_attendance_page(
+        search=search, sort_by=sort_by, sort_order=sort_order,
         employee_id=employee_id,
         from_date=from_date,
         to_date=to_date,
@@ -233,23 +246,29 @@ async def submit_correction(
     return await service.submit_correction(data)
 
 
-@router.get("/corrections", response_model=list[AttendanceCorrectionRead])
+@router.get("/corrections", response_model=PaginatedResponse[AttendanceCorrectionRead])
 async def list_corrections(
     status: str | None = Query(None),
+    search: str | None = None,
+    sort_by: str | None = None,
+    sort_order: str = Query("desc", pattern="^(asc|desc)$"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100),
     current_user: User = Depends(fastapi_users.current_user(active=True)),
     session: AsyncSession = Depends(get_async_session),
-) -> list[AttendanceCorrectionRead]:
+) -> PaginatedResponse[AttendanceCorrectionRead]:
     """List attendance correction requests.
 
     HR sees their unit, everyone else sees only their own requests.
     """
     service = AttendanceService(session)
-    current_employee = await get_current_employee(current_user, session)
     scope = await get_permission_scope(current_user, "attendance.correct", session)
     employee_id = None
     if scope.self_only:
-        employee_id = current_employee.id
-    return await service.list_corrections(
+        employee_id = (await get_current_employee(current_user, session)).id
+    return await service.list_corrections_page(
+        page=page, page_size=page_size,
+        search=search, sort_by=sort_by, sort_order=sort_order,
         status=status,
         employee_id=employee_id,
         unit_ids=None if scope.organization else scope.unit_ids,

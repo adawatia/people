@@ -1,18 +1,24 @@
 <script setup lang="ts">
-/* eslint-disable better-tailwindcss/no-unknown-classes */
+import type { PaginatedResponse } from '#shared/types/pagination'
+
 import type { AttendanceCorrection, AttendanceRecord, AttendanceSummary } from '#shared/types/attendance'
+
+const chartTheme = useChartTheme()
 
 useSeoMeta({ title: 'Attendance' })
 const auth = useAuth()
+const workspace = useWorkspace()
 const api = useHrmsApi()
+const list = useListState({ sort_order: 'desc' })
+const correctionList = useListState({}, 'correction_')
 const toast = useToast()
 const employeeId = computed(() => auth.user.value?.employee_id)
+const personalView = computed(() => workspace.current.value === 'MY')
 const monthCursor = ref(new Date(new Date().getFullYear(), new Date().getMonth(), 1))
 const correctionRecord = ref<AttendanceRecord | null>(null)
 const correction = reactive({ requested_punch_in: '', requested_punch_out: '', reason: '' })
 const correctionLoading = ref(false)
-// Only HR can raise a correction: the API gates this on the attendance.correct
-// permission plus the caller's row scope.
+// Correction requests require this capability and the caller's row scope.
 const canRequestCorrection = computed(() => auth.hasPermission('attendance.correct'))
 
 function dateKey(value: Date) {
@@ -22,13 +28,16 @@ function dateKey(value: Date) {
   return `${year}-${month}-${day}`
 }
 
+watch(monthCursor, () => {
+  list.page.value = 1
+})
 const monthKey = computed(() => `${monthCursor.value.getFullYear()}-${monthCursor.value.getMonth() + 1}`)
 const monthLabel = computed(() => new Intl.DateTimeFormat('en-IN', { month: 'long', year: 'numeric' }).format(monthCursor.value))
 
 const { data: attendanceData, pending, error, refresh } = await useAsyncData(
   'my-attendance',
   async () => {
-    if (!employeeId.value) return null
+    if (!personalView.value || !employeeId.value) return null
     const year = monthCursor.value.getFullYear()
     const month = monthCursor.value.getMonth() + 1
     const first = new Date(year, month - 1, 1)
@@ -36,11 +45,27 @@ const { data: attendanceData, pending, error, refresh } = await useAsyncData(
     const [records, summary, corrections] = await Promise.all([
       api.request<AttendanceRecord[]>(`attendance/employee/${employeeId.value}/calendar`, { query: { year, month } }),
       api.request<AttendanceSummary>(`attendance/employee/${employeeId.value}/summary`, { query: { year, month } }),
-      api.request<AttendanceCorrection[]>('attendance/corrections')
+      api.request<PaginatedResponse<AttendanceCorrection>>('attendance/corrections', { query: correctionList.query.value })
     ])
     return { records, summary, corrections, first: dateKey(first), last: dateKey(last) }
   },
-  { watch: [monthKey, employeeId] }
+  { watch: [monthKey, employeeId, personalView, correctionList.query] }
+)
+const { data: scopedRecords, pending: scopedPending, error: scopedError, refresh: refreshScoped } = await useAsyncData(
+  'scoped-attendance',
+  async () => {
+    if (personalView.value) return null
+    const year = monthCursor.value.getFullYear()
+    const month = monthCursor.value.getMonth() + 1
+    return await api.request<PaginatedResponse<AttendanceRecord>>('attendance/', {
+      query: {
+        from_date: `${year}-${String(month).padStart(2, '0')}-01`,
+        to_date: dateKey(new Date(year, month, 0)),
+        ...list.query.value
+      }
+    })
+  },
+  { watch: [monthKey, personalView, list.query] }
 )
 
 const records = computed(() => attendanceData.value?.records || [])
@@ -74,8 +99,8 @@ const statusSegments = computed(() => {
   const summary = attendanceData.value?.summary
   return [
     { label: 'Present', value: summary?.total_present ?? 0, color: '#10b981' },
-    { label: 'Half day', value: summary?.total_half_day ?? 0, color: '#8b5cf6' },
-    { label: 'On leave', value: summary?.total_leave ?? 0, color: '#6366f1' },
+    { label: 'Half day', value: summary?.total_half_day ?? 0, color: '#0d9488' },
+    { label: 'On leave', value: summary?.total_leave ?? 0, color: '#2563eb' },
     { label: 'Absent', value: summary?.total_absent ?? 0, color: '#f43f5e' },
     { label: 'Missed punch', value: summary?.total_missed_punch ?? 0, color: '#f59e0b' },
     { label: 'Weekly off', value: summary?.total_weekly_off ?? 0, color: '#94a3b8' },
@@ -95,8 +120,8 @@ const attendanceChartOption = computed<ECOption>(() => ({
     subtext: 'recorded days',
     left: 'center',
     top: 'center',
-    textStyle: { fontSize: 22, fontWeight: 700, color: '#172033' },
-    subtextStyle: { fontSize: 11, color: '#667085' }
+    textStyle: { fontSize: 22, fontWeight: 700, color: chartTheme.value ? '#e2e8f0' : '#172033' },
+    subtextStyle: { fontSize: 11, color: chartTheme.value ? '#94a3b8' : '#667085' }
   },
   series: [{
     name: 'Attendance status',
@@ -152,9 +177,9 @@ async function submitCorrection() {
         reason: correction.reason.trim()
       }
     })
-    toast.add({ title: 'Correction request submitted', description: 'Your approver can now review the request.', color: 'success', icon: 'i-lucide-circle-check' })
+    toast.add({ title: 'Correction request submitted', description: 'The correction is awaiting ERP reconciliation.', color: 'success', icon: 'i-lucide-circle-check' })
     correctionRecord.value = null
-    await refresh()
+    await Promise.all([refresh(), refreshScoped()])
   } catch (requestError) {
     const candidate = requestError as { data?: { statusMessage?: string } }
     toast.add({ title: 'Could not submit correction', description: candidate.data?.statusMessage || 'Please review the details and try again.', color: 'error' })
@@ -164,7 +189,7 @@ async function submitCorrection() {
 }
 
 function hasPendingCorrection(recordId: number) {
-  return attendanceData.value?.corrections.some(item => item.attendance_record_id === recordId && item.status === 'PENDING')
+  return records.value.find(item => item.id === recordId)?.has_pending_correction || false
 }
 </script>
 
@@ -173,13 +198,13 @@ function hasPendingCorrection(recordId: number) {
     <div class="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
       <div>
         <p class="text-sm font-medium text-primary">
-          My workday
+          {{ personalView ? 'My Workspace' : workspace.current.value === 'TEAM' ? 'Team Workspace' : 'HR Workspace' }}
         </p>
         <h2 class="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">
           Attendance
         </h2>
         <p class="mt-2 max-w-2xl text-sm leading-6 text-muted">
-          Review ERP-synced attendance and flag anything that needs correction.
+          {{ personalView ? 'Review your ERP-synced attendance and flag anything that needs correction.' : 'Review attendance records within your authorized scope.' }}
         </p>
       </div>
       <div class="flex items-center gap-2">
@@ -201,8 +226,19 @@ function hasPendingCorrection(recordId: number) {
       </div>
     </div>
 
+    <ListControls
+      v-if="!personalView"
+      v-model:search="list.search.value"
+      v-model:sort-by="list.sortBy.value"
+      v-model:sort-order="list.sortOrder.value"
+      :active="list.active.value"
+      :sorts="[{ label: 'Date', value: 'attendance_date' }, { label: 'Status', value: 'status' }]"
+      search-placeholder="Search employee name or code"
+      @clear="list.clear"
+    />
+
     <UAlert
-      v-if="auth.user.value?.is_superuser"
+      v-if="personalView && auth.user.value?.is_superuser"
       class="mt-6"
       color="info"
       variant="soft"
@@ -211,7 +247,7 @@ function hasPendingCorrection(recordId: number) {
       description="This account is not an employee and does not have attendance records. Use System administration for technical account and integration settings."
     />
     <UAlert
-      v-else-if="!employeeId"
+      v-else-if="personalView && !employeeId"
       class="mt-6"
       color="warning"
       variant="soft"
@@ -220,7 +256,7 @@ function hasPendingCorrection(recordId: number) {
       description="Ask your People administrator to link this user account to an employee record before using attendance."
     />
     <UAlert
-      v-else-if="error"
+      v-else-if="personalView && error"
       class="mt-6"
       color="warning"
       variant="soft"
@@ -230,7 +266,90 @@ function hasPendingCorrection(recordId: number) {
       :actions="[{ label: 'Refresh attendance', onClick: () => refresh() }]"
     />
 
-    <template v-if="employeeId">
+    <section
+      v-if="!personalView"
+      class="people-card mt-7 overflow-hidden"
+    >
+      <div
+        v-if="scopedPending"
+        class="space-y-3 p-5"
+      >
+        <USkeleton
+          v-for="index in 6"
+          :key="index"
+          class="h-14 w-full"
+        />
+      </div>
+      <UAlert
+        v-else-if="scopedError"
+        class="m-5"
+        color="warning"
+        variant="soft"
+        title="Attendance records could not be loaded"
+        description="Refresh to try again. Results are limited by your server-assigned scope."
+        :actions="[{ label: 'Refresh', onClick: () => refreshScoped() }]"
+      />
+      <div
+        v-else-if="scopedRecords?.items.length"
+        class="overflow-x-auto"
+      >
+        <table class="w-full min-w-[680px] text-left text-sm">
+          <thead class="bg-muted/5 text-xs uppercase tracking-wide text-muted">
+            <tr>
+              <th class="px-5 py-3">
+                Employee ID
+              </th><th class="px-4 py-3">
+                Date
+              </th><th class="px-4 py-3">
+                Status
+              </th><th class="px-4 py-3">
+                Worked
+              </th><th class="px-4 py-3">
+                Overtime
+              </th><th class="px-5 py-3">
+                Exceptions
+              </th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-[var(--people-border)]">
+            <tr
+              v-for="record in scopedRecords?.items"
+              :key="record.id"
+            >
+              <td class="px-5 py-4 font-semibold">
+                #{{ record.employee_id }}
+              </td>
+              <td class="px-4 py-4">
+                {{ record.attendance_date }}
+              </td>
+              <td class="px-4 py-4">
+                <AttendanceStatusBadge :status="record.status" />
+              </td>
+              <td class="px-4 py-4">
+                {{ formatDuration(record.worked_minutes) }}
+              </td>
+              <td class="px-4 py-4">
+                {{ formatDuration(record.overtime_minutes) }}
+              </td>
+              <td class="px-5 py-4 text-muted">
+                {{ [record.late_minutes ? `${record.late_minutes}m late` : '', record.early_exit_minutes ? `${record.early_exit_minutes}m early` : ''].filter(Boolean).join(' · ') || '—' }}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="border-t border-[var(--people-border)] px-5 py-3 text-xs text-muted">
+          Showing up to 100 records for {{ monthLabel }}. Use Reports for aggregated attendance analysis.
+        </p>
+      </div>
+      <div
+        v-else
+        class="p-10 text-center text-sm text-muted"
+      >
+        No attendance records are visible in this scope for {{ monthLabel }}.
+      </div>
+    </section>
+
+    <template v-if="personalView && employeeId">
       <div class="mt-7 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <div
           v-for="card in summaryCards"
@@ -280,6 +399,7 @@ function hasPendingCorrection(recordId: number) {
             <div class="w-full shrink-0 sm:w-56">
               <ClientOnly>
                 <VChart
+                  :theme="chartTheme"
                   class="block"
                   style="width: 100%; height: 14rem"
                   :option="attendanceChartOption"
@@ -407,19 +527,19 @@ function hasPendingCorrection(recordId: number) {
               <AttendanceStatusBadge :status="record.status" />
             </div>
             <div
-              v-if="record.late_minutes || record.early_exit_minutes || ['MISSED_PUNCH', 'ABSENT'].includes(record.status)"
+              v-if="record.late_minutes || record.early_exit_minutes || ['MISSED_PUNCH', 'ABSENT'].includes(record.status) || hasPendingCorrection(record.id)"
               class="mt-3 flex flex-wrap items-center gap-3 text-xs text-muted"
             >
               <span v-if="record.late_minutes">{{ record.late_minutes }}m late</span><span v-if="record.early_exit_minutes">{{ record.early_exit_minutes }}m early exit</span>
               <button
-                v-if="canRequestCorrection && !hasPendingCorrection(record.id)"
+                v-if="canRequestCorrection && ['MISSED_PUNCH', 'ABSENT'].includes(record.status) && !hasPendingCorrection(record.id)"
                 type="button"
                 class="font-semibold text-primary"
                 @click="openCorrection(record)"
               >
                 Request correction
               </button><span
-                v-else
+                v-else-if="hasPendingCorrection(record.id)"
                 class="font-medium text-amber-700 dark:text-amber-300"
               >Correction pending</span>
             </div>
@@ -504,5 +624,45 @@ function hasPendingCorrection(recordId: number) {
         </div>
       </section>
     </div>
+    <ListPagination
+      v-if="!personalView && scopedRecords"
+      v-model:page="list.page.value"
+      v-model:page-size="list.pageSize.value"
+      :total="scopedRecords?.total || 0"
+      :total-pages="scopedRecords?.total_pages"
+      :loading="scopedPending"
+    />
+    <section
+      v-if="personalView && attendanceData?.corrections"
+      class="mt-6"
+    >
+      <h3 class="font-semibold">
+        Correction requests
+      </h3>
+      <UEmpty
+        v-if="!attendanceData.corrections.items.length"
+        title="No correction requests"
+      />
+      <article
+        v-for="item in attendanceData.corrections.items"
+        :key="item.id"
+        class="border-b border-default py-3"
+      >
+        <p>{{ item.reason }}</p><UBadge
+          color="neutral"
+          variant="subtle"
+        >
+          {{ item.status }}
+        </UBadge>
+      </article>
+    </section>
+    <ListPagination
+      v-if="personalView && attendanceData?.corrections"
+      v-model:page="correctionList.page.value"
+      v-model:page-size="correctionList.pageSize.value"
+      :total="attendanceData?.corrections?.total || 0"
+      :total-pages="attendanceData?.corrections?.total_pages"
+      :loading="pending"
+    />
   </div>
 </template>

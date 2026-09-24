@@ -356,6 +356,33 @@ def test_overtime_self_approval_and_rejection(unique_suffix):
             assert exc_info.value.status_code == 400
             assert "cannot approve their own" in exc_info.value.detail
 
+            # Approval may reduce calculated time, but must never invent time.
+            with pytest.raises(HTTPException) as exc_info_too_many:
+                await ot_service.approve_overtime(
+                    ot.id,
+                    OvertimeApprovalCreate(approved_minutes=121, remarks="Too many"),
+                    actioned_by_user_id=mgr_user.id,
+                )
+            assert exc_info_too_many.value.status_code == 422
+            assert ot.status == "PENDING"
+
+            approvable = OvertimeRecord(
+                employee_id=emp.id,
+                attendance_record_id=att_rec.id,
+                calculated_minutes=120,
+                status="PENDING",
+            )
+            session.add(approvable)
+            await session.flush()
+            approved = await ot_service.approve_overtime(
+                approvable.id,
+                OvertimeApprovalCreate(approved_minutes=90, remarks="Verified"),
+                actioned_by_user_id=mgr_user.id,
+            )
+            assert approved.status == "APPROVED"
+            assert approved.approved_minutes == 90
+            assert approved.actioned_by == mgr_user.id
+
             # Independent manager rejects
             rejected = await ot_service.reject_overtime(
                 ot.id,

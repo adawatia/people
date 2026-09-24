@@ -7,7 +7,13 @@ from core.auth import UserManager, get_user_manager, verify_erp_api_key
 from core.database import get_async_session
 from core.mobile import normalize_indian_mobile
 from db.models import Employee, User
-from schemas.employees import EmployeeCreate, EmployeeDeactivateRequest, EmployeeOnboardingCreate, EmployeeRead, EmployeeUpdate
+from schemas.employees import (
+    EmployeeCreate,
+    EmployeeDeactivateRequest,
+    EmployeeOnboardingCreate,
+    EmployeeRead,
+    EmployeeUpdate,
+)
 from services.employee_service import EmployeeService
 
 router = APIRouter(prefix="/integrations/erp/employees", tags=["erp-employees"])
@@ -26,7 +32,7 @@ async def update_employee_from_erp(employee_id: int, data: EmployeeUpdate, sessi
         for field in ("first_name", "last_name"):
             if field in updates:
                 setattr(user, field, updates[field])
-        if "phone_number" in updates and updates["phone_number"]:
+        if updates.get("phone_number"):
             user.mobile_number = normalize_indian_mobile(updates["phone_number"])
         await session.commit()
     return result

@@ -1,34 +1,19 @@
 <script setup lang="ts">
-/* eslint-disable better-tailwindcss/no-unknown-classes */
-/* eslint-disable vue/multiline-html-element-content-newline */
 import type { Employee, EmployeePage } from '#shared/types/employee'
-import type { Department, Designation, Unit } from '#shared/types/organization'
 
 useSeoMeta({ title: 'Employees' })
 const api = useHrmsApi()
-const search = ref('')
-const debouncedSearch = ref('')
-const unitId = ref<number>(0)
-const departmentId = ref<number>(0)
-const status = ref('ACTIVE')
-const page = ref(1)
-let searchTimer: ReturnType<typeof setTimeout> | undefined
-watch(search, (value) => {
-  clearTimeout(searchTimer)
-  searchTimer = setTimeout(() => {
-    debouncedSearch.value = value
-    page.value = 1
-  }, 300)
-})
-watch([unitId, departmentId, status], () => {
-  page.value = 1
-})
-const { data: masters } = await useAsyncData('employee-masters', async () => {
-  const [units, departments, designations] = await Promise.all([api.request<Unit[]>('org/units'), api.request<Department[]>('org/departments'), api.request<Designation[]>('designations/', { query: { is_active: true } })])
-  return { units, departments, designations }
-})
-const { data, pending, error, refresh } = await useAsyncData('employees', () => api.request<EmployeePage>('employees/', { query: { page: page.value, page_size: 20, q: debouncedSearch.value || undefined, unit_id: unitId.value || undefined, department_id: departmentId.value || undefined, status: status.value === 'ALL' ? undefined : status.value } }), { watch: [page, debouncedSearch, unitId, departmentId, status] })
-const departments = computed(() => (masters.value?.departments || []).filter(item => !unitId.value || item.unit_id === unitId.value))
+const list = useListState({ status: 'ACTIVE', unit_id: '0', department_id: '0', sort_order: 'asc' })
+const search = list.search
+const status = list.field('status')
+const unitId = computed({ get: () => Number(list.field('unit_id').value), set: (value) => {
+  void list.update({ unit_id: value, department_id: 0 })
+} })
+const departmentId = computed({ get: () => Number(list.field('department_id').value), set: (value) => {
+  void list.update({ department_id: value })
+} })
+const { data, pending, error, refresh } = useLazyAsyncData('employees', (_app, { signal }) => api.request<EmployeePage>('employees/', { signal, query: { ...list.query.value, unit_id: unitId.value || undefined, department_id: departmentId.value || undefined, status: status.value === 'ALL' ? undefined : status.value } }), { watch: [list.query, unitId, departmentId, status] })
+
 const initials = (item: Employee) => `${item.first_name[0] || ''}${item.last_name?.[0] || ''}`.toUpperCase()
 // Employee records are provisioned and maintained in ERP; this page is read-only.
 </script>
@@ -53,30 +38,38 @@ const initials = (item: Employee) => `${item.first_name[0] || ''}${item.last_nam
         description="Create or provision employees in ERP. Changes will sync here automatically."
       />
     </div>
-    <section class="people-card mt-7 p-4 sm:p-5">
-      <div class="grid gap-3 md:grid-cols-4">
-        <UInput
-          v-model="search"
-          icon="i-lucide-search"
-          placeholder="Search name, code or email"
-          class="md:col-span-2"
-        /><USelect
+    <ListControls
+      v-model:search="search"
+      v-model:sort-by="list.sortBy.value"
+      v-model:sort-order="list.sortOrder.value"
+      :active="list.active.value"
+      :sorts="[{ label: 'Employee code', value: 'employee_code' }, { label: 'Name', value: 'name' }, { label: 'Status', value: 'status' }]"
+      search-placeholder="Search name, code or email"
+      @clear="list.clear"
+    >
+      <UFormField label="Unit">
+        <RemoteSelect
           v-model="unitId"
-          :items="[{ label: 'All units', value: 0 }, ...(masters?.units || []).map(item => ({ label: item.name, value: item.id }))]"
-          placeholder="All units"
-        /><USelect
+          endpoint="org/units"
+          label="All units"
+        />
+      </UFormField>
+      <UFormField label="Department">
+        <RemoteSelect
+          v-model="departmentId"
+          endpoint="org/departments"
+          label="All departments"
+          :filters="{ unit_id: unitId || undefined }"
+        />
+      </UFormField>
+      <UFormField label="Status">
+        <USelect
           v-model="status"
           :items="[{ label: 'Active', value: 'ACTIVE' }, { label: 'Inactive', value: 'INACTIVE' }, { label: 'All statuses', value: 'ALL' }]"
+          class="w-full"
         />
-      </div><div class="mt-3">
-        <USelect
-          v-model="departmentId"
-          :items="[{ label: 'All departments', value: 0 }, ...departments.map(item => ({ label: item.name, value: item.id }))]"
-          placeholder="All departments"
-          class="w-full md:w-64"
-        />
-      </div>
-    </section>
+      </UFormField>
+    </ListControls>
     <UAlert
       v-if="error"
       class="mt-5"
@@ -164,7 +157,6 @@ const initials = (item: Employee) => `${item.first_name[0] || ''}${item.last_nam
                   <span class="block">{{ item.department_name || '—' }}</span><span class="text-xs text-muted">{{ item.unit_name }}</span>
                 </td><td class="px-4 py-4">
                   {{ item.employment_type }}
-                </td><td class="px-4 py-4 text-right">—
                 </td><td class="px-6 py-4 text-right">
                   <UBadge
                     :color="item.status === 'ACTIVE' ? 'success' : 'neutral'"
@@ -181,13 +173,16 @@ const initials = (item: Employee) => `${item.first_name[0] || ''}${item.last_nam
       <div
         v-if="(data?.total_pages || 1) > 1"
         class="flex justify-end border-t border-[var(--people-border)] p-4"
-      >
-        <UPagination
-          v-model:page="page"
-          :total="data?.total || 0"
-          :items-per-page="20"
-        />
-      </div>
+      />
     </section>
+    <ListPagination
+      v-if="data"
+      v-model:page="list.page.value"
+      v-model:page-size="list.pageSize.value"
+      :total="data?.total || 0"
+      :total-pages="data?.total_pages"
+      :loading="pending"
+      label="employees"
+    />
   </div>
 </template>

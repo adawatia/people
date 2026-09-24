@@ -1,15 +1,17 @@
 <script setup lang="ts">
-/* eslint-disable better-tailwindcss/no-unknown-classes */
+import type { PaginatedResponse } from '#shared/types/pagination'
+
 import type { Shift, ShiftAssignment } from '#shared/types/workforce'
 
 useSeoMeta({ title: 'Shifts' })
 const api = useHrmsApi()
+const list = useListState({ sort_order: 'desc' })
 const tab = ref<'definitions' | 'assignments'>('definitions')
 // Shift definitions and employee assignments are authored in ERP and mirrored here.
 const { data, pending, error, refresh } = await useAsyncData('shift-workspace', async () => {
-  const [shifts, assignments] = await Promise.all([api.request<Shift[]>('shifts/', { query: { is_active: true } }), api.request<ShiftAssignment[]>('shifts/assignments')])
-  return { shifts, assignments }
-})
+  const [shifts, assignments] = await Promise.all([api.request<PaginatedResponse<Shift>>('shifts/', { query: { ...list.query.value, is_active: true } }), api.request<PaginatedResponse<ShiftAssignment>>('shifts/assignments', { query: list.query.value })])
+  return { shifts: shifts.items, shiftPage: shifts, assignments: assignments.items, assignmentPage: assignments }
+}, { watch: [list.query] })
 const time = (value: string) => value?.slice(0, 5) || '—'
 </script>
 
@@ -35,7 +37,15 @@ const time = (value: string) => value?.slice(0, 5) || '—'
       >
         <UIcon :name="item.icon" />{{ item.label }}
       </button>
-    </div><UAlert
+    </div>
+    <ListControls
+      v-if="tab === 'assignments'"
+      v-model:search="list.search.value"
+      :active="list.active.value"
+      search-placeholder="Search employee name or code"
+      @clear="list.clear"
+    />
+    <UAlert
       v-if="error"
       class="mt-5"
       color="warning"
@@ -135,5 +145,12 @@ const time = (value: string) => value?.slice(0, 5) || '—'
         </article>
       </div>
     </section>
+    <ListPagination
+      v-if="data"
+      v-model:page="list.page.value"
+      v-model:page-size="list.pageSize.value"
+      :total="tab === 'assignments' ? data.assignmentPage.total : data.shiftPage.total"
+      :loading="pending"
+    />
   </div>
 </template>

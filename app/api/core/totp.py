@@ -9,6 +9,11 @@ defaults every authenticator app assumes).
 Recovery codes are stored as SHA-256 hashes, exactly like refresh tokens: they
 are high-entropy random values, so a lookup hash is appropriate and the raw code
 is shown to the user once.
+
+The TOTP secret itself is the opposite case - the server must recover it to
+verify future codes - so it is encrypted rather than hashed.  That lives in
+``core/secret_box.py``; this module only produces and consumes the plaintext
+form, which never reaches the database or a log line.
 """
 
 from __future__ import annotations
@@ -48,6 +53,52 @@ def totp_at(secret: str, moment: datetime, *, digits: int = DEFAULT_DIGITS, step
     return _hotp(secret, int(moment.timestamp()) // step_seconds, digits=digits)
 
 
+def match_totp_step(
+    code: str,
+    secret: str,
+    moment: datetime,
+    *,
+    digits: int = DEFAULT_DIGITS,
+    step_seconds: int = DEFAULT_STEP_SECONDS,
+    window_steps: int = DEFAULT_WINDOW_STEPS,
+) -> int | None:
+    """Return the time step a submission matched, or ``None`` if it matched none.
+
+    Callers enforcing single use need *which* step matched rather than merely
+    that one did: with a drift window the code a client displays can belong to
+    the step before or after the server's current one, so recording "now" would
+    either block a legitimate code or leave a window open.  Pair the result with
+    :func:`is_totp_replay` and the stored step.
+    """
+    candidate = (code or "").strip().replace(" ", "")
+    if not candidate.isdigit() or len(candidate) != digits:
+        return None
+    counter = int(moment.timestamp()) // step_seconds
+    matched: int | None = None
+    # Every offset is evaluated (no early exit) and compared with
+    # hmac.compare_digest, so the loop length and the comparison are both
+    # constant-time: nothing leaks about which offset - if any - matched.
+    for offset in range(-window_steps, window_steps + 1):
+        expected = _hotp(secret, counter + offset, digits=digits)
+        if hmac.compare_digest(candidate, expected):
+            matched = counter + offset
+    return matched
+
+
+def is_totp_replay(matched_step: int | None, last_used_step: int | None) -> bool:
+    """Whether this submission reuses a code that was already spent.
+
+    A code is single-use: once a step has been consumed, the same step can never
+    be accepted again, which is what stops an observed code from being replayed
+    for the rest of its window.  ``matched_step`` is always >= the step of any
+    earlier successful use for the same secret, so a simple comparison suffices;
+    a ``None`` counter means this secret has never been used.
+    """
+    if matched_step is None:
+        return True
+    return last_used_step is not None and matched_step <= last_used_step
+
+
 def verify_totp(
     code: str,
     secret: str,
@@ -57,18 +108,20 @@ def verify_totp(
     step_seconds: int = DEFAULT_STEP_SECONDS,
     window_steps: int = DEFAULT_WINDOW_STEPS,
 ) -> bool:
-    """Constant-time check of a submitted code against a small drift window."""
-    candidate = (code or "").strip().replace(" ", "")
-    if not candidate.isdigit() or len(candidate) != digits:
-        return False
-    counter = int(moment.timestamp()) // step_seconds
-    # hmac.compare_digest keeps the comparison constant-time; the loop length is
-    # fixed, so no information leaks through timing.
-    matched = False
-    for offset in range(-window_steps, window_steps + 1):
-        expected = _hotp(secret, counter + offset, digits=digits)
-        matched |= hmac.compare_digest(candidate, expected)
-    return matched
+    """Constant-time check of a submitted code against a small drift window.
+
+    Stateless form, for callers that do not track single use (tests, docs).
+    Authentication paths should use :func:`match_totp_step` instead so a spent
+    code cannot be presented twice.
+    """
+    return match_totp_step(
+        code,
+        secret,
+        moment,
+        digits=digits,
+        step_seconds=step_seconds,
+        window_steps=window_steps,
+    ) is not None
 
 
 def provisioning_uri(*, secret: str, account: str, issuer: str) -> str:

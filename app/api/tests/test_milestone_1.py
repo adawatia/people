@@ -9,7 +9,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 
 from core.database import async_session_maker
-from db.models import Department, Designation, Employee, EmployeeWorkHistory, Organization, Unit
+from db.models import Department, Organization, Unit, now_ist
 from schemas.designations import DesignationCreate, DesignationUpdate
 from schemas.employees import EmployeeCreate, EmployeeUpdate
 from services.designation_service import DesignationService
@@ -171,11 +171,11 @@ def test_employee_profile_and_hierarchy(unique_suffix):
             # 6. Test deactivation and reactivation
             deactivated = await emp_service.deactivate_employee(
                 staff_read.id,
-                exit_date=date.today(),
+                exit_date=now_ist().date(),
                 exit_reason="Career break",
             )
             assert deactivated.status == "INACTIVE"
-            assert deactivated.exit_date == date.today()
+            assert deactivated.exit_date == now_ist().date()
 
             activated = await emp_service.activate_employee(staff_read.id)
             assert activated.status == "ACTIVE"

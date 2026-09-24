@@ -8,6 +8,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.pagination import employee_search, ordered
 from db.models import (
     AttendanceCorrectionRequest,
     AttendanceRecord,
@@ -248,7 +249,15 @@ class OwnerDashboardService:
         return sorted(result, key=lambda row: (row.attendance_rate, row.name))
 
     async def exceptions(
-        self, kind: str, unit_id: int | None, target_date: date, page: int, page_size: int
+        self,
+        kind: str,
+        unit_id: int | None,
+        target_date: date,
+        page: int,
+        page_size: int,
+        search: str | None = None,
+        sort_by: str | None = None,
+        sort_order: str = "asc",
     ) -> OwnerExceptionResponse:
         if kind not in EXCEPTION_KINDS:
             raise HTTPException(status_code=422, detail=f"kind must be one of: {', '.join(sorted(EXCEPTION_KINDS))}")
@@ -288,11 +297,26 @@ class OwnerDashboardService:
             else:
                 record_query = record_query.where(AttendanceRecord.status == "ON_LEAVE")
             query = query.where(Employee.id.in_(record_query))
+        query = employee_search(query, Employee, search)
+        query = ordered(
+            query,
+            {
+                "employee_code": Employee.employee_code,
+                "name": Employee.first_name,
+                "unit_id": Employee.unit_id,
+                "department_id": Employee.department_id,
+                "id": Employee.id,
+            },
+            sort_by,
+            sort_order,
+            "employee_code",
+            Employee.id,
+        )
         total = await self.session.scalar(select(func.count()).select_from(query.subquery())) or 0
         ids = list(
             (
                 await self.session.execute(
-                    query.order_by(Employee.employee_code).offset((page - 1) * page_size).limit(page_size)
+                    query.offset((page - 1) * page_size).limit(page_size)
                 )
             )
             .scalars()
@@ -300,9 +324,10 @@ class OwnerDashboardService:
         )
         repo = EmployeeRepository(self.session)
         service = EmployeeService(self.session)
-        employees = [await repo.get_by_id(employee_id) for employee_id in ids]
+        employees = await repo.get_by_ids(ids)
+        by_id = {employee.id: employee for employee in employees}
         return OwnerExceptionResponse(
-            items=[service.enrich_directory(employee) for employee in employees if employee],
+            items=[service.enrich_directory(by_id[employee_id]) for employee_id in ids if employee_id in by_id],
             total=total,
             page=page,
             page_size=page_size,

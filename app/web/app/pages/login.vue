@@ -25,7 +25,7 @@ function destination() {
 async function submit() {
   errorMessage.value = ''
   if (!form.identity.trim() || !form.password) {
-    errorMessage.value = 'Enter your mobile number, email or username and your password.'
+    errorMessage.value = 'Enter your mobile number or username and your password.'
     return
   }
   try {
@@ -89,14 +89,14 @@ async function afterMfa() {
             Sign in to People
           </h2>
           <p class="mt-3 text-sm leading-6 text-muted">
-            Use your mobile number, email address or username.
+            Use your mobile number or username.
           </p>
           <form
             class="mt-9 space-y-5"
             @submit.prevent="submit"
           >
             <UFormField
-              label="Mobile number, email or username"
+              label="Mobile number or username"
               name="identity"
               required
             >
@@ -170,7 +170,12 @@ async function afterMfa() {
             >
               Technical administrator sign-in
             </NuxtLink>
-            <span>Password reset: contact HR</span>
+            <NuxtLink
+              to="/forgot-password"
+              class="font-medium text-primary hover:underline"
+            >
+              Forgot password? Use your authenticator
+            </NuxtLink>
           </div>
         </template>
       </div>

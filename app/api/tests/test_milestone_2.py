@@ -2,18 +2,17 @@ import asyncio
 import selectors
 import sys
 import uuid
-from datetime import date, datetime, time, timedelta
-from decimal import Decimal
+from datetime import date, datetime, time
 
 import pytest
 from fastapi import HTTPException
 from sqlalchemy import select
 
 from core.database import async_session_maker
-from db.models import Department, Designation, Employee, Organization, Shift, Unit
+from db.models import Department, Designation, Employee, Organization, Unit
 from schemas.attendance import AttendancePunchCreate, BulkPunchCreate
 from schemas.holidays import HolidayCreate, HolidayListCreate
-from schemas.shifts import BulkShiftAssignmentCreate, ShiftAssignmentCreate, ShiftCreate
+from schemas.shifts import ShiftAssignmentCreate, ShiftCreate
 from services.attendance_service import AttendanceService
 from services.holiday_service import HolidayService
 from services.shift_service import ShiftService

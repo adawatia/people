@@ -1,6 +1,5 @@
 import re
 
-
 INDIAN_MOBILE_PATTERN = re.compile(r"^[6-9]\d{9}$")
 
 

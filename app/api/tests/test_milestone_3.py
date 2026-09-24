@@ -2,10 +2,9 @@ import asyncio
 import selectors
 import sys
 import uuid
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time
 
 import pytest
-from fastapi import HTTPException
 from sqlalchemy import select
 
 from core.database import async_session_maker
@@ -13,7 +12,6 @@ from db.models import Department, Designation, Employee, LeaveApplication, Leave
 from schemas.attendance import (
     AttendanceCorrectionCreate,
     AttendancePunchCreate,
-    ProcessAttendanceRequest,
 )
 from schemas.holidays import HolidayListCreate
 from schemas.shifts import ShiftAssignmentCreate, ShiftCreate

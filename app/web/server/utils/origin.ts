@@ -29,7 +29,7 @@ export interface OriginCheckInput {
   referer?: string | null
   host?: string | null
   forwardedHost?: string | null
-  allowedOrigins?: string[]
+  allowedOrigins?: string[] | string
 }
 
 export interface OriginCheckResult {
@@ -67,8 +67,16 @@ export function checkRequestOrigin(input: OriginCheckInput): OriginCheckResult {
   const ownHost = normaliseHost(input.forwardedHost) ?? normaliseHost(input.host)
   if (ownHost && declaredHost === ownHost) return { allowed: true, reason: 'same-host' }
 
-  const configured = (input.allowedOrigins ?? [])
-    .flatMap(entry => entry.split(','))
+  // Nuxt runtime configuration can preserve an array or expose an environment
+  // variable as one comma-separated string, depending on the runtime adapter.
+  // Normalize both shapes before comparing hosts.
+  const configuredEntries = Array.isArray(input.allowedOrigins)
+    ? input.allowedOrigins
+    : input.allowedOrigins
+      ? [input.allowedOrigins]
+      : []
+  const configured = configuredEntries
+    .reduce<string[]>((entries, entry) => entries.concat(entry.split(',')), [])
     .map(entry => normaliseHost(entry))
     .filter((entry): entry is string => Boolean(entry))
   if (configured.includes(declaredHost)) return { allowed: true, reason: 'configured' }
