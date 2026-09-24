@@ -15,8 +15,9 @@ Environment variables:
 
 The workflow is dependency ordered: organization -> units -> departments ->
 designations -> shifts -> employees -> assignments -> holidays -> attendance
--> leave balances -> overtime -> leave outcome pull/ack. IDs returned by an
-earlier endpoint are inserted into dependent requests automatically.
+-> leave master data -> leave balances -> overtime -> leave outcome pull/ack.
+IDs returned by an earlier endpoint are inserted into dependent requests
+automatically.
 
 The create endpoints are not globally idempotent. Use unique codes, usernames,
 emails, mobile numbers, ERP record IDs, and ERP event IDs for each real run.
@@ -159,7 +160,27 @@ ERP_DATA: dict[str, Any] = {
             "early_exit_minutes": 0,
         },
     ],
-    # leave_code must already exist in HRMS. The default seed normally creates CL.
+    "leave_periods": [
+        {
+            "name": "Calendar Year 2026",
+            "from_date": "2026-01-01",
+            "to_date": "2026-12-31",
+            "is_active": True,
+        },
+    ],
+    "leave_types": [
+        {
+            "name": "Casual Leave",
+            "code": "CL",
+            "is_paid": True,
+            "annual_allocation": 12,
+            "max_consecutive_days": 3,
+            "requires_approval": True,
+            "carry_forward": False,
+            "include_holidays": False,
+            "is_active": True,
+        },
+    ],
     "leave_balances": [
         {
             "employee_key": "manager",
@@ -338,36 +359,36 @@ def run_workflow(client: ErpClient, *, acknowledge: bool, exercise_lifecycle: bo
     # other temporary password. Override this for real manual testing.
     initial_password = os.environ.get("ERP_DEMO_INITIAL_PASSWORD", "Cobalt!Harbor92#")
 
-    print("\n[1/11] Organization")
+    print("\n[1/12] Organization")
     client.request("PATCH", "integrations/erp/organization", data["organization"])
 
-    print("\n[2/11] Units")
+    print("\n[2/12] Units")
     unit_ids: dict[str, int] = {}
     for item in data["units"]:
         result = client.request("POST", "integrations/erp/units", without_keys(item, "key"))
         unit_ids[item["key"]] = require_id(result, f"unit {item['key']}")
 
-    print("\n[3/11] Departments")
+    print("\n[3/12] Departments")
     department_ids: dict[str, int] = {}
     for item in data["departments"]:
         payload = without_keys(item, "key", "unit_key") | {"unit_id": unit_ids[item["unit_key"]]}
         result = client.request("POST", "integrations/erp/departments", payload)
         department_ids[item["key"]] = require_id(result, f"department {item['key']}")
 
-    print("\n[4/11] Designations")
+    print("\n[4/12] Designations")
     designation_ids: dict[str, int] = {}
     for item in data["designations"]:
         result = client.request("POST", "integrations/erp/designations", without_keys(item, "key"))
         designation_ids[item["key"]] = require_id(result, f"designation {item['key']}")
 
-    print("\n[5/11] Shift definitions")
+    print("\n[5/12] Shift definitions")
     shift_ids: dict[str, int] = {}
     for item in data["shifts"]:
         payload = without_keys(item, "key", "unit_key") | {"unit_id": unit_ids[item["unit_key"]]}
         result = client.request("POST", "integrations/erp/shifts", payload)
         shift_ids[item["key"]] = require_id(result, f"shift {item['key']}")
 
-    print("\n[6/11] Employees and linked login accounts")
+    print("\n[6/12] Employees and linked login accounts")
     employee_ids: dict[str, int] = {}
     for item in data["employees"]:
         payload = without_keys(
@@ -400,7 +421,7 @@ def run_workflow(client: ErpClient, *, acknowledge: bool, exercise_lifecycle: bo
         result = client.request("POST", "integrations/erp/employees", payload)
         employee_ids[item["key"]] = require_id(result, f"employee {item['key']}")
 
-    print("\n[7/11] Shift assignments")
+    print("\n[7/12] Shift assignments")
     employee_items = data["employees"]
     first = employee_items[0]
     client.request(
@@ -424,10 +445,10 @@ def run_workflow(client: ErpClient, *, acknowledge: bool, exercise_lifecycle: bo
             },
         )
 
-    print("\n[8/11] Organization holidays")
+    print("\n[8/12] Organization holidays")
     client.request("POST", "integrations/erp/holidays/bulk", data["holidays"])
 
-    print("\n[9/11] Processed attendance")
+    print("\n[9/12] Processed attendance")
     attendance_records = []
     for item in data["attendance"]:
         attendance_records.append(
@@ -458,7 +479,13 @@ def run_workflow(client: ErpClient, *, acknowledge: bool, exercise_lifecycle: bo
             )
         )
 
-    print("\n[10/11] Leave balances")
+    print("\n[10/12] Leave periods and types")
+    for item in data["leave_periods"]:
+        client.request("POST", "leaves/periods", item)
+    for item in data["leave_types"]:
+        client.request("POST", "leaves/types", item)
+
+    print("\n[11/12] Leave balances")
     balances = [
         without_keys(item, "employee_key") | {"employee_id": employee_ids[item["employee_key"]]}
         for item in data["leave_balances"]
@@ -468,7 +495,7 @@ def run_workflow(client: ErpClient, *, acknowledge: bool, exercise_lifecycle: bo
     if len(balances) > 1:
         client.request("POST", "integrations/erp/leaves/balances/bulk", balances[1:])
 
-    print("\n[11/11] Overtime records and leave outcome feed")
+    print("\n[12/12] Overtime records and leave outcome feed")
     overtime_payload = []
     attendance_by_key = {item["key"]: item for item in data["attendance"]}
     for item in data["overtime"]:

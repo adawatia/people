@@ -108,8 +108,11 @@ async def sync_leave_balances(
             if employee is None and item.employee_code:
                 employee = await session.scalar(select(Employee).where(Employee.employee_code == item.employee_code))
             leave_type = await session.scalar(select(LeaveType).where(LeaveType.code == item.leave_code.upper()))
-            if employee is None or leave_type is None:
-                raise ValueError("Employee or leave type not found")
+            if employee is None:
+                identity = item.employee_id if item.employee_id is not None else item.employee_code
+                raise ValueError(f"Employee {identity!r} not found")
+            if leave_type is None:
+                raise ValueError(f"Leave type code {item.leave_code.upper()!r} not found")
             balance = await session.scalar(select(LeaveBalance).where(
                 LeaveBalance.employee_id == employee.id,
                 LeaveBalance.leave_type_id == leave_type.id,

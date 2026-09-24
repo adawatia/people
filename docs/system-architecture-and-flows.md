@@ -543,7 +543,7 @@ Config: `create_period`, `create_type`, `update_type`, `allocate_leaves` (writes
 2. delete read notifications older than 3 days,
 3. keep at most the 50 newest notifications per `user_id`/`target_role` partition (window function).
 
-### 2.8 ERP integration contract (`/api/v1/integrations/erp/**`, all `X-API-Key`)
+### 2.8 ERP integration contract (all writes use `X-API-Key`)
 
 | Method & path | Purpose | Idempotency / notes |
 |---|---|---|
@@ -561,6 +561,7 @@ Config: `create_period`, `create_type`, `update_type`, `allocate_leaves` (writes
 | `GET /leaves/changes?since&limit` | **ERP pulls** leave outcomes (`erp_sync_status != ACKNOWLEDGED`) | ordered by `actioned_at`; `has_more` cursor |
 | `POST /leaves/changes/ack` | ERP acknowledges event ids | marks `ACKNOWLEDGED` + `erp_synced_at`; returns `unknown[]` |
 | `POST /leaves/balances`, `/balances/bulk` | Sync leave balances (allocated/used/pending) | per-item `accepted`/`failed`; upserts by employee + leave code + year |
+| `POST /api/v1/leaves/periods`, `/types` | Create ERP-owned leave periods and types before balance sync | these two legacy paths sit outside `/integrations/erp`; both require `X-API-Key` |
 
 **Ingestion discipline:** bulk endpoints are intentionally *partial-success* — a bad row lands in `failed[]` with its error string and the rest are committed. Callers must inspect the result, not just the HTTP status.
 
