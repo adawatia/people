@@ -195,16 +195,6 @@ function hasPendingCorrection(recordId: number) {
 
 <template>
   <div>
-    <div v-if="!personalView">
-      <ListControls
-        v-model:search="list.search.value"
-        v-model:sort-by="list.sortBy.value"
-        v-model:sort-order="list.sortOrder.value"
-        :active="list.active.value"
-        :sorts="[{ label: 'Date', value: 'attendance_date' }, { label: 'Status', value: 'status' }]"
-        @clear="list.clear"
-      />
-    </div>
     <div class="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
       <div>
         <p class="text-sm font-medium text-primary">
@@ -235,6 +225,17 @@ function hasPendingCorrection(recordId: number) {
         />
       </div>
     </div>
+
+    <ListControls
+      v-if="!personalView"
+      v-model:search="list.search.value"
+      v-model:sort-by="list.sortBy.value"
+      v-model:sort-order="list.sortOrder.value"
+      :active="list.active.value"
+      :sorts="[{ label: 'Date', value: 'attendance_date' }, { label: 'Status', value: 'status' }]"
+      search-placeholder="Search employee name or code"
+      @clear="list.clear"
+    />
 
     <UAlert
       v-if="personalView && auth.user.value?.is_superuser"

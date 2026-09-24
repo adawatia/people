@@ -62,8 +62,6 @@ const leaveChartOption = computed<ECOption>(() => {
 
 <template>
   <div>
-    <ListControls v-model:search="list.search.value" v-model:sort-by="list.sortBy.value" v-model:sort-order="list.sortOrder.value" :active="list.active.value" :sorts="[{ label: 'Employee code', value: 'employee_code' }, { label: 'Name', value: 'name' }]" @clear="list.clear" />
-
     <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
       <div>
         <p class="text-sm font-medium text-primary">
@@ -102,7 +100,17 @@ const leaveChartOption = computed<ECOption>(() => {
       >
         Leave summary
       </button>
-    </div><UAlert
+    </div>
+    <ListControls
+      v-model:search="list.search.value"
+      v-model:sort-by="list.sortBy.value"
+      v-model:sort-order="list.sortOrder.value"
+      :active="list.active.value"
+      :sorts="[{ label: 'Employee code', value: 'employee_code' }, { label: 'Name', value: 'name' }]"
+      search-placeholder="Search employee name or code"
+      @clear="list.clear"
+    />
+    <UAlert
       v-if="error"
       class="mt-5"
       color="error"

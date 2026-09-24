@@ -107,15 +107,6 @@ async function confirmCancellation() {
 
 <template>
   <div>
-    <ListControls
-      v-model:search="list.search.value"
-      v-model:sort-by="list.sortBy.value"
-      v-model:sort-order="list.sortOrder.value"
-      :active="list.active.value"
-      :sorts="[{ label: 'Request date', value: 'created_at' }, { label: 'Status', value: 'status' }]"
-      @clear="list.clear"
-    />
-
     <div class="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
       <div>
         <p class="text-sm font-medium text-primary">
@@ -135,6 +126,16 @@ async function confirmCancellation() {
         New request
       </UButton>
     </div>
+
+    <ListControls
+      v-model:search="list.search.value"
+      v-model:sort-by="list.sortBy.value"
+      v-model:sort-order="list.sortOrder.value"
+      :active="list.active.value"
+      :sorts="[{ label: 'Request date', value: 'created_at' }, { label: 'Status', value: 'status' }]"
+      search-placeholder="Search employee name or code"
+      @clear="list.clear"
+    />
     <UAlert
       v-if="selfService && !employeeId"
       class="mt-6"

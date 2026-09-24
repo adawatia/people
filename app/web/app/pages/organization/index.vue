@@ -21,11 +21,6 @@ function unitName(id: number) {
 
 <template>
   <div>
-    <ListControls
-      v-model:search="list.search.value"
-      :active="list.active.value"
-      @clear="list.clear"
-    />
     <header class="my-6">
       <p class="text-sm text-primary">
         Organization
@@ -48,6 +43,12 @@ function unitName(id: number) {
         <UIcon :name="tab.icon" />{{ tab.label }}
       </button>
     </div>
+    <ListControls
+      v-model:search="list.search.value"
+      :active="list.active.value"
+      :search-placeholder="`Search ${activeTab}`"
+      @clear="list.clear"
+    />
     <UAlert
       v-if="error"
       class="mt-5"

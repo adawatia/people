@@ -140,18 +140,6 @@ async function rejectRequest() {
 
 <template>
   <div>
-    <ListControls
-      v-if="activeTab === 'work'"
-      v-model:search="workList.search.value"
-      :active="workList.active.value"
-      @clear="workList.clear"
-    />
-    <ListControls
-      v-if="activeTab === 'leave'"
-      v-model:search="leaveList.search.value"
-      :active="leaveList.active.value"
-      @clear="leaveList.clear"
-    />
     <div class="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
       <div>
         <p class="text-sm font-medium text-primary">
@@ -199,6 +187,31 @@ async function rejectRequest() {
         <UIcon name="i-lucide-timer" />Overtime<span class="rounded-full bg-primary/10 px-2 py-0.5 text-xs">{{ overtimeQueue.data.value?.total || 0 }}</span>
       </button>
     </div>
+
+    <ListControls
+      v-if="activeTab === 'leave'"
+      v-model:search="leaveList.search.value"
+      :active="leaveList.active.value"
+      label="Filter leave approvals"
+      search-placeholder="Search employee name or code"
+      @clear="leaveList.clear"
+    />
+    <ListControls
+      v-else-if="activeTab === 'work'"
+      v-model:search="workList.search.value"
+      :active="workList.active.value"
+      label="Filter work arrangement approvals"
+      search-placeholder="Search employee name or code"
+      @clear="workList.clear"
+    />
+    <ListControls
+      v-else-if="activeTab === 'overtime'"
+      v-model:search="overtimeList.search.value"
+      :active="overtimeList.active.value"
+      label="Filter overtime approvals"
+      search-placeholder="Search employee name or code"
+      @clear="overtimeList.clear"
+    />
 
     <UAlert
       v-if="!canLeave && !canWork && !canOvertime"
@@ -464,13 +477,6 @@ async function rejectRequest() {
         There are no {{ activeTab }} requests waiting for your action.
       </p>
     </div>
-
-    <ListControls
-      v-if="activeTab === 'overtime'"
-      v-model:search="overtimeList.search.value"
-      :active="overtimeList.active.value"
-      @clear="overtimeList.clear"
-    />
 
     <UModal
       :open="!!(leaveReject || workReject || overtimeReject)"

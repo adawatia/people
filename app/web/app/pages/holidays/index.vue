@@ -21,11 +21,6 @@ const formatDate = (value: string) => new Intl.DateTimeFormat('en-IN', { weekday
 
 <template>
   <div>
-    <ListControls
-      v-model:search="list.search.value"
-      :active="list.active.value"
-      @clear="list.clear"
-    />
     <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
       <div>
         <p class="text-sm font-medium text-primary">
@@ -36,7 +31,14 @@ const formatDate = (value: string) => new Intl.DateTimeFormat('en-IN', { weekday
           View the organization holiday calendar synchronized from ERP.
         </p>
       </div>
-    </div><UAlert
+    </div>
+    <ListControls
+      v-model:search="list.search.value"
+      :active="list.active.value"
+      search-placeholder="Search holiday calendars"
+      @clear="list.clear"
+    />
+    <UAlert
       v-if="error"
       class="mt-6"
       color="warning"

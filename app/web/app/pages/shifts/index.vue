@@ -17,12 +17,6 @@ const time = (value: string) => value?.slice(0, 5) || '—'
 
 <template>
   <div>
-    <ListControls
-      v-if="tab === 'assignments'"
-      v-model:search="list.search.value"
-      :active="list.active.value"
-      @clear="list.clear"
-    />
     <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
       <div>
         <p class="text-sm font-medium text-primary">
@@ -43,7 +37,15 @@ const time = (value: string) => value?.slice(0, 5) || '—'
       >
         <UIcon :name="item.icon" />{{ item.label }}
       </button>
-    </div><UAlert
+    </div>
+    <ListControls
+      v-if="tab === 'assignments'"
+      v-model:search="list.search.value"
+      :active="list.active.value"
+      search-placeholder="Search employee name or code"
+      @clear="list.clear"
+    />
+    <UAlert
       v-if="error"
       class="mt-5"
       color="warning"

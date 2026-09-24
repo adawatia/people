@@ -43,11 +43,6 @@ async function markAll() {
 
 <template>
   <div class="mx-auto max-w-4xl">
-    <ListControls
-      v-model:search="list.search.value"
-      :active="list.active.value"
-      @clear="list.clear"
-    />
     <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
       <div>
         <p class="text-sm font-medium text-primary">
@@ -67,6 +62,12 @@ async function markAll() {
         Mark all read
       </UButton>
     </div>
+    <ListControls
+      v-model:search="list.search.value"
+      :active="list.active.value"
+      search-placeholder="Search notification titles"
+      @clear="list.clear"
+    />
     <div class="mt-7 flex gap-1 rounded-xl bg-muted/5 p-1 sm:w-fit">
       <button
         v-for="option in [{ key: 'all', label: 'All' }, { key: 'unread', label: `Unread (${unread})` }]"

@@ -38,40 +38,38 @@ const initials = (item: Employee) => `${item.first_name[0] || ''}${item.last_nam
         description="Create or provision employees in ERP. Changes will sync here automatically."
       />
     </div>
-    <UButton
-      v-if="list.active.value"
-      class="mt-4"
-      icon="i-lucide-filter-x"
-      variant="outline"
-      color="neutral"
-      @click="list.clear"
+    <ListControls
+      v-model:search="search"
+      v-model:sort-by="list.sortBy.value"
+      v-model:sort-order="list.sortOrder.value"
+      :active="list.active.value"
+      :sorts="[{ label: 'Employee code', value: 'employee_code' }, { label: 'Name', value: 'name' }, { label: 'Status', value: 'status' }]"
+      search-placeholder="Search name, code or email"
+      @clear="list.clear"
     >
-      Clear filters
-    </UButton>
-    <section class="people-card mt-7 p-4 sm:p-5">
-      <div class="grid gap-3 md:grid-cols-4">
-        <UInput
-          v-model="search"
-          icon="i-lucide-search"
-          placeholder="Search name, code or email"
-          class="md:col-span-2"
-        /><RemoteSelect
+      <UFormField label="Unit">
+        <RemoteSelect
           v-model="unitId"
           endpoint="org/units"
           label="All units"
-        /><USelect
-          v-model="status"
-          :items="[{ label: 'Active', value: 'ACTIVE' }, { label: 'Inactive', value: 'INACTIVE' }, { label: 'All statuses', value: 'ALL' }]"
         />
-      </div><div class="mt-3">
+      </UFormField>
+      <UFormField label="Department">
         <RemoteSelect
           v-model="departmentId"
           endpoint="org/departments"
           label="All departments"
           :filters="{ unit_id: unitId || undefined }"
         />
-      </div>
-    </section>
+      </UFormField>
+      <UFormField label="Status">
+        <USelect
+          v-model="status"
+          :items="[{ label: 'Active', value: 'ACTIVE' }, { label: 'Inactive', value: 'INACTIVE' }, { label: 'All statuses', value: 'ALL' }]"
+          class="w-full"
+        />
+      </UFormField>
+    </ListControls>
     <UAlert
       v-if="error"
       class="mt-5"
