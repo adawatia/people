@@ -104,20 +104,23 @@ class ShiftRepository:
         """
         today = today or now_ist().date()
         end_date = today + timedelta(days=lookahead_days - 1)
+        assignment_shift_ids = select(ShiftAssignment.shift_id).where(
+            ShiftAssignment.employee_id == employee_id,
+            ShiftAssignment.status == "ACTIVE",
+            ShiftAssignment.effective_from <= end_date,
+            or_(
+                ShiftAssignment.effective_to.is_(None),
+                ShiftAssignment.effective_to >= today,
+            ),
+        )
+        default_shift_id = select(Employee.shift_id).where(
+            Employee.id == employee_id,
+            Employee.shift_id.is_not(None),
+        )
         stmt = (
             select(Shift)
-            .distinct()
-            .join(ShiftAssignment, ShiftAssignment.shift_id == Shift.id)
-            .where(
-                ShiftAssignment.employee_id == employee_id,
-                ShiftAssignment.status == "ACTIVE",
-                ShiftAssignment.effective_from <= end_date,
-                or_(
-                    ShiftAssignment.effective_to.is_(None),
-                    ShiftAssignment.effective_to >= today,
-                ),
-            )
-            .order_by(Shift.name)
+            .where(or_(Shift.id.in_(assignment_shift_ids), Shift.id.in_(default_shift_id)))
+            .order_by(Shift.name, Shift.id)
         )
         return list((await self.session.execute(stmt)).scalars().all())
 
@@ -200,7 +203,11 @@ class ShiftRepository:
             ids = ids.where(or_(Employee.id.in_(scope.employee_ids), Employee.unit_id.in_(scope.unit_ids),
                                 Employee.department_id.in_(scope.department_ids)))
         ids = employee_search(ids, Employee, search)
-        query = select(ShiftAssignment).where(ShiftAssignment.employee_id.in_(ids))
+        query = (
+            select(ShiftAssignment)
+            .options(selectinload(ShiftAssignment.shift), selectinload(ShiftAssignment.employee))
+            .where(ShiftAssignment.employee_id.in_(ids))
+        )
         for column, value in [(ShiftAssignment.employee_id, employee_id), (ShiftAssignment.shift_id, shift_id),
                               (ShiftAssignment.status, status)]:
             if value is not None:
@@ -211,7 +218,7 @@ class ShiftRepository:
 
     async def definitions_page(
         self,
-        employee_id=None,
+        scope,
         unit_id=None,
         is_active=True,
         page=1,
@@ -221,14 +228,27 @@ class ShiftRepository:
         sort_order="asc",
     ):
         query = select(Shift)
-        if employee_id is not None:
+        if not scope.organization:
+            employee_ids = select(Employee.id).where(
+                or_(
+                    Employee.id.in_(scope.employee_ids),
+                    Employee.unit_id.in_(scope.unit_ids),
+                    Employee.department_id.in_(scope.department_ids),
+                )
+            )
             today = now_ist().date()
             assigned = select(ShiftAssignment.shift_id).where(
-                ShiftAssignment.employee_id == employee_id, ShiftAssignment.status == "ACTIVE",
+                ShiftAssignment.employee_id.in_(employee_ids),
+                ShiftAssignment.status == "ACTIVE",
                 ShiftAssignment.effective_from <= today + timedelta(days=14),
-                or_(ShiftAssignment.effective_to.is_(None), ShiftAssignment.effective_to >= today))
-            query = query.where(Shift.id.in_(assigned))
-        elif unit_id is not None:
+                or_(ShiftAssignment.effective_to.is_(None), ShiftAssignment.effective_to >= today),
+            )
+            defaults = select(Employee.shift_id).where(
+                Employee.id.in_(employee_ids),
+                Employee.shift_id.is_not(None),
+            )
+            query = query.where(or_(Shift.id.in_(assigned), Shift.id.in_(defaults)))
+        if unit_id is not None:
             query = query.where(or_(Shift.unit_id == unit_id, Shift.unit_id.is_(None)))
         if is_active is not None:
             query = query.where(Shift.is_active == is_active)

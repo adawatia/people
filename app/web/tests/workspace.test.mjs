@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { canVisitWorkspace, resolveWorkspace, workspacesForUser } from '../app/composables/useWorkspace.ts'
 
-const employee = { permissions: ['attendance.view_self', 'leave.apply', 'work_arrangement.apply', 'overtime.view_self'] }
+const employee = { permissions: ['attendance.view_self', 'leave.apply', 'work_arrangement.apply', 'overtime.view_self', 'shift.view_self'] }
 const manager = { permissions: [...employee.permissions, 'employee.view', 'attendance.view_department', 'overtime.approve'] }
 const hr = { permissions: [...manager.permissions, 'leave.manage', 'attendance.process'] }
 const owner = { permissions: [...employee.permissions, 'employee.view', 'attendance.view', 'attendance.view_unit', 'attendance.view_department', 'overtime.view_department', 'dashboard.view_organization'] }
@@ -27,6 +27,8 @@ test('personal and management routes stay separate and approvals accept overtime
   assert.equal(canVisitWorkspace(manager, 'MY', '/employees'), false)
   assert.equal(canVisitWorkspace(manager, 'TEAM', '/employees/42'), true)
   assert.equal(canVisitWorkspace(manager, 'TEAM', '/approvals'), true)
+  assert.equal(canVisitWorkspace(employee, 'MY', '/shifts'), true)
+  assert.equal(canVisitWorkspace(manager, 'TEAM', '/shifts'), true)
   assert.equal(canVisitWorkspace(employee, 'TEAM', '/approvals'), false)
   assert.equal(canVisitWorkspace(owner, 'HR', '/attendance'), false)
 })

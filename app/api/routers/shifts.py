@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.auth import fastapi_users
 from core.business_roles import resolve_business_access
 from core.database import get_async_session
-from core.employee_access import get_current_employee, get_employee_scope
+from core.employee_access import EmployeeAccessScope, get_current_employee, get_employee_scope
 from core.pagination import PaginatedResponse
 from db.models import User
 from schemas.shifts import (
@@ -51,15 +51,23 @@ async def list_shifts(
     search: str | None = None,
     sort_by: str | None = None,
     sort_order: str = Query("asc", pattern="^(asc|desc)$"),
+    employee_id: int | None = None,
     unit_id: int | None = None,
     is_active: bool | None = True,
     user: User = Depends(fastapi_users.current_user(active=True)),
     session: AsyncSession = Depends(get_async_session),
 ) -> PaginatedResponse[ShiftRead]:
     service = ShiftService(session)
-    employee = await _employee_self_scope(user, session)
+    scope = await get_employee_scope(user, session)
+    if employee_id is not None:
+        employee = await service.employee_repo.get_by_id(employee_id)
+        if employee is None:
+            raise HTTPException(status_code=404, detail="Employee not found")
+        if not scope.allows(employee):
+            raise HTTPException(status_code=403, detail="You do not have access to this employee's shifts")
+        scope = EmployeeAccessScope(employee_ids={employee.id})
     return await service.definitions_page(
-        employee_id=employee.id if employee else None,
+        scope=scope,
         unit_id=unit_id,
         is_active=is_active,
         page=page,

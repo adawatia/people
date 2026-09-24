@@ -5,14 +5,23 @@ import type { Shift, ShiftAssignment } from '#shared/types/workforce'
 
 useSeoMeta({ title: 'Shifts' })
 const api = useHrmsApi()
+const auth = useAuth()
+const workspace = useWorkspace()
 const list = useListState({ sort_order: 'desc' })
 const tab = ref<'definitions' | 'assignments'>('definitions')
 // Shift definitions and employee assignments are authored in ERP and mirrored here.
 const { data, pending, error, refresh } = await useAsyncData('shift-workspace', async () => {
-  const [shifts, assignments] = await Promise.all([api.request<PaginatedResponse<Shift>>('shifts/', { query: { ...list.query.value, is_active: true } }), api.request<PaginatedResponse<ShiftAssignment>>('shifts/assignments', { query: list.query.value })])
+  const employee_id = workspace.current.value === 'MY' ? auth.user.value?.employee_id : undefined
+  const query = { ...list.query.value, employee_id }
+  const [shifts, assignments] = await Promise.all([api.request<PaginatedResponse<Shift>>('shifts/', { query: { ...query, is_active: true } }), api.request<PaginatedResponse<ShiftAssignment>>('shifts/assignments', { query })])
   return { shifts: shifts.items, shiftPage: shifts, assignments: assignments.items, assignmentPage: assignments }
-}, { watch: [list.query] })
+}, { watch: [list.query, workspace.current] })
 const time = (value: string) => value?.slice(0, 5) || '—'
+const scopeDescription = computed(() => workspace.current.value === 'MY'
+  ? 'Review only your assigned shift and schedule history synchronized from ERP.'
+  : workspace.current.value === 'TEAM'
+    ? 'Review shift assignments for employees in your department.'
+    : 'Review shift assignments for employees in your authorized HR scope.')
 </script>
 
 <template>
@@ -24,7 +33,7 @@ const time = (value: string) => value?.slice(0, 5) || '—'
         </p><h2 class="mt-1 text-2xl font-semibold sm:text-3xl">
           Shifts
         </h2><p class="mt-2 text-sm text-muted">
-          Review the shift definitions and employee assignments synchronized from ERP.
+          {{ scopeDescription }}
         </p>
       </div>
     </div><div class="mt-7 flex gap-2 border-b border-[var(--people-border)]">

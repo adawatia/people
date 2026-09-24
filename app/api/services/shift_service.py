@@ -496,7 +496,9 @@ class ShiftService:
         return None
 
     async def assignments_page(self, scope, **filters):
-        return await self.repo.assignments_page(scope, **filters)
+        page = await self.repo.assignments_page(scope, **filters)
+        page["items"] = [self.to_assignment_read(assignment) for assignment in page["items"]]
+        return page
 
     async def definitions_page(self, **filters):
         return await self.repo.definitions_page(**filters)

@@ -326,6 +326,7 @@ async def test_deterministic_ordering_for_history_notifications_and_lookup_lists
 
     async def definitions(page):
         return await shift_repo.definitions_page(
+            scope=EmployeeAccessScope(organization=True),
             unit_id=list_matrix["unit_a"].id,
             page=page,
             page_size=2,
@@ -337,3 +338,57 @@ async def test_deterministic_ordering_for_history_notifications_and_lookup_lists
     first, repeated, second = await definitions(1), await definitions(1), await definitions(2)
     assert first["total"] == 3
     _assert_stable_pages(first, repeated, second)
+
+
+@pytest.mark.asyncio
+async def test_shift_definitions_and_assignments_follow_employee_scope(list_matrix):
+    session = list_matrix["session"]
+    suffix = list_matrix["suffix"]
+    employees_a = list_matrix["employees_a"]
+    employee_b = list_matrix["employee_b"]
+    department_id = list_matrix["department_a"].id
+    unit_id = list_matrix["unit_a"].id
+
+    visible_shift = session.session.scalar(select(Shift).where(Shift.code == f"S{suffix}"))
+    outside_shift = Shift(
+        unit_id=employee_b.unit_id,
+        name=f"Outside Shift {suffix}",
+        code=f"OS{suffix}",
+        start_time=time(10),
+        end_time=time(19),
+    )
+    session.session.add(outside_shift)
+    session.session.flush()
+    for employee in employees_a:
+        employee.shift_id = visible_shift.id
+    employee_b.shift_id = outside_shift.id
+    session.session.flush()
+
+    repo = ShiftRepository(session)
+    scopes = {
+        "self": EmployeeAccessScope(employee_ids={employees_a[0].id}),
+        "department": EmployeeAccessScope(department_ids={department_id}),
+        "unit": EmployeeAccessScope(unit_ids={unit_id}),
+    }
+    expected_assignment_counts = {"self": 1, "department": 3, "unit": 3}
+
+    for label, scope in scopes.items():
+        definitions = await repo.definitions_page(
+            scope=scope,
+            page=1,
+            page_size=25,
+            search=suffix,
+        )
+        assert definitions["total"] == 1
+        assert [shift.id for shift in definitions["items"]] == [visible_shift.id]
+
+        assignments = await repo.assignments_page(
+            scope,
+            page=1,
+            page_size=25,
+            search=suffix,
+        )
+        assert assignments["total"] == expected_assignment_counts[label]
+        assert {item.employee_id for item in assignments["items"]} <= {
+            employee.id for employee in employees_a
+        }

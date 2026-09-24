@@ -35,6 +35,7 @@ const WORKSPACE_ROUTES: Record<Workspace, WorkspaceRouteRule[]> = {
     { path: '/attendance', permissions: ['attendance.view_department'] }, { path: '/leaves', permissions: ['leave.approve'] },
     { path: '/work-arrangements', permissions: ['work_arrangement.approve'] }, { path: '/overtime', permissions: ['overtime.view_department'] },
     { path: '/approvals', permissions: ['leave.approve', 'work_arrangement.approve', 'overtime.approve'] },
+    { path: '/shifts', permissions: ['shift.view_self'] },
     { path: '/reports', permissions: ['reports.attendance', 'reports.leave', 'reports.view'] },
     { path: '/profile' }, { path: '/settings' }, { path: '/notifications' }
   ],

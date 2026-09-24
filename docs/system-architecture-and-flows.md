@@ -513,6 +513,7 @@ Config: `create_period`, `create_type`, `update_type`, `allocate_leaves` (writes
 * `get_shift_window(shift, date)` builds concrete start/end datetimes and flags `is_cross_midnight` (end < start ⇒ +1 day).
 * `resolve_shift_for_timestamp` / `get_shift_window_for_date`: **dated `shift_assignments` win over `Employee.shift_id`**, with `effective_from ≤ date ≤ effective_to`.
 * `get_employee_shift_schedule(employee_id, for_timestamp)` returns `assigned_shift` + `upcoming_shift` in **one batched context** (`load_schedule_context`, `_window_for_date`) — this batching was introduced to remove per-date N+1 lookups (regression-tested in `tests/test_shift_schedule_batching.py` and used by the dashboard).
+* Shift definitions and assignment lists apply `EmployeeAccessScope` before counting or paging: employees see only their own assigned/default shift, department managers see their department, unit HR sees their unit, and organization-scoped HR sees the organization. Assignment rows batch-load employee and shift labels.
 * Assignment creation prevents overlapping assignments per employee (`find_overlapping_assignment`).
 * Public router is **read-only** (see §8.1 A1).
 
@@ -733,7 +734,7 @@ One account can move between contexts without another login:
 | Workspace | Audience | Typical navigation |
 |---|---|---|
 | My Workspace | Every employee, including elevated users | Personal attendance, leave, work arrangements, overtime, shifts, holidays |
-| Team Workspace | Department/team review permissions | Team dashboard, scoped employees/attendance/leave/work-arrangement/overtime records, approvals, reports |
+| Team Workspace | Department/team review permissions | Team dashboard, scoped employees/attendance/leave/work-arrangement/overtime/shift records, approvals, reports |
 | HR Workspace | HR operations permissions | Scoped workforce/attendance/leave/work-arrangement/overtime records, approvals, reports, organization |
 | Executive Workspace | `dashboard.view_organization` | Organization analytics, reports, organization overview |
 | Technical Administration | Super Admin only | Technical metrics and system administration |
@@ -874,7 +875,7 @@ The correction-request action is not available to a plain employee: it is hidden
 
 **Unit HR vs organization HR.** Both hold the identical `HR_ADMIN` permission bundle; only the access scope differs (`UNIT` + `access_scope_id`, or `ORGANIZATION`). A unit HR admin sees their unit and is refused on another unit's records; organization HR (`access_scope = ORGANIZATION`, no `access_scope_id`) reaches every unit, and their dashboard KPI label reads "Organization members". Organization HR is still *not* an Organization Owner: it has no `dashboard.view_organization` and therefore no owner analytics panel.
 
-**Shifts (`/shifts`).** Definitions + assignments are read from HRMS; creating them is ERP-only, so the "New shift"/"Assign shift" buttons currently 405 (§8.1 A4). Employees' schedules come from ERP assignments, so this page is effectively a viewer today.
+**Shifts (`/shifts`).** Definitions + assignments are read from HRMS and scoped to the active user's employee reach: self in My, department in Team, unit/organization in HR. Creating them is ERP-only, so the page is a viewer and exposes no create/assign controls.
 
 **Password operations.** `POST /auth/hr/employees/{id}/password-reset` sets a temporary password (policy-validated), sets `must_change_password`, and revokes all of the user's refresh sessions. This is the supported "reset a locked-out employee" path; the login page tells users to contact HR for exactly this reason.
 
