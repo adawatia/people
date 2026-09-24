@@ -93,10 +93,11 @@ export function useAuth() {
   }
 
   async function logout() {
+    const destination = user.value?.is_superuser || user.value?.role === 'SUPER_ADMIN' ? '/admin/login' : '/login'
     await requestFetch('/api/session', { method: 'DELETE' })
     user.value = null
     initialized.value = true
-    await navigateTo('/login')
+    await navigateTo(destination)
   }
 
   return {

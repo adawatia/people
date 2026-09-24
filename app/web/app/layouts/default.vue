@@ -204,21 +204,23 @@ onMounted(() => {
         </NuxtLink>
       </nav>
       <div class="border-t border-[var(--people-border)] pt-4">
-        <NuxtLink
-          to="/profile"
-          class="flex items-center gap-3 rounded-xl px-2 py-2 hover:bg-muted/10"
-        >
-          <UAvatar
-            :text="auth.initials.value"
-            size="md"
-          />
-          <div class="min-w-0 flex-1">
-            <p class="truncate text-sm font-semibold">
-              {{ auth.displayName.value }}
-            </p><p class="truncate text-xs text-muted">
-              {{ auth.user.value?.employee_code || auth.user.value?.email }}
-            </p>
-          </div>
+        <div class="flex items-center gap-1 rounded-xl px-1 py-1">
+          <NuxtLink
+            to="/profile"
+            class="flex min-w-0 flex-1 items-center gap-3 rounded-lg px-1 py-1 hover:bg-muted/10"
+          >
+            <UAvatar
+              :text="auth.initials.value"
+              size="md"
+            />
+            <div class="min-w-0 flex-1">
+              <p class="truncate text-sm font-semibold">
+                {{ auth.displayName.value }}
+              </p><p class="truncate text-xs text-muted">
+                {{ auth.user.value?.employee_code || auth.user.value?.email }}
+              </p>
+            </div>
+          </NuxtLink>
           <UButton
             icon="i-lucide-log-out"
             color="neutral"
@@ -226,7 +228,7 @@ onMounted(() => {
             aria-label="Sign out"
             @click="auth.logout"
           />
-        </NuxtLink>
+        </div>
       </div>
     </aside>
     <div class="lg:pl-[17rem]">
