@@ -4,6 +4,7 @@ The command is a read-only preview unless every destructive guard is supplied::
 
     uv run python cleanup_db.py
     uv run python cleanup_db.py --execute --confirm "DELETE ALL HRMS DATA"
+    uv run python cleanup_db.py --execute --confirm "DELETE ALL HRMS DATA" --reseed-bootstrap
 
 ``alembic_version`` is always preserved so the remaining schema stays aligned
 with the migration history. Stop the API before executing this command: in a
@@ -14,6 +15,7 @@ Super Admin rows.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import sys
 from collections.abc import Sequence
 
@@ -54,6 +56,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Permit execution when ENVIRONMENT is not development, dev, test, or local.",
     )
+    parser.add_argument(
+        "--reseed-bootstrap",
+        action="store_true",
+        help="Recreate the bootstrap organization and Super Admin from environment settings after cleanup.",
+    )
     return parser.parse_args()
 
 
@@ -92,6 +99,17 @@ def validate_execution(args: argparse.Namespace, url: URL) -> None:
         )
 
 
+async def reseed_bootstrap() -> None:
+    """Recreate the minimum records required to sign in after a reset."""
+    from core.database import auth_engine
+    from db.seed import ensure_seed_data
+
+    try:
+        await ensure_seed_data()
+    finally:
+        await auth_engine.dispose()
+
+
 def print_preview(url: URL, schema: str, tables: Sequence[str]) -> None:
     print(f"Database: {url.render_as_string(hide_password=True)}")
     print(f"Schema:   {schema}")
@@ -109,6 +127,8 @@ def main() -> int:
     engine: Engine | None = None
     try:
         url = database_url()
+        if args.reseed_bootstrap and not args.execute:
+            raise CleanupRefused("--reseed-bootstrap requires --execute.")
         if args.execute:
             validate_execution(args, url)
         engine = create_engine(url, pool_pre_ping=True)
@@ -127,8 +147,20 @@ def main() -> int:
         with engine.begin() as connection:
             connection.exec_driver_sql(statement)
         print(f"\nEmptied {len(tables)} application tables and reset their owned identity sequences.")
+        if args.reseed_bootstrap:
+            asyncio.run(reseed_bootstrap())
+            settings = get_settings()
+            print(
+                "Recreated the bootstrap organization and Super Admin "
+                f"({settings.super_admin_username!r}, {settings.super_admin_email!r})."
+            )
+        else:
+            print(
+                "The Super Admin was deleted with the other rows. Development API startup recreates it, "
+                "or rerun cleanup with --reseed-bootstrap."
+            )
         return 0
-    except (CleanupRefused, OSError, SQLAlchemyError) as exc:
+    except (CleanupRefused, OSError, RuntimeError, SQLAlchemyError) as exc:
         print(f"Database cleanup failed: {exc}", file=sys.stderr)
         return 1
     finally:
