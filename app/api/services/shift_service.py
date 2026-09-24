@@ -494,3 +494,9 @@ class ShiftService:
                 if window.actual_start <= timestamp <= window.actual_end:
                     return window
         return None
+
+    async def assignments_page(self, scope, **filters):
+        return await self.repo.assignments_page(scope, **filters)
+
+    async def definitions_page(self, **filters):
+        return await self.repo.definitions_page(**filters)

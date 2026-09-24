@@ -1,56 +1,42 @@
 <script setup lang="ts">
-/* eslint-disable better-tailwindcss/no-unknown-classes */
-import type { Department, Designation, Organization, Unit } from '#shared/types/organization'
+import type { PaginatedResponse } from '#shared/types/pagination'
+
+import type { Department, Designation, Unit } from '#shared/types/organization'
 
 type Tab = 'units' | 'departments' | 'designations'
 useSeoMeta({ title: 'Organization' })
 const api = useHrmsApi()
-const activeTab = ref<Tab>('units')
-const { data, pending, error, refresh } = await useAsyncData('organization-workspace', async () => {
-  const [organization, units, departments, designations] = await Promise.all([api.request<Organization>('org/organization'), api.request<Unit[]>('org/units'), api.request<Department[]>('org/departments'), api.request<Designation[]>('designations/')])
-  return { organization, units, departments, designations }
-})
-const totalActive = computed(() => ({ units: data.value?.units.filter(item => item.is_active).length || 0, departments: data.value?.departments.filter(item => item.is_active).length || 0, designations: data.value?.designations.filter(item => item.is_active).length || 0 }))
+const list = useListState({ tab: 'units', sort_order: 'asc' })
+const activeTab = list.field('tab')
+const { data, pending, error, refresh } = await useAsyncData('organization-workspace', async (_app, { signal }) => {
+  const endpoint = activeTab.value === 'units' ? 'org/units' : activeTab.value === 'departments' ? 'org/departments' : 'designations/'
+  const result = await api.request<PaginatedResponse<Unit | Department | Designation>>(endpoint, { signal, query: list.query.value })
+  return { ...result, units: activeTab.value === 'units' ? result.items as Unit[] : [], departments: activeTab.value === 'departments' ? result.items as Department[] : [], designations: activeTab.value === 'designations' ? result.items as Designation[] : [] }
+}, { watch: [activeTab, list.query] })
 function unitName(id: number) {
-  return data.value?.units.find(item => item.id === id)?.name || `Unit #${id}`
+  return `Unit #${id}`
 }
 // Structure writes are ERP-owned: this page only reads and renders master data.
 </script>
 
 <template>
   <div>
-    <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-      <div>
-        <p class="text-sm font-medium text-primary">
-          Company structure
-        </p><h2 class="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">
-          Organization
-        </h2><p class="mt-2 text-sm text-muted">
-          Organization structure is synchronized from ERP and shown here as read-only data.
-        </p>
-      </div><UBadge color="info" variant="soft" icon="i-lucide-database">Managed by ERP</UBadge>
-    </div>
-    <section class="mt-7 grid gap-4 sm:grid-cols-3">
-      <article
-        v-for="metric in [{ key: 'units', label: 'Active units', icon: 'i-lucide-building-2', value: totalActive.units, bg: 'var(--people-blue)' }, { key: 'departments', label: 'Departments', icon: 'i-lucide-network', value: totalActive.departments, bg: 'var(--people-mint)' }, { key: 'designations', label: 'Designations', icon: 'i-lucide-badge', value: totalActive.designations, bg: 'var(--people-lavender)' }]"
-        :key="metric.key"
-        class="people-card p-5"
-      >
-        <div class="flex items-center justify-between">
-          <p class="text-sm text-muted">
-            {{ metric.label }}
-          </p><span
-            class="grid size-10 place-items-center rounded-xl"
-            :style="{ background: metric.bg }"
-          ><UIcon
-            :name="metric.icon"
-            class="size-5"
-          /></span>
-        </div><p class="mt-5 text-3xl font-semibold tabular-nums">
-          {{ pending ? '—' : metric.value }}
-        </p>
-      </article>
-    </section>
+    <ListControls
+      v-model:search="list.search.value"
+      :active="list.active.value"
+      @clear="list.clear"
+    />
+    <header class="my-6">
+      <p class="text-sm text-primary">
+        Organization
+      </p>
+      <h1 class="text-2xl font-semibold">
+        Company structure
+      </h1>
+      <p class="mt-2 text-sm text-muted">
+        Organization records are maintained in ERP.
+      </p>
+    </header>
     <div class="mt-7 flex gap-2 overflow-x-auto border-b border-[var(--people-border)]">
       <button
         v-for="tab in [{ key: 'units', label: 'Units', icon: 'i-lucide-building-2' }, { key: 'departments', label: 'Departments', icon: 'i-lucide-network' }, { key: 'designations', label: 'Designations', icon: 'i-lucide-badge' }]"
@@ -106,7 +92,7 @@ function unitName(id: number) {
         </h3><p class="mt-1 text-sm text-muted">
           {{ item.code || 'No code' }}<span v-if="item.city"> · {{ item.city }}</span>
         </p><div class="mt-5 flex items-center gap-2 text-sm text-muted">
-          <UIcon name="i-lucide-network" />{{ item.departments?.length || data?.departments.filter(dept => dept.unit_id === item.id).length || 0 }} departments
+          <UIcon name="i-lucide-network" />Unit
         </div>
       </article>
     </section>
@@ -157,8 +143,21 @@ function unitName(id: number) {
           {{ item.code || 'No code' }}
         </p><p class="mt-3 line-clamp-2 text-sm text-muted">
           {{ item.description || 'No description provided.' }}
-        </p><p class="mt-4 flex items-center justify-end gap-2 text-xs text-muted"><UIcon name="i-lucide-refresh-cw" />Managed by ERP</p>
+        </p><p class="mt-4 flex items-center justify-end gap-2 text-xs text-muted">
+          <UIcon name="i-lucide-refresh-cw" />Managed by ERP
+        </p>
       </article>
     </section>
+    <UEmpty
+      v-if="!pending && !error && !data?.total"
+      title="No matching organization records"
+    />
+    <ListPagination
+      v-if="data"
+      v-model:page="list.page.value"
+      v-model:page-size="list.pageSize.value"
+      :total="data.total"
+      :loading="pending"
+    />
   </div>
 </template>

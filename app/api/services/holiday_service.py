@@ -1,16 +1,15 @@
 from datetime import date, timedelta
+
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import Employee, Holiday, HolidayList
+from db.models import Holiday, HolidayList
 from repositories.employee_repo import EmployeeRepository
 from repositories.holiday_repo import HolidayRepository
 from schemas.holidays import (
-    HolidayBase,
     HolidayCreate,
     HolidayListCreate,
     HolidayListRead,
-    HolidayListUpdate,
     HolidayRead,
 )
 

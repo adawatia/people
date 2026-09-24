@@ -1,9 +1,9 @@
-import math
-from datetime import date
+
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from core.pagination import ordered, paginate
 from db.models import Employee, EmployeeWorkHistory
 
 
@@ -18,7 +18,6 @@ class EmployeeRepository:
             selectinload(Employee.designation_rel),
             selectinload(Employee.shift),
             selectinload(Employee.reporting_manager),
-            selectinload(Employee.work_history),
         ]
 
     async def get_by_id(self, employee_id: int) -> Employee | None:
@@ -28,6 +27,12 @@ class EmployeeRepository:
             .where(Employee.id == employee_id)
         )
         return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def get_by_ids(self, employee_ids: list[int]) -> list[Employee]:
+        if not employee_ids:
+            return []
+        stmt = select(Employee).options(*self._eager_options()).where(Employee.id.in_(employee_ids))
+        return list((await self.session.execute(stmt)).scalars().all())
 
     async def get_by_code(self, employee_code: str) -> Employee | None:
         stmt = (
@@ -56,8 +61,10 @@ class EmployeeRepository:
     async def list_paginated(
         self,
         page: int = 1,
-        page_size: int = 20,
+        page_size: int = 25,
         q: str | None = None,
+        sort_by: str | None = None,
+        sort_order: str = "asc",
         unit_id: int | None = None,
         department_id: int | None = None,
         designation_id: int | None = None,
@@ -70,14 +77,14 @@ class EmployeeRepository:
         base_query = select(Employee).options(*self._eager_options())
 
         if q:
-            term = f"%{q}%"
+            term = q.strip()
             base_query = base_query.where(
                 or_(
-                    Employee.employee_code.ilike(term),
-                    Employee.first_name.ilike(term),
-                    Employee.last_name.ilike(term),
-                    Employee.designation.ilike(term),
-                    Employee.official_email.ilike(term),
+                    Employee.employee_code.icontains(term, autoescape=True),
+                    Employee.first_name.icontains(term, autoescape=True),
+                    Employee.last_name.icontains(term, autoescape=True),
+                    Employee.designation.icontains(term, autoescape=True),
+                    Employee.official_email.icontains(term, autoescape=True),
                 )
             )
         if unit_id is not None:
@@ -104,7 +111,9 @@ class EmployeeRepository:
         total = (await self.session.execute(count_stmt)).scalar_one()
 
         offset = (page - 1) * page_size
-        stmt = base_query.order_by(Employee.employee_code).offset(offset).limit(page_size)
+        stmt = ordered(base_query, {"employee_code": Employee.employee_code, "name": Employee.first_name,
+                                   "created_at": Employee.created_at, "status": Employee.status},
+                       sort_by, sort_order, "employee_code", Employee.id).offset(offset).limit(page_size)
         employees = list((await self.session.execute(stmt)).scalars().all())
 
         return employees, total
@@ -121,7 +130,7 @@ class EmployeeRepository:
             stmt = stmt.where(Employee.unit_id == unit_id)
         if status is not None:
             stmt = stmt.where(Employee.status == status.upper())
-        stmt = stmt.order_by(Employee.employee_code).limit(page_size)
+        stmt = stmt.order_by(Employee.employee_code, Employee.id).limit(page_size)
         return list((await self.session.execute(stmt)).scalars().all())
 
     async def create(self, employee: Employee) -> Employee:
@@ -150,3 +159,33 @@ class EmployeeRepository:
             .order_by(EmployeeWorkHistory.from_date.desc())
         )
         return list((await self.session.execute(stmt)).scalars().all())
+
+    async def work_history_page(
+        self,
+        employee_id,
+        page=1,
+        page_size=25,
+        search=None,
+        sort_by=None,
+        sort_order="desc",
+    ):
+        query = (select(EmployeeWorkHistory)
+                 .options(selectinload(EmployeeWorkHistory.unit), selectinload(EmployeeWorkHistory.department),
+                          selectinload(EmployeeWorkHistory.designation))
+                 .where(EmployeeWorkHistory.employee_id == employee_id))
+        if search:
+            query = query.where(EmployeeWorkHistory.remarks.icontains(search.strip(), autoescape=True))
+        query = ordered(
+            query,
+            {
+                "from_date": EmployeeWorkHistory.from_date,
+                "to_date": EmployeeWorkHistory.to_date,
+                "created_at": EmployeeWorkHistory.created_at,
+                "id": EmployeeWorkHistory.id,
+            },
+            sort_by,
+            sort_order,
+            "from_date",
+            EmployeeWorkHistory.id,
+        )
+        return await paginate(self.session, query, page, page_size)

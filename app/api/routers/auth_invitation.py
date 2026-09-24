@@ -1,16 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi_users import exceptions as fu_exceptions
 from fastapi_users.password import PasswordHelper
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import UserManager, get_user_manager
 from core.business_roles import resolve_business_role
-from db.models import AuthSession, Employee
-from sqlalchemy import update
 from core.database import get_async_session
 from core.invitation import find_user_by_invitation_token
-from db.models import now_ist
+from db.models import AuthSession, Employee, now_ist
 from schemas import SetPasswordRequest, ValidateInvitationResponse
 
 router = APIRouter(prefix="/auth/invitation", tags=["auth"])

@@ -275,7 +275,9 @@ def test_confirming_a_replacement_promotes_it_and_retires_the_old_secret(unique_
 
         confirmed = instance.post(
             f"{API}/auth/mfa/confirm",
-            json={"current_password": PASSWORD, "code": _later(new_secret)},
+            # The active factor consumed this same time step during enrollment.
+            # Replay state from that old secret must not reject the new secret.
+            json={"current_password": PASSWORD, "code": totp_at(new_secret, now_ist())},
             headers=headers,
         )
         assert confirmed.status_code == 200, confirmed.text
@@ -290,6 +292,15 @@ def test_confirming_a_replacement_promotes_it_and_retires_the_old_secret(unique_
         # The replaced authenticator no longer authenticates.
         assert _verify(instance, identity, _later(old_secret)).status_code == 401
         assert _row(user_id)[0] == stored
+
+        # Password recovery immediately follows the newly promoted factor too;
+        # it must not retain replay state from the authenticator it replaced.
+        recovery = instance.post(f"{API}/auth/password-recovery/start", json={"identity": identity})
+        recovered = instance.post(
+            f"{API}/auth/password-recovery/verify",
+            json={"recovery_token": recovery.json()["recovery_token"], "code": _later(new_secret)},
+        )
+        assert recovered.status_code == 200, recovered.text
 
 
 def test_an_expired_replacement_is_rejected_and_hidden_from_status(unique_suffix):
@@ -448,6 +459,18 @@ def test_authenticator_can_recover_a_forgotten_password_without_creating_a_sessi
         assert verified.status_code == 200, verified.text
         reset_token = verified.json()["recovery_token"]
 
+        # InvalidPasswordException keeps its user-facing explanation in
+        # ``reason`` rather than ``str(exc)``. The reset endpoint must retain
+        # it so the BFF can tell a user how to choose an acceptable password.
+        weak_reset = instance.post(
+            f"{API}/auth/password-recovery/reset",
+            json={"reset_token": reset_token, "new_password": "Password@123"},
+        )
+        assert weak_reset.status_code == 400, weak_reset.text
+        policy_reason = weak_reset.json()["detail"]
+        assert isinstance(policy_reason, str) and policy_reason.strip()
+        assert policy_reason != "The HRMS service could not complete this request."
+
         reset = instance.post(
             f"{API}/auth/password-recovery/reset",
             json={"reset_token": reset_token, "new_password": new_password},
@@ -460,3 +483,20 @@ def test_authenticator_can_recover_a_forgotten_password_without_creating_a_sessi
             f"{API}/auth/password-recovery/reset",
             json={"reset_token": reset_token, "new_password": PASSWORD},
         ).status_code == 401
+
+
+def test_password_recovery_explains_when_an_authenticator_code_was_already_used(unique_suffix):
+    _seed(unique_suffix)
+    identity = f"emp.{unique_suffix}"
+    with client() as instance:
+        enrolled = _enrol(instance, identity)
+        used_code = _later(enrolled["secret"])
+        assert _verify(instance, identity, used_code).status_code == 200
+
+        started = instance.post(f"{API}/auth/password-recovery/start", json={"identity": identity})
+        replayed = instance.post(
+            f"{API}/auth/password-recovery/verify",
+            json={"recovery_token": started.json()["recovery_token"], "code": used_code},
+        )
+        assert replayed.status_code == 401
+        assert "already been used" in replayed.json()["detail"]

@@ -752,23 +752,25 @@ class AuthService:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Start MFA enrolment first")
 
         matched_step = match_totp_step(code, pending, now_ist())
-        # A code is single-use against the factor it belongs to. Tracking this for
-        # the new seed too means the code that completed enrolment cannot be
-        # presented again at sign-in during the remainder of its window.
-        if is_totp_replay(matched_step, user.mfa_last_used_step):
+        # The replay counter belongs to the active secret. A pending enrollment
+        # is a different factor even though its TOTP counter has the same
+        # time-based value. Comparing the pending code with the active secret's
+        # counter rejects every replacement confirmed in the same 30-second
+        # interval as the sign-in that opened Settings.
+        if matched_step is None:
             self._audit(
                 actor=user,
                 action=AuditAction.MFA_FAILED,
                 entity_type="user",
                 entity_id=str(user.id),
-                filters={"stage": "activate", "reason": "replayed" if matched_step is not None else "invalid"},
+                filters={"stage": "activate", "reason": "invalid"},
                 ip_address=ip_address,
                 request_id=request_id,
             )
             await self.session.commit()
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=TOTP_ALREADY_USED if matched_step is not None else "That code is not valid",
+                detail="That code is not valid. Check that your device time is set automatically and try the current code.",
             )
 
         user.mfa_secret = user.mfa_pending_secret

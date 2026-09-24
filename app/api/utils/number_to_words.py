@@ -32,7 +32,7 @@ def convert_three_digits(num: int) -> str:
     return f"{hundred_str} {convert_two_digits(rem)}"
 
 
-def amount_to_indian_words(amount: float | int | None) -> str:
+def amount_to_indian_words(amount: float | None) -> str:
     """
     Converts numeric amount into standard Indian currency words (Crore, Lakh, Thousand, Hundred)
     Matching standard Indian GST challan / invoice formats.

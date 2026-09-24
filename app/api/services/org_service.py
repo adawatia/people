@@ -1,7 +1,6 @@
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-
 from db.models import Department, Organization, Unit
 from repositories.org_repo import OrgRepository
 from schemas.org import (

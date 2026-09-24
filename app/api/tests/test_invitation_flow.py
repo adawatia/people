@@ -101,12 +101,13 @@ def test_invitation_token_validation(run_async_helper):
 
 def test_validate_password_none_check(run_async_helper):
     async def _test():
-        from core.auth import UserManager, get_user_db
-        from core.database import async_session_maker
         from fastapi_users.exceptions import InvalidPasswordException
 
+        from core.auth import UserManager, get_user_db
+        from core.database import async_session_maker
+
         async with async_session_maker() as session:
-            user_db = [udb async for udb in get_user_db(session)][0]
+            user_db = await anext(get_user_db(session))
             user_mgr = UserManager(user_db)
 
             # Test that passing None raises InvalidPasswordException without TypeError

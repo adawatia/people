@@ -10,7 +10,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import verify_erp_api_key
 from core.database import get_async_session
-from schemas import DepartmentCreate, DepartmentRead, DepartmentUpdate, OrganizationRead, OrganizationUpdate, UnitCreate, UnitRead, UnitUpdate
+from schemas import (
+    DepartmentCreate,
+    DepartmentRead,
+    DepartmentUpdate,
+    OrganizationRead,
+    OrganizationUpdate,
+    UnitCreate,
+    UnitRead,
+    UnitUpdate,
+)
 from schemas.designations import DesignationCreate, DesignationRead, DesignationUpdate
 from services.designation_service import DesignationService
 from services.org_service import OrgService

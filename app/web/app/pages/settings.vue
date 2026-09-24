@@ -56,7 +56,9 @@ async function savePassword() {
     await navigateTo('/login?notice=password-changed')
   } catch (error) {
     toast.add({ title: 'Password not updated', description: message(error), color: 'error' })
-  } finally { savingPassword.value = false }
+  } finally {
+    savingPassword.value = false
+  }
 }
 
 // ── MFA ──────────────────────────────────────────────────────────────────────
@@ -157,7 +159,9 @@ async function revokeSession(id: number) {
     await api.request(`auth/sessions/${id}`, { method: 'DELETE' })
     await loadSessions()
     toast.add({ title: 'Device signed out', color: 'success' })
-  } catch (error) { toast.add({ title: 'Could not sign that device out', description: message(error), color: 'error' }) }
+  } catch (error) {
+    toast.add({ title: 'Could not sign that device out', description: message(error), color: 'error' })
+  }
 }
 
 async function revokeAllSessions() {
@@ -165,7 +169,9 @@ async function revokeAllSessions() {
     await api.request('auth/sessions', { method: 'DELETE' })
     auth.clear()
     await navigateTo('/login')
-  } catch (error) { toast.add({ title: 'Could not sign out everywhere', description: message(error), color: 'error' }) }
+  } catch (error) {
+    toast.add({ title: 'Could not sign out everywhere', description: message(error), color: 'error' })
+  }
 }
 
 const deviceLabel = (session: SessionSummary) => session.user_agent?.split(')')[0]?.replace(/^Mozilla\/5\.0 \(/, '') || 'Unknown device'

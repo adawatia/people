@@ -1,7 +1,8 @@
 """add ERP holiday identifier"""
 
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 revision = "7d9e4f0a2b31"
 down_revision = "6c8d3e9f1b20"

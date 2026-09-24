@@ -4,6 +4,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.pagination import PaginatedResponse
 from db.models import (
     AttendanceRecord,
     LeaveAllocation,
@@ -728,3 +729,42 @@ class LeaveService:
                 r.employee_code = a.employee.employee_code
             reads.append(r)
         return reads
+
+    async def list_applications_page(
+        self,
+        employee_id: int | None = None,
+        status: str | None = None,
+        from_date: date | None = None,
+        to_date: date | None = None,
+        unit_ids: set[int] | None = None,
+        department_ids: set[int] | None = None,
+        search: str | None = None,
+        sort_by: str | None = None,
+        sort_order: str = "desc",
+        page: int = 1,
+        page_size: int = 25,
+    ) -> PaginatedResponse[LeaveApplicationRead]:
+        if from_date and to_date and from_date > to_date:
+            raise HTTPException(422, "Start date must not be after end date")
+        result = await self.repo.list_applications_page(
+            page=page, page_size=page_size,
+            search=search, sort_by=sort_by, sort_order=sort_order,
+            employee_id=employee_id,
+            status=status,
+            from_date=from_date,
+            to_date=to_date,
+            unit_ids=unit_ids,
+            department_ids=department_ids,
+        )
+        apps = result["items"]
+        reads = []
+        for a in apps:
+            r = LeaveApplicationRead.model_validate(a)
+            if a.leave_type:
+                r.leave_type_name = a.leave_type.name
+                r.leave_type_code = a.leave_type.code
+            if a.employee:
+                r.employee_name = f"{a.employee.first_name} {a.employee.last_name or ''}".strip()
+                r.employee_code = a.employee.employee_code
+            reads.append(r)
+        return PaginatedResponse[LeaveApplicationRead](**dict(result, items=reads))

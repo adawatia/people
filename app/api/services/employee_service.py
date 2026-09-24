@@ -1,4 +1,5 @@
 from datetime import date
+
 from fastapi import HTTPException, status
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,7 +11,7 @@ from core.business_roles import (
     resolve_business_access,
     role_columns,
 )
-from db.models import AuthSession, Department, Designation, Employee, EmployeeWorkHistory, Shift, Unit, User, now_ist
+from db.models import AuthSession, Department, Designation, Employee, EmployeeWorkHistory, Unit, User, now_ist
 from repositories.employee_repo import EmployeeRepository
 from schemas.employees import (
     EmployeeCreate,
@@ -93,8 +94,10 @@ class EmployeeService:
     async def list_employees(
         self,
         page: int = 1,
-        page_size: int = 20,
+        page_size: int = 25,
         q: str | None = None,
+        sort_by: str | None = None,
+        sort_order: str = "asc",
         unit_id: int | None = None,
         department_id: int | None = None,
         designation_id: int | None = None,
@@ -107,7 +110,7 @@ class EmployeeService:
         employees, total = await self.repo.list_paginated(
             page=page,
             page_size=page_size,
-            q=q,
+            q=q, sort_by=sort_by, sort_order=sort_order,
             unit_id=unit_id,
             department_id=department_id,
             designation_id=designation_id,
@@ -126,6 +129,7 @@ class EmployeeService:
             page=page,
             page_size=page_size,
             total_pages=total_pages,
+            has_next=page < total_pages, has_prev=page > 1,
         )
 
     async def get_employee(self, employee_id: int) -> Employee:
@@ -259,7 +263,7 @@ class EmployeeService:
             unit_id=unit_id,
             department_id=data.department_id,
             designation_id=data.designation_id,
-            from_date=data.date_of_joining or date.today(),
+            from_date=data.date_of_joining or now_ist().date(),
             remarks="Initial Appointment",
         )
         await self.repo.add_work_history(initial_history)
@@ -276,7 +280,7 @@ class EmployeeService:
         update_data = data.model_dump(exclude_unset=True)
 
         # Check official email uniqueness if changing
-        if "official_email" in update_data and update_data["official_email"]:
+        if update_data.get("official_email"):
             existing_email = await self.repo.get_by_email(update_data["official_email"])
             if existing_email and existing_email.id != employee_id:
                 raise HTTPException(
@@ -381,7 +385,7 @@ class EmployeeService:
         if (new_unit != old_unit) or (new_dept != old_dept) or (new_desig != old_desig):
             # Close previous active work history
             histories = await self.repo.get_work_history(emp.id)
-            today = date.today()
+            today = now_ist().date()
             if histories:
                 last_history = histories[0]
                 if last_history.to_date is None:
@@ -410,7 +414,7 @@ class EmployeeService:
     ) -> EmployeeRead:
         emp = await self.get_employee(employee_id)
         emp.status = "INACTIVE"
-        emp.exit_date = exit_date or date.today()
+        emp.exit_date = exit_date or now_ist().date()
         emp.exit_reason = exit_reason or "Deactivated by Administrator"
         if emp.user_id:
             user = await self.session.get(User, emp.user_id)
@@ -454,3 +458,6 @@ class EmployeeService:
         await self.get_employee(employee_id)
         histories = await self.repo.get_work_history(employee_id)
         return [EmployeeWorkHistoryRead.model_validate(h) for h in histories]
+
+    async def work_history_page(self, employee_id, page, page_size, **filters):
+        return await self.repo.work_history_page(employee_id, page, page_size, **filters)

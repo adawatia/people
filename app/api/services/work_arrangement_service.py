@@ -1,7 +1,9 @@
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
+
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.pagination import PaginatedResponse
 from db.models import AttendanceRecord, WorkArrangementRequest, now_ist
 from repositories.attendance_record_repo import AttendanceRecordRepository
 from repositories.employee_repo import EmployeeRepository
@@ -43,10 +45,11 @@ class WorkArrangementService:
 
         # Check for overlapping pending or approved leave applications
         from sqlalchemy import select
+
         from db.models import LeaveApplication
         leave_stmt = select(LeaveApplication).where(
             LeaveApplication.employee_id == data.employee_id,
-            LeaveApplication.status.in_(["PENDING", "APPROVED"]),
+            LeaveApplication.status.in_(["PENDING", "APPROVED", "CANCELLATION_PENDING"]),
             LeaveApplication.from_date <= data.to_date,
             LeaveApplication.to_date >= data.from_date,
         )
@@ -162,7 +165,7 @@ class WorkArrangementService:
         was_approved = req.status == "APPROVED"
         req.status = "CANCELLED"
         req.actioned_by = cancelled_by_user_id
-        req.actioned_at = datetime.now()
+        req.actioned_at = now_ist()
 
         # Revert attendance records if previously approved
         if was_approved:
@@ -206,3 +209,35 @@ class WorkArrangementService:
             department_ids=department_ids,
         )
         return [WorkArrangementRead.model_validate(r) for r in requests]
+
+    async def list_requests_page(
+        self,
+        employee_id: int | None = None,
+        status: str | None = None,
+        arrangement_type: str | None = None,
+        from_date: date | None = None,
+        to_date: date | None = None,
+        unit_ids: set[int] | None = None,
+        department_ids: set[int] | None = None,
+        search: str | None = None,
+        sort_by: str | None = None,
+        sort_order: str = "desc",
+        page: int = 1,
+        page_size: int = 25,
+    ) -> PaginatedResponse[WorkArrangementRead]:
+        if from_date and to_date and from_date > to_date:
+            raise HTTPException(422, "Start date must not be after end date")
+        result = await self.repo.list_requests_page(
+            page=page, page_size=page_size,
+            search=search, sort_by=sort_by, sort_order=sort_order,
+            employee_id=employee_id,
+            status=status,
+            arrangement_type=arrangement_type,
+            from_date=from_date,
+            to_date=to_date,
+            unit_ids=unit_ids,
+            department_ids=department_ids,
+        )
+        items = [WorkArrangementRead.model_validate(r) for r in result["items"]]
+
+        return PaginatedResponse[WorkArrangementRead](**dict(result, items=items))

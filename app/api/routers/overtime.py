@@ -1,9 +1,12 @@
+from datetime import date
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import fastapi_users, require_permission
 from core.database import get_async_session
 from core.employee_access import get_current_employee, get_permission_scope, require_employee_access
+from core.pagination import PaginatedResponse
 from db.models import User
 from schemas.overtime import (
     OvertimeApprovalCreate,
@@ -16,13 +19,21 @@ from services.overtime_service import OvertimeService
 router = APIRouter(prefix="/overtime", tags=["overtime"])
 
 
-@router.get("/", response_model=list[OvertimeRecordRead])
+@router.get("/", response_model=PaginatedResponse[OvertimeRecordRead])
 async def list_overtime(
     employee_id: int | None = None,
     status_filter: str | None = Query(None, alias="status"),
+    from_date: date | None = None,
+    to_date: date | None = None,
+    q: str | None = Query(None, max_length=200),
+    search: str | None = Query(None, max_length=200),
+    sort_by: str | None = None,
+    sort_order: str = Query("desc", pattern="^(asc|desc)$"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100),
     _: User = Depends(fastapi_users.current_user(active=True)),
     session: AsyncSession = Depends(get_async_session),
-) -> list[OvertimeRecordRead]:
+) -> PaginatedResponse[OvertimeRecordRead]:
     service = OvertimeService(session)
     current_user = _
     # Managers have the department-specific permission while organization owners
@@ -49,6 +60,7 @@ async def list_overtime(
         status=status_filter,
         unit_ids=None if scope.organization else scope.unit_ids,
         department_ids=None if scope.organization else scope.department_ids,
+        from_date=from_date, to_date=to_date, q=search if search is not None else q, sort_by=sort_by, sort_order=sort_order, page=page, page_size=page_size,
     )
 
 

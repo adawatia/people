@@ -1,8 +1,8 @@
 """add privileged analytics audit logs"""
 
-from alembic import op
 import sqlalchemy as sa
 
+from alembic import op
 
 revision = "9a1d2e3f4b5c"
 down_revision = "8e0f5a1b2c43"

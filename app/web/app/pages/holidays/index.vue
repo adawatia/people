@@ -1,22 +1,31 @@
 <script setup lang="ts">
-/* eslint-disable better-tailwindcss/no-unknown-classes, @stylistic/max-statements-per-line */
+import type { PaginatedResponse } from '#shared/types/pagination'
+
 import type { HolidayList } from '#shared/types/workforce'
 
 useSeoMeta({ title: 'Holidays' })
 const api = useHrmsApi()
+const list = useListState({ sort_order: 'asc' })
 const selectedId = ref<number>()
 // Holiday calendars are ERP-owned; the UI is display-only.
 const { data, pending, error, refresh } = await useAsyncData('holiday-workspace', async () => {
-  const lists = await api.request<HolidayList[]>('holidays/lists')
-  return { lists }
+  const lists = await api.request<PaginatedResponse<HolidayList>>('holidays/lists', { query: list.query.value })
+  return { lists: lists.items, ...lists }
+}, { watch: [list.query] })
+watchEffect(() => {
+  if (!data.value?.lists.some(item => item.id === selectedId.value) && data.value?.lists[0]) selectedId.value = data.value.lists[0].id
 })
-watchEffect(() => { if (!selectedId.value && data.value?.lists[0]) selectedId.value = data.value.lists[0].id })
 const selected = computed(() => data.value?.lists.find(item => item.id === selectedId.value))
 const formatDate = (value: string) => new Intl.DateTimeFormat('en-IN', { weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(`${value}T00:00:00`))
 </script>
 
 <template>
   <div>
+    <ListControls
+      v-model:search="list.search.value"
+      :active="list.active.value"
+      @clear="list.clear"
+    />
     <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
       <div>
         <p class="text-sm font-medium text-primary">
@@ -113,5 +122,13 @@ const formatDate = (value: string) => new Intl.DateTimeFormat('en-IN', { weekday
         </div>
       </section>
     </div>
+    <ListPagination
+      v-if="data"
+      v-model:page="list.page.value"
+      v-model:page-size="list.pageSize.value"
+      :total="data.total"
+      :loading="pending"
+      label="calendars"
+    />
   </div>
 </template>

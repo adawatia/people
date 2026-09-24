@@ -1,6 +1,13 @@
 """Pydantic schemas exposed by the fixed-role HRMS API."""
 
 from schemas.common import PaginatedResponse
+from schemas.notifications import (
+    NotificationBase,
+    NotificationCreate,
+    NotificationMarkRead,
+    NotificationRead,
+    NotificationUnreadCount,
+)
 from schemas.users import (
     PaginatedUsersResponse,
     SetPasswordRequest,
@@ -12,30 +19,23 @@ from schemas.users import (
     UserUpdate,
     ValidateInvitationResponse,
 )
-from schemas.notifications import (
-    NotificationBase,
-    NotificationCreate,
-    NotificationMarkRead,
-    NotificationRead,
-    NotificationUnreadCount,
-)
 
 __all__ = [
-    "PaginatedResponse",
-    "UserRead",
-    "UserPermissionsResponse",
-    "UserCreate",
-    "UserCreateRequest",
-    "UserUpdate",
-    "SetPasswordRequest",
-    "ValidateInvitationResponse",
-    "UserStats",
-    "PaginatedUsersResponse",
     "NotificationBase",
     "NotificationCreate",
+    "NotificationMarkRead",
     "NotificationRead",
     "NotificationUnreadCount",
-    "NotificationMarkRead",
+    "PaginatedResponse",
+    "PaginatedUsersResponse",
+    "SetPasswordRequest",
+    "UserCreate",
+    "UserCreateRequest",
+    "UserPermissionsResponse",
+    "UserRead",
+    "UserStats",
+    "UserUpdate",
+    "ValidateInvitationResponse",
 ]
 
 from .org import (
@@ -52,3 +52,5 @@ from .org import (
     UnitRead,
     UnitUpdate,
 )
+
+__all__ += ['DepartmentBase', 'DepartmentCreate', 'DepartmentRead', 'DepartmentUpdate', 'OrganizationBase', 'OrganizationCreate', 'OrganizationRead', 'OrganizationUpdate', 'UnitBase', 'UnitCreate', 'UnitRead', 'UnitUpdate']

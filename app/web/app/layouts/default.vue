@@ -89,32 +89,12 @@ const accountItems: NavItem[] = [
   { label: 'Settings', icon: 'i-lucide-settings', to: '/settings' },
   { label: 'Notifications', icon: 'i-lucide-bell', to: '/notifications' }
 ]
-const mobileGroups = computed(() => {
-  const itemsFor = (...paths: string[]) => visibleItems.value.filter(item => paths.includes(item.to))
-  if (isTechnicalAdmin.value) return [
-    { label: 'Home', icon: 'i-lucide-house', items: itemsFor('/') },
-    { label: 'Profile', icon: 'i-lucide-user-round', items: [accountItems[0]!] },
-    { label: 'Settings', icon: 'i-lucide-settings', items: [accountItems[1]!] },
-    { label: 'Updates', icon: 'i-lucide-bell', items: [accountItems[2]!] }
-  ]
-  if (currentWorkspace.value === 'EXECUTIVE') return [
-    { label: 'Home', icon: 'i-lucide-house', items: itemsFor('/') },
-    { label: 'Reports', icon: 'i-lucide-chart-no-axes-combined', items: itemsFor('/reports') },
-    { label: 'Company', icon: 'i-lucide-building-2', items: itemsFor('/organization') },
-    { label: 'Account', icon: 'i-lucide-user-round', items: accountItems }
-  ]
-  return [
-    { label: 'Home', icon: 'i-lucide-house', items: itemsFor('/') },
-    { label: 'Time', icon: 'i-lucide-clock-3', items: itemsFor('/attendance', '/overtime', '/shifts') },
-    { label: 'Requests', icon: 'i-lucide-clipboard-check', items: itemsFor('/leaves', '/work-arrangements', '/approvals') },
-    currentWorkspace.value === 'MY'
-      ? { label: 'Calendar', icon: 'i-lucide-calendar-days', items: itemsFor('/holidays') }
-      : { label: 'People', icon: 'i-lucide-users-round', items: itemsFor('/employees', '/organization') }
-  ]
+const mobilePrimary = computed(() => {
+  const targets: Record<Workspace, string> = { MY: '/leaves', TEAM: '/approvals', HR: '/employees', EXECUTIVE: '/reports', TECHNICAL: '/settings' }
+  const path = targets[currentWorkspace.value]
+  return [...visibleItems.value, ...accountItems].find(item => item.to === path && workspace.canVisit(path)) || accountItems[0]!
 })
-const mobileSheetItems = computed(() => mobileGroup.value === 'More'
-  ? [...visibleItems.value.filter(item => !mobileGroups.value.some(group => group.items.some(primary => primary.to === item.to))), ...accountItems]
-  : mobileGroups.value.find(group => group.label === mobileGroup.value)?.items || [])
+const mobileSheetItems = computed(() => [...visibleItems.value.filter(item => item.to !== '/' && item.to !== mobilePrimary.value.to), ...accountItems.filter(item => item.to !== mobilePrimary.value.to)])
 function openMobileGroup(label: string) {
   mobileGroup.value = label
   mobileOpen.value = true
@@ -279,26 +259,42 @@ onMounted(() => {
     >
       <div class="mx-auto flex max-w-lg items-center justify-around gap-1">
         <UButton
-          v-for="item in mobileGroups"
-          :key="item.label"
-          :icon="item.icon"
-          :color="item.items.some(link => route.path === link.to) ? 'primary' : 'neutral'"
+          :to="workspace.link('/')"
+          icon="i-lucide-house"
           variant="ghost"
-          size="sm"
-          class="min-w-0 flex-1 flex-col gap-0.5 px-1 py-2 text-[10px]"
-          :aria-label="item.label"
-          aria-haspopup="dialog"
-          :aria-expanded="mobileOpen && mobileGroup === item.label"
-          @click="openMobileGroup(item.label)"
+          color="neutral"
+          class="min-h-12 flex-1 flex-col text-xs"
+          aria-label="Home"
         >
-          {{ item.label }}
+          Home
         </UButton>
         <UButton
-          icon="i-lucide-grid-2x2"
+          icon="i-lucide-layout-grid"
+          variant="ghost"
+          color="neutral"
+          class="min-h-12 flex-1 flex-col text-xs"
+          :aria-label="`Workspace: ${workspaceDefinition.label}`"
+          aria-haspopup="dialog"
+          :aria-expanded="mobileOpen && mobileGroup === 'Workspace'"
+          @click="openMobileGroup('Workspace')"
+        >
+          {{ workspaceDefinition.shortLabel }}
+        </UButton>
+        <UButton
+          :to="workspace.link(mobilePrimary.to)"
+          :icon="mobilePrimary.icon"
+          variant="ghost"
+          color="neutral"
+          class="min-h-12 flex-1 flex-col text-xs"
+        >
+          {{ mobilePrimary.label }}
+        </UButton>
+        <UButton
+          icon="i-lucide-menu"
           color="neutral"
           variant="ghost"
           size="sm"
-          class="min-w-0 flex-1 flex-col gap-0.5 px-1 py-2 text-[10px]"
+          class="min-h-12 min-w-0 flex-1 flex-col gap-0.5 px-1 py-2 text-xs"
           aria-label="More navigation"
           aria-haspopup="dialog"
           :aria-expanded="mobileOpen && mobileGroup === 'More'"
@@ -318,29 +314,31 @@ onMounted(() => {
     >
       <template #body>
         <div
-          v-if="mobileGroup === 'More' && availableWorkspaces.length > 1"
-          class="mb-5"
+          v-if="mobileGroup === 'Workspace'"
+          class="space-y-3"
         >
-          <label
-            for="mobile-workspace"
-            class="mb-2 block text-sm font-semibold"
-          >Workspace</label>
-          <select
-            id="mobile-workspace"
-            :value="currentWorkspace"
-            class="min-h-11 w-full rounded-xl border border-[var(--people-border)] bg-[var(--people-surface)] px-3 text-sm"
-            @change="changeWorkspace"
+          <UButton
+            v-for="item in availableWorkspaces"
+            :key="item"
+            :icon="WORKSPACES.find(definition => definition.key === item)?.icon"
+            :variant="item === currentWorkspace ? 'soft' : 'outline'"
+            color="neutral"
+            block
+            class="min-h-12 justify-start"
+            :aria-pressed="item === currentWorkspace"
+            @click="workspace.select(item, '/'); mobileOpen = false"
           >
-            <option
-              v-for="item in availableWorkspaces"
-              :key="item"
-              :value="item"
-            >
-              {{ WORKSPACES.find(definition => definition.key === item)?.label }}
-            </option>
-          </select>
+            {{ WORKSPACES.find(definition => definition.key === item)?.label }}
+            <UIcon
+              v-if="item === currentWorkspace"
+              name="i-lucide-check"
+            />
+          </UButton>
         </div>
-        <div class="grid grid-cols-2 gap-3">
+        <div
+          v-else
+          class="grid grid-cols-2 gap-3"
+        >
           <NuxtLink
             v-for="item in mobileSheetItems"
             :key="item.to"
@@ -357,7 +355,7 @@ onMounted(() => {
           </NuxtLink>
         </div>
         <p
-          v-if="!mobileSheetItems.length"
+          v-if="mobileGroup !== 'Workspace' && !mobileSheetItems.length"
           class="py-6 text-sm text-muted"
         >
           No pages are available in this section.

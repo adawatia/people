@@ -206,15 +206,15 @@ def test_hr_lists_unit_corrections_and_employees_see_only_their_own(unique_suffi
     with TestClient(app) as client:
         hr_response = client.get("/api/v1/attendance/corrections", headers=_auth(str(seeded["hr"])))
         assert hr_response.status_code == 200, hr_response.text
-        assert correction_id in [item["id"] for item in hr_response.json()]
+        assert correction_id in [item["id"] for item in hr_response.json()["items"]]
 
         member_response = client.get("/api/v1/attendance/corrections", headers=_auth(str(seeded["member"])))
         assert member_response.status_code == 200, member_response.text
-        assert correction_id in [item["id"] for item in member_response.json()]
+        assert correction_id in [item["id"] for item in member_response.json()["items"]]
 
         outsider_response = client.get("/api/v1/attendance/corrections", headers=_auth(str(seeded["outsider"])))
         assert outsider_response.status_code == 200, outsider_response.text
-        assert correction_id not in [item["id"] for item in outsider_response.json()]
+        assert correction_id not in [item["id"] for item in outsider_response.json()["items"]]
 
 
 def test_unit_hr_is_confined_to_their_unit_while_organization_hr_covers_every_unit(unique_suffix):
@@ -226,11 +226,11 @@ def test_unit_hr_is_confined_to_their_unit_while_organization_hr_covers_every_un
     with TestClient(app) as client:
         unit_hr_listing = client.get("/api/v1/attendance/corrections", headers=_auth(str(seeded["hr"])))
         assert unit_hr_listing.status_code == 200, unit_hr_listing.text
-        assert {item["id"] for item in unit_hr_listing.json()} == {in_unit_id}
+        assert {item["id"] for item in unit_hr_listing.json()["items"]} == {in_unit_id}
 
         org_hr_listing = client.get("/api/v1/attendance/corrections", headers=_auth(str(seeded["org_hr"])))
         assert org_hr_listing.status_code == 200, org_hr_listing.text
-        assert {item["id"] for item in org_hr_listing.json()} >= {in_unit_id, out_of_unit_id}
+        assert {item["id"] for item in org_hr_listing.json()["items"]} >= {in_unit_id, out_of_unit_id}
 
         outside_payload = {
             "attendance_record_id": seeded["other_free_record_id"],

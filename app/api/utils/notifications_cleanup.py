@@ -1,7 +1,9 @@
 import asyncio
 import logging
 from datetime import timedelta
+
 from sqlalchemy import delete, text
+
 from core.database import async_session_maker
 from db.models import Notification, now_ist
 
@@ -54,8 +56,8 @@ async def run_notification_cleanup():
             if deleted_count > 0:
                 logger.info(f"Cleaned up {deleted_count} old notifications.")
             
-    except Exception as e:
-        logger.error(f"Error during notification cleanup: {e}", exc_info=True)
+    except Exception:
+        logger.exception("Error during notification cleanup")
 
 async def notification_cleanup_loop():
     """

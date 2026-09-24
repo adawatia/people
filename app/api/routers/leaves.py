@@ -11,7 +11,8 @@ from core.employee_access import (
     get_permission_scope,
     require_employee_access,
 )
-from db.models import User
+from core.pagination import PaginatedResponse
+from db.models import LeavePeriod, LeaveType, User
 from schemas.leaves import (
     LeaveApplicationAction,
     LeaveApplicationCreate,
@@ -26,6 +27,7 @@ from schemas.leaves import (
     LeaveTypeUpdate,
 )
 from services.leave_service import LeaveService
+from services.lookup_service import LookupService
 
 router = APIRouter(prefix="/leaves", tags=["leaves"])
 
@@ -41,13 +43,25 @@ async def _leave_management_scope(user: User, session: AsyncSession) -> Employee
 
 # ── Leave Periods ─────────────────────────────────────────────────────────────
 
-@router.get("/periods", response_model=list[LeavePeriodRead])
+@router.get("/periods", response_model=PaginatedResponse[LeavePeriodRead])
 async def list_leave_periods(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100),
+    search: str | None = None,
+    sort_by: str | None = None,
+    sort_order: str = Query("asc", pattern="^(asc|desc)$"),
     _: User = Depends(fastapi_users.current_user(active=True)),
     session: AsyncSession = Depends(get_async_session),
-) -> list[LeavePeriodRead]:
-    service = LeaveService(session)
-    return await service.list_periods()
+) -> PaginatedResponse[LeavePeriodRead]:
+    return await LookupService(session).list_page(
+        LeavePeriod,
+        page=page,
+        page_size=page_size,
+        search=search,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        filters={},
+    )
 
 
 @router.post(
@@ -69,14 +83,26 @@ async def create_leave_period(
 
 # ── Leave Types ───────────────────────────────────────────────────────────────
 
-@router.get("/types", response_model=list[LeaveTypeRead])
+@router.get("/types", response_model=PaginatedResponse[LeaveTypeRead])
 async def list_leave_types(
     is_active: bool | None = Query(True),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100),
+    search: str | None = None,
+    sort_by: str | None = None,
+    sort_order: str = Query("asc", pattern="^(asc|desc)$"),
     _: User = Depends(fastapi_users.current_user(active=True)),
     session: AsyncSession = Depends(get_async_session),
-) -> list[LeaveTypeRead]:
-    service = LeaveService(session)
-    return await service.list_types(is_active=is_active)
+) -> PaginatedResponse[LeaveTypeRead]:
+    return await LookupService(session).list_page(
+        LeaveType,
+        page=page,
+        page_size=page_size,
+        search=search,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        filters={"is_active": is_active},
+    )
 
 
 @router.post(
@@ -145,15 +171,20 @@ async def get_leave_balance(
 
 # ── Leave Applications ────────────────────────────────────────────────────────
 
-@router.get("/", response_model=list[LeaveApplicationRead])
+@router.get("/", response_model=PaginatedResponse[LeaveApplicationRead])
 async def list_leave_applications(
     employee_id: int | None = None,
     status_filter: str | None = Query(None, alias="status"),
     from_date: date | None = None,
     to_date: date | None = None,
+    search: str | None = None,
+    sort_by: str | None = None,
+    sort_order: str = Query("desc", pattern="^(asc|desc)$"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100),
     current_user: User = Depends(fastapi_users.current_user(active=True)),
     session: AsyncSession = Depends(get_async_session),
-) -> list[LeaveApplicationRead]:
+) -> PaginatedResponse[LeaveApplicationRead]:
     service = LeaveService(session)
     scope = await _leave_management_scope(current_user, session)
     if employee_id is not None:
@@ -169,7 +200,9 @@ async def list_leave_applications(
         )
     elif scope.self_only:
         employee_id = (await get_current_employee(current_user, session)).id
-    return await service.list_applications(
+    return await service.list_applications_page(
+        page=page, page_size=page_size,
+        search=search, sort_by=sort_by, sort_order=sort_order,
         employee_id=employee_id,
         status=status_filter,
         from_date=from_date,

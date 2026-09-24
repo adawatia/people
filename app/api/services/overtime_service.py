@@ -4,6 +4,7 @@ from datetime import date
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.pagination import PaginatedResponse
 from db.models import OvertimeApproval, now_ist
 from repositories.employee_repo import EmployeeRepository
 from repositories.overtime_repo import OvertimeRepository
@@ -27,11 +28,30 @@ class OvertimeService:
         status: str | None = None,
         unit_ids: set[int] | None = None,
         department_ids: set[int] | None = None,
-    ) -> list[OvertimeRecordRead]:
-        records = await self.repo.list_records(
-            employee_id=employee_id, status=status, unit_ids=unit_ids, department_ids=department_ids
-        )
-        return [OvertimeRecordRead.model_validate(r) for r in records]
+        from_date: date | None = None,
+        to_date: date | None = None,
+        q: str | None = None,
+        sort_by: str | None = None,
+        sort_order: str = "desc",
+        page: int = 1,
+        page_size: int = 25,
+    ) -> list[OvertimeRecordRead] | PaginatedResponse[OvertimeRecordRead]:
+        if from_date and to_date and from_date > to_date:
+            raise HTTPException(status_code=422, detail="Start date must not be after end date")
+        filters = {
+            "employee_id": employee_id, "status": status, "unit_ids": unit_ids, "department_ids": department_ids,
+            "from_date": from_date, "to_date": to_date, "q": q, "sort_by": sort_by, "sort_order": sort_order,
+        }
+        def serialize(record):
+            return OvertimeRecordRead.model_validate(record).model_copy(update={
+                "employee_name": " ".join(filter(None, [record.employee.first_name, record.employee.last_name])),
+                "employee_code": record.employee.employee_code,
+                "attendance_date": record.attendance_record.attendance_date,
+            })
+
+        result = await self.repo.list_page(page=page, page_size=page_size, **filters)
+        result["items"] = [serialize(record) for record in result["items"]]
+        return PaginatedResponse[OvertimeRecordRead](**result)
 
     async def get_overtime(self, ot_id: int) -> OvertimeRecordRead:
         ot = await self.repo.get_by_id(ot_id)

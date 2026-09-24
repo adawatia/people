@@ -19,6 +19,7 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
+from fastapi_users.exceptions import InvalidPasswordException
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -44,6 +45,7 @@ from schemas.auth import (
 )
 from services.auth_service import (
     INVALID_CREDENTIALS,
+    TOTP_ALREADY_USED,
     AuditAction,
     AuthService,
     IssuedSession,
@@ -370,7 +372,14 @@ async def verify_password_recovery(
     result = await service.verify_mfa(user, payload.code, ip_address=client_ip(request), request_id=request_id(request))
     if not result.ok:
         await record_throttle_failure(throttle, request=request, account=account, scope="password_recovery")
-        raise HTTPException(status_code=401, detail="That authenticator code is not valid")
+        raise HTTPException(
+            status_code=401,
+            detail=(
+                TOTP_ALREADY_USED
+                if result.replayed
+                else "That authenticator code is not valid. Check that your device time is set automatically."
+            ),
+        )
     reset_token = await service.issue_password_recovery_reset(user)
     await throttle.record_success(ip=client_ip(request), account=account, scope="password_recovery")
     return PasswordRecoveryStartResponse(
@@ -405,9 +414,13 @@ async def reset_password_with_recovery(
         raise HTTPException(status_code=401, detail="Recovery session expired")
     try:
         await manager.validate_password(payload.new_password, user)
-    except Exception as exc:
+    except InvalidPasswordException as exc:
         await record_throttle_failure(throttle, request=request, account=account, scope="password_recovery")
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        # fastapi-users intentionally stores the reason on the exception rather
+        # than in its string representation.  Returning ``str(exc)`` here
+        # produced an empty FastAPI detail body, which made the BFF display its
+        # generic service-error fallback for an expected password-policy error.
+        raise HTTPException(status_code=400, detail=exc.reason) from exc
     await AuthService(session).reset_password_with_token(
         payload.reset_token,
         manager.password_helper.hash(payload.new_password),
@@ -436,8 +449,8 @@ async def change_password(
         raise HTTPException(status_code=400, detail="Current password is incorrect")
     try:
         await manager.validate_password(payload.new_password, user)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except InvalidPasswordException as exc:
+        raise HTTPException(status_code=400, detail=exc.reason) from exc
 
     user.hashed_password = manager.password_helper.hash(payload.new_password)
     user.must_change_password = False

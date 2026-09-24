@@ -1,8 +1,8 @@
 """Add ERP synchronization metadata to leave applications."""
 
-from alembic import op
 import sqlalchemy as sa
 
+from alembic import op
 
 revision = "6c8d3e9f1b20"
 down_revision = "5b7c2d8e1a90"

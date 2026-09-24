@@ -1,14 +1,16 @@
 <script setup lang="ts">
-/* eslint-disable better-tailwindcss/no-unknown-classes */
+import type { PaginatedResponse } from '#shared/types/pagination'
+
 import type { Employee, EmployeeWorkHistory } from '#shared/types/employee'
 
 const route = useRoute()
 const api = useHrmsApi()
+const list = useListState()
 const employeeId = computed(() => Number(route.params.id))
 const { data, pending, error, refresh } = await useAsyncData(`employee-${employeeId.value}`, async () => {
-  const [employee, history] = await Promise.all([api.request<Employee>(`employees/${employeeId.value}`), api.request<EmployeeWorkHistory[]>(`employees/${employeeId.value}/work-history`)])
+  const [employee, history] = await Promise.all([api.request<Employee>(`employees/${employeeId.value}`), api.request<PaginatedResponse<EmployeeWorkHistory>>(`employees/${employeeId.value}/work-history`, { query: list.query.value })])
   return { employee, history }
-})
+}, { watch: [list.query, employeeId] })
 useSeoMeta({ title: () => data.value?.employee.full_name || 'Employee profile' })
 const initials = computed(() => `${data.value?.employee.first_name?.[0] || ''}${data.value?.employee.last_name?.[0] || ''}`.toUpperCase())
 const formatDate = (value?: string | null) => value ? new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(`${value}T00:00:00`)) : '—'
@@ -141,7 +143,7 @@ const formatDate = (value?: string | null) => value ? new Intl.DateTimeFormat('e
             Organization and designation changes over time
           </p>
         </div><div
-          v-if="!data.history.length"
+          v-if="!data.history.items.length"
           class="p-8 text-center text-sm text-muted"
         >
           No work history recorded.
@@ -150,7 +152,7 @@ const formatDate = (value?: string | null) => value ? new Intl.DateTimeFormat('e
           class="divide-y divide-[var(--people-border)]"
         >
           <article
-            v-for="item in data.history"
+            v-for="item in data.history.items"
             :key="item.id"
             class="flex gap-4 p-5 sm:px-6"
           >
@@ -165,5 +167,13 @@ const formatDate = (value?: string | null) => value ? new Intl.DateTimeFormat('e
         </div>
       </section>
     </template>
+    <ListPagination
+      v-if="data?.history"
+      v-model:page="list.page.value"
+      v-model:page-size="list.pageSize.value"
+      :total="data?.history?.total || 0"
+      :total-pages="data?.history?.total_pages"
+      :loading="pending"
+    />
   </div>
 </template>

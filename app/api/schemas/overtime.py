@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -6,6 +6,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 class OvertimeRecordRead(BaseModel):
     id: int
     employee_id: int
+    employee_name: str | None = None
+    employee_code: str | None = None
+    attendance_date: date | None = None
     attendance_record_id: int
     calculated_minutes: int
     approved_minutes: int

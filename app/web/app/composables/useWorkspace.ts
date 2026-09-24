@@ -126,11 +126,11 @@ export function useWorkspace() {
   async function select(workspace: Workspace, path = route.path) {
     if (!available.value.includes(workspace)) return
     selected.value = workspace
-    await router.push({ path: canVisit(path, workspace) ? path : '/', query: { ...route.query, workspace } })
+    await router.push({ path: canVisit(path, workspace) ? path : '/', query: { workspace } })
   }
 
   function link(path: string) {
-    return { path, query: { ...route.query, workspace: current.value } }
+    return { path, query: { workspace: current.value } }
   }
 
   return { available, current, definition, select, link, canVisit }

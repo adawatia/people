@@ -317,7 +317,7 @@ Split so a stolen password alone can never replace an existing factor:
 
 A second factor is requested when the account's *policy* mandates it **or** the account has already enrolled — an enrolled authenticator is always used, otherwise opting in from account settings would protect nothing. `MFA_REQUIRED_FOR_SUPER_ADMIN` defaults to `false` so enabling it is a deliberate, communicated rollout; `MFA_ENABLED=false` disables MFA enforcement, including for previously enrolled accounts. Verification is constant-time with a ±1 step (30 s) drift window, and recovery codes are stored as SHA-256 hashes like refresh tokens. Enrolled already? `disable` is refused while policy requires MFA.
 
-**Forgot-password recovery** is separate from normal login: the user enters a username or mobile number, proves possession of the enrolled TOTP authenticator (or a recovery code), and receives a short-lived one-time password-reset capability. The flow never creates a session, revokes every existing session after the new password is saved, keeps MFA enrolled, and is throttled and audited.
+**Forgot-password recovery** is separate from normal login: the user enters a username or mobile number, proves possession of the enrolled TOTP authenticator (or a recovery code), and receives a short-lived one-time password-reset capability. The flow never creates a session, revokes every existing session after the new password is saved, keeps MFA enrolled, and is throttled and audited. Reused TOTP steps are reported separately from mistyped codes, while an expired or replaced recovery capability returns the UI to the identity step.
 
 **Every code is single-use.** A successful verification records the TOTP *step it matched* (`users.mfa_last_used_step`) and any later submission of that step or an earlier one is refused with a distinct message, so an observed code cannot be replayed for the remainder of its window — including the ±1 step of drift either side. The matched step is recorded rather than "now" on purpose: attributing a lagging client's code to the current step would either block a legitimate sign-in or leave the window open, which is exactly how replay was possible before. A spent code is reported as *spent* rather than invalid, so the user is told to wait for the next code instead of hunting for a typo that does not exist.
 
@@ -749,7 +749,7 @@ Navigation is grouped by purpose inside each workspace (for example Workforce, R
 
 The shared Approvals page is available when the user can approve leave, work arrangements, **or overtime**; overtime approval must not depend on also granting one of the other approval permissions.
 
-Mobile uses four workspace-specific primary groups plus **More**, with no hamburger or sidebar. Each group opens a scrollable bottom sheet occupying about half the screen, with related pages as cards. More holds remaining pages, account actions, and the workspace selector. The desktop sidebar remains grouped by purpose.
+Mobile has exactly four primary destinations: **Home**, **Workspace**, the permission-filtered contextual section (My: Leave; Team: Approvals; HR: Employees; Executive: Reports; Technical: Settings), and **More**. Workspace opens a Nuxt UI slideover that identifies the active workspace; More holds remaining pages and account actions. The desktop sidebar retains one workspace selector and grouped navigation.
 
 The workspace route guard resolves the **destination** query and validated saved preference using pure helpers. It does not instantiate reactive workspace watchers inside middleware or read the previous page's route. Owners receive My + Executive, managers My + Team, HR My + HR, and technical administrators only Technical. Regression checks: `node --test tests/workspace.test.mjs` from `app/web` (Node 24).
 
@@ -783,7 +783,7 @@ The workspace middleware keeps hidden routes out of the current workspace and re
 
 * Tokens in `app/assets/css/main.css` (`--people-canvas`, `--people-surface`, `--people-border`, `--people-blue/mint/lavender/peach/yellow` + `-ink` pairs) drive every card/icon tone; `people-card`, `people-icon`, `people-icon--*` are the shared class contracts.
 * Every page header follows: eyebrow label → `h2` title → one-line subtitle → right-aligned primary action.
-* Skeletons (`USkeleton`) for first paint, `UAlert` "taking a short break" pattern with a retry action for failed dashboards, `UToast` for action results, `confirm()` for destructive actions.
+* Skeletons (`USkeleton`) for first paint, `UAlert` "taking a short break" pattern with a retry action for failed dashboards, `UToast` for action results, and Nuxt UI confirmation modals for destructive actions.
 * Breakpoints: single column → `sm:grid-cols-2` → `xl:grid-cols-3/4`; sidebar is fixed ≥ `lg`; grouped bottom navigation and bottom sheets below `lg`; `min-h-11` tap targets; safe-area padding on mobile nav.
 * Dark mode via `UColorModeButton`; charts use `nuxt-echarts` with SVG/canvas renderers registered in `nuxt.config.ts`.
 
@@ -861,7 +861,9 @@ The correction-request action is not available to a plain employee: it is hidden
 
 **Dashboard.** In `MY`, HR sees personal metrics and shift/attendance cards. In `HR`, dashboard metrics use the configured `UNIT` or `ORGANIZATION` scope and label the headcount accordingly; personal cards are not mixed into the HR view.
 
-**Employees (`/employees`).** Unit-limited directory with search/filters, pagination (`page_size` ≤ 100), detail page with work history. Provisioning is ERP-only: `POST /employees/onboard` returns `410`, and the page's own activate/deactivate/delete buttons hit non-existent routes (§8.1 A1).
+**Employees (`/employees`).** Unit-limited directory with search/filters, pagination (`page_size` ≤ 100), detail page with separately paginated work history. Provisioning is ERP-only: `POST /employees/onboard` returns `410`, and the page explains ERP ownership without exposing unsupported activate, deactivate, delete, or edit actions.
+
+**Growing-list contract.** Nuxt-facing business lists use `page` (default 1), `page_size` (default 25, maximum 100), `search`, `sort_by`, `sort_order`, and their domain filters. Responses use `PaginatedResponse` navigation metadata. Authorization and filters are applied before counts; sort fields are endpoint allowlists and SQL ordering always appends the row identifier. Employee-month calendars, aggregate summaries, effective schedule windows, leave balances by configured type, one holiday list's entries, and policy-limited session lists are bounded collections rather than business-list exceptions. ERP ingestion and change-feed response shapes remain integration contracts and are unchanged.
 
 **Attendance (`/attendance`).** Read scope covers `attendance.view`, `view_unit`, `view_department`; can run the engine with `POST /attendance/process` (`attendance.process`) for an authorized unit/employee, and can raise corrections for records inside their scope (`attendance.correct` + `require_employee_access` → 403 `"You do not have access to this employee"` otherwise).
 

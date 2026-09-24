@@ -1,5 +1,6 @@
 <script setup lang="ts">
-/* eslint-disable better-tailwindcss/no-unknown-classes */
+import type { PaginatedResponse } from '#shared/types/pagination'
+
 import type { LeaveApplication, LeaveBalance, LeaveType } from '#shared/types/leave'
 
 useSeoMeta({ title: 'Leave' })
@@ -12,41 +13,33 @@ const managementMode = computed(() => workspace.current.value === 'TEAM' || work
 const applyOpen = ref(false)
 const submitting = ref(false)
 const cancellingId = ref<number | null>(null)
-const filter = ref('ALL')
+const list = useListState({ status: 'ALL', sort_order: 'desc' })
+const filter = list.field('status')
 const today = new Date().toISOString().slice(0, 10)
 const form = reactive({ leave_type_id: 0, from_date: today, to_date: today, half_day: false, reason: '' })
 
-const { data, pending, error, refresh } = await useAsyncData('my-leave', async () => {
+const { data, pending, error, refresh } = await useAsyncData('my-leave', async (_app, { signal }) => {
   if (!managementMode.value && !employeeId.value) return null
   const balanceRequest = !managementMode.value && employeeId.value
     ? api.request<LeaveBalance[]>(`leaves/balance/employee/${employeeId.value}`)
     : Promise.resolve([])
-  const applicationsRequest = api.request<LeaveApplication[]>('leaves/', {
-    query: managementMode.value ? undefined : { employee_id: employeeId.value }
+  const applicationsRequest = api.request<PaginatedResponse<LeaveApplication>>('leaves/', {
+    signal, query: { ...list.query.value, status: filter.value === 'ALL' ? undefined : filter.value, employee_id: managementMode.value ? undefined : employeeId.value }
   })
-  const typesRequest = api.request<LeaveType[]>('leaves/types', { query: { is_active: true } })
+  const typesRequest = api.request<PaginatedResponse<LeaveType>>('leaves/types', { query: { is_active: true } })
   const [balances, applications, types] = await Promise.all([balanceRequest, applicationsRequest, typesRequest])
-  return { balances, applications, types }
-}, { watch: [employeeId, managementMode] })
+  return { balances, applications, types: types.items }
+}, { watch: [employeeId, managementMode, list.query, filter] })
 
-const filteredApplications = computed(() => (data.value?.applications || []).filter(item => filter.value === 'ALL' || item.status === filter.value))
-const pendingDaysByType = computed(() => {
-  const totals = new Map<number, number>()
-  for (const application of data.value?.applications || []) {
-    if (application.status === 'PENDING') {
-      totals.set(application.leave_type_id, (totals.get(application.leave_type_id) || 0) + application.days_count)
-    }
-  }
-  return totals
-})
+const filteredApplications = computed(() => data.value?.applications.items || [])
 function displayPending(balance: LeaveBalance) {
-  return pendingDaysByType.value.get(balance.leave_type_id) ?? balance.pending
+  return balance.pending
 }
 function displayAvailable(balance: LeaveBalance) {
-  return Math.max(0, balance.allocated - balance.used - displayPending(balance))
+  return balance.available
 }
-function balanceIsSyncing(balance: LeaveBalance) {
-  return displayPending(balance) !== balance.pending
+function balanceIsSyncing(_balance: LeaveBalance) {
+  return false
 }
 const selectedBalance = computed(() => data.value?.balances.find(item => item.leave_type_id === form.leave_type_id))
 const estimatedDays = computed(() => {
@@ -114,14 +107,21 @@ async function submitApplication() {
   }
 }
 
-async function cancelApplication(application: LeaveApplication) {
+const cancelTarget = ref<LeaveApplication | null>(null)
+const cancelReason = ref('')
+function cancelApplication(application: LeaveApplication) {
+  cancelReason.value = ''
+  cancelTarget.value = application
+}
+async function confirmCancellation() {
+  const application = cancelTarget.value
+  if (!application) return
   const leaveHasStarted = application.status === 'APPROVED' && application.from_date <= today && today <= application.to_date
   let body: { effective_date?: string, reason?: string } | undefined
   if (leaveHasStarted) {
-    const reason = prompt('Why are you returning from leave today? This will be sent to your approver.')
-    if (!reason || reason.trim().length < 3) return
-    body = { effective_date: today, reason: reason.trim() }
-  } else if (!confirm(`Cancel your ${application.leave_type_name || 'leave'} request?`)) return
+    if (cancelReason.value.trim().length < 3) return
+    body = { effective_date: today, reason: cancelReason.value.trim() }
+  }
   cancellingId.value = application.id
   try {
     await api.request(`leaves/${application.id}/cancel`, { method: 'PATCH', body })
@@ -131,6 +131,7 @@ async function cancelApplication(application: LeaveApplication) {
       color: 'neutral',
       icon: leaveHasStarted ? 'i-lucide-clock-3' : 'i-lucide-ban'
     })
+    cancelTarget.value = null
     await refresh()
   } catch (cancelError) {
     const candidate = cancelError as { data?: { statusMessage?: string } }
@@ -143,6 +144,15 @@ async function cancelApplication(application: LeaveApplication) {
 
 <template>
   <div>
+    <ListControls
+      v-model:search="list.search.value"
+      v-model:sort-by="list.sortBy.value"
+      v-model:sort-order="list.sortOrder.value"
+      :active="list.active.value"
+      :sorts="[{ label: 'Applied date', value: 'applied_at' }, { label: 'Status', value: 'status' }]"
+      @clear="list.clear"
+    />
+
     <div class="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
       <div>
         <p class="text-sm font-medium text-primary">
@@ -392,7 +402,7 @@ async function cancelApplication(application: LeaveApplication) {
         </div>
 
         <div
-          v-if="!pending && !filteredApplications.length && !data?.applications.length"
+          v-if="!pending && !filteredApplications.length && !data?.applications.total"
           class="px-6 py-14 text-center"
         >
           <UIcon
@@ -538,18 +548,12 @@ async function cancelApplication(application: LeaveApplication) {
             label="Leave type"
             required
           >
-            <select
-              v-model.number="form.leave_type_id"
-              class="h-12 w-full rounded-lg border border-[var(--people-border)] bg-[var(--people-surface)] px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
-            >
-              <option
-                v-for="type in data?.types"
-                :key="type.id"
-                :value="type.id"
-              >
-                {{ type.name }} ({{ type.code }})
-              </option>
-            </select>
+            <RemoteSelect
+              v-model="form.leave_type_id"
+              endpoint="leaves/types"
+              label="Select leave type"
+              :filters="{ is_active: true }"
+            />
           </UFormField>
           <UFormField
             label="From"
@@ -637,5 +641,55 @@ async function cancelApplication(application: LeaveApplication) {
         </div>
       </section>
     </div>
+    <ListPagination
+      v-if="data?.applications"
+      v-model:page="list.page.value"
+      v-model:page-size="list.pageSize.value"
+      :total="data?.applications?.total || 0"
+      :total-pages="data?.applications?.total_pages"
+      :loading="pending"
+      label="requests"
+    />
+    <UModal
+      :open="!!cancelTarget"
+      title="Cancel request"
+      description="Confirm cancellation. Approved leave that has started requires an early-return decision from your approver."
+      @update:open="value => { if (!value && !cancellingId) cancelTarget = null }"
+    >
+      <template #body>
+        <p class="text-sm text-muted">
+          This changes the request status and may restore unused leave or remove the work arrangement.
+        </p>
+        <UFormField
+          v-if="cancelTarget?.status === 'APPROVED' && cancelTarget.from_date <= today && today <= cancelTarget.to_date"
+          label="Early-return reason"
+          required
+          class="mt-4"
+        >
+          <UTextarea
+            v-model="cancelReason"
+            class="w-full"
+          />
+        </UFormField>
+      </template>
+      <template #footer>
+        <UButton
+          color="neutral"
+          variant="outline"
+          :disabled="!!cancellingId"
+          @click="cancelTarget = null"
+        >
+          Keep request
+        </UButton>
+        <UButton
+          color="error"
+          :loading="!!cancellingId"
+          :disabled="(cancelTarget?.status === 'APPROVED' && cancelTarget.from_date <= today && today <= cancelTarget.to_date) && cancelReason.trim().length < 3"
+          @click="confirmCancellation"
+        >
+          Confirm cancellation
+        </UButton>
+      </template>
+    </UModal>
   </div>
 </template>

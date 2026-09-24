@@ -1,8 +1,9 @@
 <script setup lang="ts">
-/* eslint-disable better-tailwindcss/no-unknown-classes */
+import type { PaginatedResponse } from '#shared/types/pagination'
+
 import type { LeaveApplication } from '#shared/types/leave'
 import type { WorkArrangement } from '#shared/types/work-arrangement'
-import type { OvertimeRecord } from '#shared/types/overtime'
+import type { OvertimePage, OvertimeRecord } from '#shared/types/overtime'
 
 type ApprovalTab = 'leave' | 'work' | 'overtime'
 
@@ -20,27 +21,22 @@ const leaveReject = ref<LeaveApplication | null>(null)
 const workReject = ref<WorkArrangement | null>(null)
 const overtimeReject = ref<OvertimeRecord | null>(null)
 const rejectionReason = ref('')
-
-const leaveQueue = useAsyncData('leave-approval-queue', async () => {
-  if (!canLeave.value) return []
-  const [applications, cancellations] = await Promise.all([
-    api.request<LeaveApplication[]>('leaves/', { query: { status: 'PENDING' } }),
-    api.request<LeaveApplication[]>('leaves/', { query: { status: 'CANCELLATION_PENDING' } })
-  ])
-  return [...applications, ...cancellations]
-})
-
-const workQueue = useAsyncData('work-arrangement-approval-queue', async () => {
-  if (!canWork.value) return []
-  return await api.request<WorkArrangement[]>('work-arrangements/', { query: { status: 'PENDING' } })
-})
-
-const overtimeQueue = useAsyncData('overtime-approval-queue', async () => {
-  if (!canOvertime.value) return []
-  return await api.request<OvertimeRecord[]>('overtime/', { query: { status: 'PENDING' } })
-})
-
-const totalWaiting = computed(() => (leaveQueue.data.value?.length || 0) + (workQueue.data.value?.length || 0) + (overtimeQueue.data.value?.length || 0))
+const leaveList = useListState({}, 'leave_')
+const workList = useListState({}, 'work_')
+const overtimeList = useListState({}, 'overtime_')
+const leaveQueue = useAsyncData('leave-approval-queue', async (_app, { signal }) => {
+  if (!canLeave.value) return null
+  return api.request<PaginatedResponse<LeaveApplication>>('leaves/', { signal, query: { ...leaveList.query.value, status: 'PENDING,CANCELLATION_PENDING' } })
+}, { watch: [leaveList.query] })
+const workQueue = useAsyncData('work-arrangement-approval-queue', async (_app, { signal }) => {
+  if (!canWork.value) return null
+  return api.request<PaginatedResponse<WorkArrangement>>('work-arrangements/', { signal, query: { ...workList.query.value, status: 'PENDING' } })
+}, { watch: [workList.query] })
+const overtimeQueue = useAsyncData('overtime-approval-queue', async (_app, { signal }) => {
+  if (!canOvertime.value) return null
+  return api.request<OvertimePage>('overtime/', { signal, query: { ...overtimeList.query.value, status: 'PENDING' } })
+}, { watch: [overtimeList.query] })
+const totalWaiting = computed(() => (leaveQueue.data.value?.total || 0) + (workQueue.data.value?.total || 0) + (overtimeQueue.data.value?.total || 0))
 const activePending = computed(() => activeTab.value === 'leave' ? leaveQueue.pending.value : activeTab.value === 'work' ? workQueue.pending.value : overtimeQueue.pending.value)
 const activeError = computed(() => activeTab.value === 'leave' ? leaveQueue.error.value : activeTab.value === 'work' ? workQueue.error.value : overtimeQueue.error.value)
 
@@ -85,7 +81,9 @@ async function approveWork(item: WorkArrangement) {
     await workQueue.refresh()
   } catch (error) {
     toast.add({ title: 'Approval failed', description: requestError(error, 'Please try again.'), color: 'error' })
-  } finally { actionKey.value = '' }
+  } finally {
+    actionKey.value = ''
+  }
 }
 
 async function approveOvertime(item: OvertimeRecord) {
@@ -142,6 +140,18 @@ async function rejectRequest() {
 
 <template>
   <div>
+    <ListControls
+      v-if="activeTab === 'work'"
+      v-model:search="workList.search.value"
+      :active="workList.active.value"
+      @clear="workList.clear"
+    />
+    <ListControls
+      v-if="activeTab === 'leave'"
+      v-model:search="leaveList.search.value"
+      :active="leaveList.active.value"
+      @clear="leaveList.clear"
+    />
     <div class="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
       <div>
         <p class="text-sm font-medium text-primary">
@@ -168,7 +178,7 @@ async function rejectRequest() {
         :class="activeTab === 'leave' ? 'border-primary text-primary' : 'border-transparent text-muted'"
         @click="activeTab = 'leave'"
       >
-        <UIcon name="i-lucide-calendar-days" />Leave<span class="rounded-full bg-primary/10 px-2 py-0.5 text-xs">{{ leaveQueue.data.value?.length || 0 }}</span>
+        <UIcon name="i-lucide-calendar-days" />Leave<span class="rounded-full bg-primary/10 px-2 py-0.5 text-xs">{{ leaveQueue.data.value?.total || 0 }}</span>
       </button>
       <button
         v-if="canWork"
@@ -177,7 +187,7 @@ async function rejectRequest() {
         :class="activeTab === 'work' ? 'border-primary text-primary' : 'border-transparent text-muted'"
         @click="activeTab = 'work'"
       >
-        <UIcon name="i-lucide-briefcase-business" />Work arrangements<span class="rounded-full bg-primary/10 px-2 py-0.5 text-xs">{{ workQueue.data.value?.length || 0 }}</span>
+        <UIcon name="i-lucide-briefcase-business" />Work arrangements<span class="rounded-full bg-primary/10 px-2 py-0.5 text-xs">{{ workQueue.data.value?.total || 0 }}</span>
       </button>
       <button
         v-if="canOvertime"
@@ -186,7 +196,7 @@ async function rejectRequest() {
         :class="activeTab === 'overtime' ? 'border-primary text-primary' : 'border-transparent text-muted'"
         @click="activeTab = 'overtime'"
       >
-        <UIcon name="i-lucide-timer" />Overtime<span class="rounded-full bg-primary/10 px-2 py-0.5 text-xs">{{ overtimeQueue.data.value?.length || 0 }}</span>
+        <UIcon name="i-lucide-timer" />Overtime<span class="rounded-full bg-primary/10 px-2 py-0.5 text-xs">{{ overtimeQueue.data.value?.total || 0 }}</span>
       </button>
     </div>
 
@@ -224,11 +234,11 @@ async function rejectRequest() {
     </div>
 
     <div
-      v-else-if="activeTab === 'leave' && leaveQueue.data.value?.length"
+      v-else-if="activeTab === 'leave' && leaveQueue.data.value?.total"
       class="mt-6 grid gap-4 xl:grid-cols-2"
     >
       <article
-        v-for="item in leaveQueue.data.value"
+        v-for="item in leaveQueue.data.value?.items"
         :key="item.id"
         class="people-card overflow-hidden"
       >
@@ -303,11 +313,11 @@ async function rejectRequest() {
     </div>
 
     <div
-      v-else-if="activeTab === 'work' && workQueue.data.value?.length"
+      v-else-if="activeTab === 'work' && workQueue.data.value?.total"
       class="mt-6 grid gap-4 xl:grid-cols-2"
     >
       <article
-        v-for="item in workQueue.data.value"
+        v-for="item in workQueue.data.value?.items"
         :key="item.id"
         class="people-card overflow-hidden"
       >
@@ -373,11 +383,11 @@ async function rejectRequest() {
     </div>
 
     <section
-      v-else-if="activeTab === 'overtime' && overtimeQueue.data.value?.length"
+      v-else-if="activeTab === 'overtime' && overtimeQueue.data.value?.items.length"
       class="mt-6 grid gap-4 xl:grid-cols-2"
     >
       <article
-        v-for="item in overtimeQueue.data.value"
+        v-for="item in overtimeQueue.data.value.items"
         :key="item.id"
         class="people-card overflow-hidden"
       >
@@ -388,10 +398,10 @@ async function rejectRequest() {
           /></span>
           <div class="min-w-0 flex-1">
             <h3 class="font-semibold">
-              Employee #{{ item.employee_id }}
+              {{ item.employee_name || `Employee #${item.employee_id}` }}
             </h3>
             <p class="mt-1 text-sm text-muted">
-              Attendance record #{{ item.attendance_record_id }}
+              {{ item.employee_code }} · {{ item.attendance_date }}
             </p>
           </div>
           <UBadge
@@ -455,58 +465,92 @@ async function rejectRequest() {
       </p>
     </div>
 
-    <div
-      v-if="leaveReject || workReject || overtimeReject"
-      class="fixed inset-0 z-[70] flex items-end justify-center bg-slate-950/40 backdrop-blur-[2px] sm:items-center sm:p-6"
-      @click.self="closeReject"
+    <ListControls
+      v-if="activeTab === 'overtime'"
+      v-model:search="overtimeList.search.value"
+      :active="overtimeList.active.value"
+      @clear="overtimeList.clear"
+    />
+
+    <UModal
+      :open="!!(leaveReject || workReject || overtimeReject)"
+      title="Reject request"
+      description="Give a clear reason for rejecting this request."
+      @update:open="value => { if (!value) closeReject() }"
     >
-      <section class="w-full max-w-lg rounded-t-3xl bg-[var(--people-surface)] p-6 shadow-2xl sm:rounded-2xl sm:p-7">
-        <div class="flex items-start justify-between gap-4">
-          <div>
-            <p class="text-sm font-semibold text-rose-600">
-              Reject {{ leaveReject ? 'leave request' : workReject ? 'work arrangement' : 'overtime request' }}
-            </p><h3 class="mt-1 text-xl font-semibold">
-              Add a clear reason
-            </h3>
-          </div><UButton
-            icon="i-lucide-x"
-            color="neutral"
-            variant="ghost"
-            aria-label="Close"
-            @click="closeReject"
-          />
-        </div><p class="mt-4 text-sm leading-6 text-muted">
-          The employee will see this explanation with the rejected request.
-        </p><UFormField
-          class="mt-5"
-          label="Rejection reason"
-          required
-        >
-          <UTextarea
-            v-model="rejectionReason"
-            class="w-full"
-            :rows="4"
-            placeholder="Explain why this request cannot be approved."
-            autofocus
-          />
-        </UFormField><div class="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-          <UButton
-            color="neutral"
-            variant="soft"
-            @click="closeReject"
+      <template #body>
+        <section class="w-full max-w-lg rounded-t-3xl bg-[var(--people-surface)] p-6 shadow-2xl sm:rounded-2xl sm:p-7">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <p class="text-sm font-semibold text-rose-600">
+                Reject {{ leaveReject ? 'leave request' : workReject ? 'work arrangement' : 'overtime request' }}
+              </p><h3 class="mt-1 text-xl font-semibold">
+                Add a clear reason
+              </h3>
+            </div><UButton
+              icon="i-lucide-x"
+              color="neutral"
+              variant="ghost"
+              aria-label="Close"
+              @click="closeReject"
+            />
+          </div><p class="mt-4 text-sm leading-6 text-muted">
+            The employee will see this explanation with the rejected request.
+          </p><UFormField
+            class="mt-5"
+            label="Rejection reason"
+            required
           >
-            Cancel
-          </UButton><UButton
-            color="error"
-            icon="i-lucide-circle-x"
-            :loading="Boolean(actionKey)"
-            :disabled="rejectionReason.trim().length < 3"
-            @click="rejectRequest"
-          >
-            Reject request
-          </UButton>
-        </div>
-      </section>
-    </div>
+            <UTextarea
+              v-model="rejectionReason"
+              class="w-full"
+              :rows="4"
+              placeholder="Explain why this request cannot be approved."
+              autofocus
+            />
+          </UFormField><div class="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+            <UButton
+              color="neutral"
+              variant="soft"
+              @click="closeReject"
+            >
+              Cancel
+            </UButton><UButton
+              color="error"
+              icon="i-lucide-circle-x"
+              :loading="Boolean(actionKey)"
+              :disabled="rejectionReason.trim().length < 3"
+              @click="rejectRequest"
+            >
+              Reject request
+            </UButton>
+          </div>
+        </section>
+      </template>
+    </UModal>
+    <ListPagination
+      v-if="activeTab === 'leave' && leaveQueue.data.value"
+      v-model:page="leaveList.page.value"
+      v-model:page-size="leaveList.pageSize.value"
+      :total="leaveQueue.data.value?.total || 0"
+      :total-pages="leaveQueue.data.value?.total_pages"
+      :loading="leaveQueue.pending.value"
+    />
+    <ListPagination
+      v-if="activeTab === 'work' && workQueue.data.value"
+      v-model:page="workList.page.value"
+      v-model:page-size="workList.pageSize.value"
+      :total="workQueue.data.value?.total || 0"
+      :total-pages="workQueue.data.value?.total_pages"
+      :loading="workQueue.pending.value"
+    />
+    <ListPagination
+      v-if="activeTab === 'overtime' && overtimeQueue.data.value"
+      v-model:page="overtimeList.page.value"
+      v-model:page-size="overtimeList.pageSize.value"
+      :total="overtimeQueue.data.value?.total || 0"
+      :total-pages="overtimeQueue.data.value?.total_pages"
+      :loading="overtimeQueue.pending.value"
+    />
   </div>
 </template>

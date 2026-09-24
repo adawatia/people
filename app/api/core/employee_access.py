@@ -45,7 +45,7 @@ class EmployeeAccessScope:
     department_ids: set[int] = field(default_factory=set)
     employee_ids: set[int] = field(default_factory=set)
 
-    def include(self, other: "EmployeeAccessScope") -> None:
+    def include(self, other: EmployeeAccessScope) -> None:
         """Merge `other` into this scope (used when a route accepts several permissions)."""
         self.organization = self.organization or other.organization
         self.unit_ids.update(other.unit_ids)
@@ -80,7 +80,12 @@ class EmployeeAccessScope:
 
 async def get_current_employee(user: User, session: AsyncSession) -> Employee:
     """Return the Employee profile linked to this login, or 403 if none."""
-    employee = await EmployeeRepository(session).get_by_user_id(user.id)
+    cache = session.info.setdefault("current_employees", {}) if hasattr(session, "info") else {}
+    employee = cache.get(user.id)
+    if employee is None:
+        employee = await EmployeeRepository(session).get_by_user_id(user.id)
+        if employee is not None:
+            cache[user.id] = employee
     if employee is None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

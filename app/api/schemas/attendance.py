@@ -41,6 +41,7 @@ class AttendancePunchRead(BaseModel):
 
 
 class AttendanceRecordRead(BaseModel):
+    has_pending_correction: bool = False
     id: int
     employee_id: int
     attendance_date: date

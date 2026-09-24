@@ -1,8 +1,8 @@
 """enforce one organization record"""
 
-from alembic import op
 import sqlalchemy as sa
 
+from alembic import op
 
 revision = "4f2c1a7d9b10"
 down_revision = "8d57e49c7af9"

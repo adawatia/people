@@ -116,10 +116,16 @@ export function upstreamError(error: unknown, event?: H3Event) {
   const retryAfter = candidate.response?.headers?.get('retry-after')
   const retryAfterSeconds = retryAfter && /^\d+$/.test(retryAfter) ? Number(retryAfter) : null
   if (event && retryAfterSeconds !== null) setResponseHeader(event, 'Retry-After', retryAfterSeconds)
+  if (upstreamStatus(error) >= 500) return createError({ statusCode: upstreamStatus(error), statusMessage: 'The HRMS service could not complete this request. Please try again.' })
   const detail = candidate.data?.detail
+  const validationMessage = Array.isArray(detail)
+    ? detail.find((item): item is { msg?: unknown } => typeof item === 'object' && item !== null && 'msg' in item)?.msg
+    : undefined
   const upstreamMessage = typeof detail === 'string'
     ? detail
-    : (typeof detail === 'object' && detail && 'reason' in detail ? String((detail as { reason: unknown }).reason) : candidate.message)
+    : (typeof validationMessage === 'string'
+        ? validationMessage
+        : (typeof detail === 'object' && detail && 'reason' in detail ? String((detail as { reason: unknown }).reason) : candidate.message))
   const message = retryAfterSeconds === null
     ? upstreamMessage
     : `${upstreamMessage || 'Too many attempts.'} Try again in ${retryAfterSeconds} seconds.`

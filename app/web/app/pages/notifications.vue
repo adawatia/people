@@ -1,35 +1,53 @@
 <script setup lang="ts">
-/* eslint-disable better-tailwindcss/no-unknown-classes */
+import type { PaginatedResponse } from '#shared/types/pagination'
+
 import type { HrmsNotification } from '#shared/types/notification'
 
 useSeoMeta({ title: 'Notifications' })
 const api = useHrmsApi()
 const toast = useToast()
-const filter = ref<'all' | 'unread'>('all')
+const list = useListState({ filter: 'all' })
+const filter = list.field('filter')
 const workingId = ref<number | null>(null)
-const { data: notifications, pending, error, refresh } = await useAsyncData('notifications', () => api.request<HrmsNotification[]>('notifications'))
-const visible = computed(() => (notifications.value || []).filter(item => filter.value === 'all' || !item.is_read))
-const unread = computed(() => (notifications.value || []).filter(item => !item.is_read).length)
+const { data: notifications, pending, error, refresh } = await useAsyncData('notifications', (_app, { signal }) => api.request<PaginatedResponse<HrmsNotification>>('notifications', { signal, query: { ...list.query.value, unread: filter.value === 'unread' ? true : undefined } }), { watch: [list.query, filter] })
+const { data: counts, refresh: refreshCounts } = await useAsyncData('notification-count', () => api.request<{ unread_count: number }>('notifications/unread-count'))
+const visible = computed(() => notifications.value?.items || [])
+const unread = computed(() => counts.value?.unread_count || 0)
 const iconFor = (type: string) => type.includes('leave') ? 'i-lucide-calendar-days' : type.includes('attendance') ? 'i-lucide-calendar-check-2' : type.includes('overtime') ? 'i-lucide-timer' : 'i-lucide-bell'
 const timeAgo = (value: string) => new Intl.RelativeTimeFormat('en', { numeric: 'auto' }).format(-Math.max(1, Math.round((Date.now() - new Date(value).getTime()) / 3600000)), 'hour')
 async function openNotification(item: HrmsNotification) {
-  if (!item.is_read) {
-    workingId.value = item.notification_id
-    await api.request(`notifications/${item.notification_id}/read`, { method: 'PATCH' })
-    item.is_read = true
+  workingId.value = item.notification_id
+  try {
+    if (!item.is_read) {
+      await api.request(`notifications/${item.notification_id}/read`, { method: 'PATCH' })
+      await Promise.all([refresh(), refreshCounts()])
+    }
+    // Notification links are application paths, never arbitrary external URLs.
+    if (item.link?.startsWith('/') && !item.link.startsWith('//')) await navigateTo(item.link)
+  } catch {
+    toast.add({ title: 'Could not update notification', description: 'Please try again.', color: 'error' })
+  } finally {
     workingId.value = null
   }
-  if (item.link) await navigateTo(item.link)
 }
 async function markAll() {
-  await api.request('notifications/mark-all-read', { method: 'POST' })
-  for (const item of notifications.value || []) item.is_read = true
-  toast.add({ title: 'All caught up', color: 'success', icon: 'i-lucide-check-check' })
+  try {
+    await api.request('notifications/mark-all-read', { method: 'POST' })
+    await Promise.all([refresh(), refreshCounts()])
+    toast.add({ title: 'All caught up', color: 'success', icon: 'i-lucide-check-check' })
+  } catch {
+    toast.add({ title: 'Could not mark notifications read', description: 'Please try again.', color: 'error' })
+  }
 }
 </script>
 
 <template>
   <div class="mx-auto max-w-4xl">
+    <ListControls
+      v-model:search="list.search.value"
+      :active="list.active.value"
+      @clear="list.clear"
+    />
     <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
       <div>
         <p class="text-sm font-medium text-primary">
@@ -120,5 +138,13 @@ async function markAll() {
         </button>
       </div>
     </section>
+    <ListPagination
+      v-if="notifications"
+      v-model:page="list.page.value"
+      v-model:page-size="list.pageSize.value"
+      :total="notifications?.total || 0"
+      :total-pages="notifications?.total_pages"
+      :loading="pending"
+    />
   </div>
 </template>

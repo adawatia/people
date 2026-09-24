@@ -1,11 +1,16 @@
 <script setup lang="ts">
-/* eslint-disable better-tailwindcss/no-unknown-classes */
+import type { PaginatedResponse } from '#shared/types/pagination'
+
 import type { AttendanceCorrection, AttendanceRecord, AttendanceSummary } from '#shared/types/attendance'
+
+const chartTheme = useChartTheme()
 
 useSeoMeta({ title: 'Attendance' })
 const auth = useAuth()
 const workspace = useWorkspace()
 const api = useHrmsApi()
+const list = useListState({ sort_order: 'desc' })
+const correctionList = useListState({}, 'correction_')
 const toast = useToast()
 const employeeId = computed(() => auth.user.value?.employee_id)
 const personalView = computed(() => workspace.current.value === 'MY')
@@ -23,6 +28,9 @@ function dateKey(value: Date) {
   return `${year}-${month}-${day}`
 }
 
+watch(monthCursor, () => {
+  list.page.value = 1
+})
 const monthKey = computed(() => `${monthCursor.value.getFullYear()}-${monthCursor.value.getMonth() + 1}`)
 const monthLabel = computed(() => new Intl.DateTimeFormat('en-IN', { month: 'long', year: 'numeric' }).format(monthCursor.value))
 
@@ -37,28 +45,27 @@ const { data: attendanceData, pending, error, refresh } = await useAsyncData(
     const [records, summary, corrections] = await Promise.all([
       api.request<AttendanceRecord[]>(`attendance/employee/${employeeId.value}/calendar`, { query: { year, month } }),
       api.request<AttendanceSummary>(`attendance/employee/${employeeId.value}/summary`, { query: { year, month } }),
-      api.request<AttendanceCorrection[]>('attendance/corrections')
+      api.request<PaginatedResponse<AttendanceCorrection>>('attendance/corrections', { query: correctionList.query.value })
     ])
     return { records, summary, corrections, first: dateKey(first), last: dateKey(last) }
   },
-  { watch: [monthKey, employeeId, personalView] }
+  { watch: [monthKey, employeeId, personalView, correctionList.query] }
 )
 const { data: scopedRecords, pending: scopedPending, error: scopedError, refresh: refreshScoped } = await useAsyncData(
   'scoped-attendance',
   async () => {
-    if (personalView.value) return []
+    if (personalView.value) return null
     const year = monthCursor.value.getFullYear()
     const month = monthCursor.value.getMonth() + 1
-    return await api.request<AttendanceRecord[]>('attendance/', {
+    return await api.request<PaginatedResponse<AttendanceRecord>>('attendance/', {
       query: {
         from_date: `${year}-${String(month).padStart(2, '0')}-01`,
         to_date: dateKey(new Date(year, month, 0)),
-        page: 1,
-        page_size: 100
+        ...list.query.value
       }
     })
   },
-  { watch: [monthKey, personalView] }
+  { watch: [monthKey, personalView, list.query] }
 )
 
 const records = computed(() => attendanceData.value?.records || [])
@@ -92,8 +99,8 @@ const statusSegments = computed(() => {
   const summary = attendanceData.value?.summary
   return [
     { label: 'Present', value: summary?.total_present ?? 0, color: '#10b981' },
-    { label: 'Half day', value: summary?.total_half_day ?? 0, color: '#8b5cf6' },
-    { label: 'On leave', value: summary?.total_leave ?? 0, color: '#6366f1' },
+    { label: 'Half day', value: summary?.total_half_day ?? 0, color: '#0d9488' },
+    { label: 'On leave', value: summary?.total_leave ?? 0, color: '#2563eb' },
     { label: 'Absent', value: summary?.total_absent ?? 0, color: '#f43f5e' },
     { label: 'Missed punch', value: summary?.total_missed_punch ?? 0, color: '#f59e0b' },
     { label: 'Weekly off', value: summary?.total_weekly_off ?? 0, color: '#94a3b8' },
@@ -113,8 +120,8 @@ const attendanceChartOption = computed<ECOption>(() => ({
     subtext: 'recorded days',
     left: 'center',
     top: 'center',
-    textStyle: { fontSize: 22, fontWeight: 700, color: '#172033' },
-    subtextStyle: { fontSize: 11, color: '#667085' }
+    textStyle: { fontSize: 22, fontWeight: 700, color: chartTheme.value ? '#e2e8f0' : '#172033' },
+    subtextStyle: { fontSize: 11, color: chartTheme.value ? '#94a3b8' : '#667085' }
   },
   series: [{
     name: 'Attendance status',
@@ -170,9 +177,9 @@ async function submitCorrection() {
         reason: correction.reason.trim()
       }
     })
-    toast.add({ title: 'Correction request submitted', description: 'Your approver can now review the request.', color: 'success', icon: 'i-lucide-circle-check' })
+    toast.add({ title: 'Correction request submitted', description: 'The correction is awaiting ERP reconciliation.', color: 'success', icon: 'i-lucide-circle-check' })
     correctionRecord.value = null
-    await refresh()
+    await Promise.all([refresh(), refreshScoped()])
   } catch (requestError) {
     const candidate = requestError as { data?: { statusMessage?: string } }
     toast.add({ title: 'Could not submit correction', description: candidate.data?.statusMessage || 'Please review the details and try again.', color: 'error' })
@@ -182,12 +189,22 @@ async function submitCorrection() {
 }
 
 function hasPendingCorrection(recordId: number) {
-  return attendanceData.value?.corrections.some(item => item.attendance_record_id === recordId && item.status === 'PENDING')
+  return records.value.find(item => item.id === recordId)?.has_pending_correction || false
 }
 </script>
 
 <template>
   <div>
+    <div v-if="!personalView">
+      <ListControls
+        v-model:search="list.search.value"
+        v-model:sort-by="list.sortBy.value"
+        v-model:sort-order="list.sortOrder.value"
+        :active="list.active.value"
+        :sorts="[{ label: 'Date', value: 'attendance_date' }, { label: 'Status', value: 'status' }]"
+        @clear="list.clear"
+      />
+    </div>
     <div class="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
       <div>
         <p class="text-sm font-medium text-primary">
@@ -272,7 +289,7 @@ function hasPendingCorrection(recordId: number) {
         :actions="[{ label: 'Refresh', onClick: () => refreshScoped() }]"
       />
       <div
-        v-else-if="scopedRecords?.length"
+        v-else-if="scopedRecords?.items.length"
         class="overflow-x-auto"
       >
         <table class="w-full min-w-[680px] text-left text-sm">
@@ -295,7 +312,7 @@ function hasPendingCorrection(recordId: number) {
           </thead>
           <tbody class="divide-y divide-[var(--people-border)]">
             <tr
-              v-for="record in scopedRecords"
+              v-for="record in scopedRecords?.items"
               :key="record.id"
             >
               <td class="px-5 py-4 font-semibold">
@@ -381,6 +398,7 @@ function hasPendingCorrection(recordId: number) {
             <div class="w-full shrink-0 sm:w-56">
               <ClientOnly>
                 <VChart
+                  :theme="chartTheme"
                   class="block"
                   style="width: 100%; height: 14rem"
                   :option="attendanceChartOption"
@@ -605,5 +623,45 @@ function hasPendingCorrection(recordId: number) {
         </div>
       </section>
     </div>
+    <ListPagination
+      v-if="!personalView && scopedRecords"
+      v-model:page="list.page.value"
+      v-model:page-size="list.pageSize.value"
+      :total="scopedRecords?.total || 0"
+      :total-pages="scopedRecords?.total_pages"
+      :loading="scopedPending"
+    />
+    <section
+      v-if="personalView && attendanceData?.corrections"
+      class="mt-6"
+    >
+      <h3 class="font-semibold">
+        Correction requests
+      </h3>
+      <UEmpty
+        v-if="!attendanceData.corrections.items.length"
+        title="No correction requests"
+      />
+      <article
+        v-for="item in attendanceData.corrections.items"
+        :key="item.id"
+        class="border-b border-default py-3"
+      >
+        <p>{{ item.reason }}</p><UBadge
+          color="neutral"
+          variant="subtle"
+        >
+          {{ item.status }}
+        </UBadge>
+      </article>
+    </section>
+    <ListPagination
+      v-if="personalView && attendanceData?.corrections"
+      v-model:page="correctionList.page.value"
+      v-model:page-size="correctionList.pageSize.value"
+      :total="attendanceData?.corrections?.total || 0"
+      :total-pages="attendanceData?.corrections?.total_pages"
+      :loading="pending"
+    />
   </div>
 </template>

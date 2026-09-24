@@ -25,6 +25,7 @@ from __future__ import annotations
 import logging
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision: str = "d5e6f7a8b9c0"
@@ -37,8 +38,8 @@ logger = logging.getLogger("alembic.runtime.migration")
 
 def _encrypt_existing_secrets() -> None:
     """Encrypt plaintext seeds when a real encryption key is configured."""
-    from core.secret_box import DEVELOPMENT_KEY, SecretBoxError, encrypt_secret, is_encrypted  # noqa: PLC0415
-    from core.settings import get_settings  # noqa: PLC0415
+    from core.secret_box import DEVELOPMENT_KEY, SecretBoxError, encrypt_secret, is_encrypted
+    from core.settings import get_settings
 
     key = get_settings().mfa_secret_key()
     if key == DEVELOPMENT_KEY:

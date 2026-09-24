@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,7 +10,9 @@ from core.business_roles import (
     resolve_business_role,
 )
 from core.database import get_async_session
+from core.pagination import PaginatedResponse
 from db.models import Employee, Notification, User
+from repositories.notification_repo import NotificationRepository
 from schemas.notifications import (
     NotificationRead,
     NotificationUnreadCount,
@@ -96,20 +98,20 @@ async def create_notification(
     return notif
 
 
-@router.get("", response_model=list[NotificationRead], summary="Fetch recent notifications for logged in user")
+@router.get("", response_model=PaginatedResponse[NotificationRead], summary="Fetch recent notifications for logged in user")
 async def get_notifications(
-    limit: int = 30,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100),
+    unread: bool | None = None,
+    search: str | None = None,
+    sort_by: str | None = None,
+    sort_order: str = Query("desc", pattern="^(asc|desc)$"),
     current_user: User = Depends(fastapi_users.current_user(active=True)),
     session: AsyncSession = Depends(get_async_session),
 ):
     filt = await build_notification_filter(current_user, session)
-    query = select(Notification)
-    if filt is not None:
-        query = query.where(filt)
-    query = query.order_by(Notification.created_at.desc()).limit(min(limit, 100))
-
-    result = await session.scalars(query)
-    return list(result.all())
+    return await NotificationRepository(session).list_page(
+        filt, page, page_size, unread, search, sort_by, sort_order)
 
 
 @router.get("/unread-count", response_model=NotificationUnreadCount, summary="Get unread notifications count")
