@@ -205,7 +205,7 @@ OT summary section on dashboard + `/overtime` page.
 
 1. All 6 modules' models will be added to `models.py` in one pass
 2. One Alembic migration for all new tables (clean, atomic)
-3. The `seed_demo_data.py` will be updated to use SQLAlchemy ORM instead of raw SQL
+3. `app/api/demo.py` exercises the real ERP HTTP endpoints in dependency order; it does not bypass contracts with direct database demo inserts.
 4. Routers built module by module, tested after each
 5. Frontend pages built in parallel with the backend routers
 

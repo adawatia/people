@@ -564,6 +564,8 @@ Config: `create_period`, `create_type`, `update_type`, `allocate_leaves` (writes
 
 **Ingestion discipline:** bulk endpoints are intentionally *partial-success* — a bad row lands in `failed[]` with its error string and the rest are committed. Callers must inspect the result, not just the HTTP status.
 
+**Manual contract runner:** `app/api/demo.py` is an editable HTTP client for exercising the ERP contract in dependency order. It previews by default and sends requests only with `--execute`; returned unit, department, designation, shift, employee, and attendance IDs are carried into dependent calls. It does not write directly to PostgreSQL. `--leave-feed-only` can be run after a human approves or rejects leave, and acknowledgements require the separate `--ack-leave-changes` flag.
+
 **Outbound discipline:** HRMS never calls the ERP. Leave approvals/rejections/cancellations queue an event that the ERP polls. Until the ERP acks, `erp_sync_status` stays `PENDING`; rows are visible in `GET /leaves/changes` indefinitely.
 
 ### 2.9 Public API index (grouped by tag)
