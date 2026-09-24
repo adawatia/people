@@ -7,6 +7,7 @@ from core.auth import fastapi_users, require_permission
 from core.database import get_async_session
 from core.employee_access import get_current_employee, get_permission_scope, require_employee_access
 from core.pagination import PaginatedResponse
+from core.sorting import OvertimeSort
 from db.models import User
 from schemas.overtime import (
     OvertimeApprovalCreate,
@@ -27,7 +28,7 @@ async def list_overtime(
     to_date: date | None = None,
     q: str | None = Query(None, max_length=200),
     search: str | None = Query(None, max_length=200),
-    sort_by: str | None = None,
+    sort_by: OvertimeSort | None = None,
     sort_order: str = Query("desc", pattern="^(asc|desc)$"),
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=100),

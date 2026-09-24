@@ -8,6 +8,7 @@ from core.business_roles import resolve_business_access
 from core.database import get_async_session
 from core.employee_access import EmployeeAccessScope, get_current_employee, get_employee_scope
 from core.pagination import PaginatedResponse
+from core.sorting import ShiftAssignmentSort, ShiftDefinitionSort
 from db.models import User
 from schemas.shifts import (
     EmployeeShiftScheduleRead,
@@ -49,7 +50,7 @@ async def list_shifts(
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=100),
     search: str | None = None,
-    sort_by: str | None = None,
+    sort_by: ShiftDefinitionSort | None = None,
     sort_order: str = Query("asc", pattern="^(asc|desc)$"),
     employee_id: int | None = None,
     unit_id: int | None = None,
@@ -83,7 +84,7 @@ async def list_shift_assignments(
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=100),
     search: str | None = None,
-    sort_by: str | None = None,
+    sort_by: ShiftAssignmentSort | None = None,
     sort_order: str = Query("desc", pattern="^(asc|desc)$"),
     shift_id: int | None = None,
     employee_id: int | None = None,

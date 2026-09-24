@@ -12,6 +12,7 @@ from core.employee_access import (
     require_employee_access,
 )
 from core.pagination import PaginatedResponse
+from core.sorting import LeaveApplicationSort, LookupSort
 from db.models import LeavePeriod, LeaveType, User
 from schemas.leaves import (
     LeaveApplicationAction,
@@ -48,7 +49,7 @@ async def list_leave_periods(
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=100),
     search: str | None = None,
-    sort_by: str | None = None,
+    sort_by: LookupSort | None = None,
     sort_order: str = Query("asc", pattern="^(asc|desc)$"),
     _: User = Depends(fastapi_users.current_user(active=True)),
     session: AsyncSession = Depends(get_async_session),
@@ -89,7 +90,7 @@ async def list_leave_types(
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=100),
     search: str | None = None,
-    sort_by: str | None = None,
+    sort_by: LookupSort | None = None,
     sort_order: str = Query("asc", pattern="^(asc|desc)$"),
     _: User = Depends(fastapi_users.current_user(active=True)),
     session: AsyncSession = Depends(get_async_session),
@@ -178,7 +179,7 @@ async def list_leave_applications(
     from_date: date | None = None,
     to_date: date | None = None,
     search: str | None = None,
-    sort_by: str | None = None,
+    sort_by: LeaveApplicationSort | None = None,
     sort_order: str = Query("desc", pattern="^(asc|desc)$"),
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=100),

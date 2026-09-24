@@ -11,6 +11,7 @@ from core.business_roles import (
 )
 from core.database import get_async_session
 from core.pagination import PaginatedResponse
+from core.sorting import NotificationSort
 from db.models import Employee, Notification, User
 from repositories.notification_repo import NotificationRepository
 from schemas.notifications import (
@@ -104,7 +105,7 @@ async def get_notifications(
     page_size: int = Query(25, ge=1, le=100),
     unread: bool | None = None,
     search: str | None = None,
-    sort_by: str | None = None,
+    sort_by: NotificationSort | None = None,
     sort_order: str = Query("desc", pattern="^(asc|desc)$"),
     current_user: User = Depends(fastapi_users.current_user(active=True)),
     session: AsyncSession = Depends(get_async_session),

@@ -11,6 +11,7 @@ from core.employee_access import (
     require_employee_access,
 )
 from core.pagination import PaginatedResponse
+from core.sorting import WorkArrangementSort
 from db.models import User
 from schemas.work_arrangements import (
     WorkArrangementAction,
@@ -30,7 +31,7 @@ async def list_work_arrangements(
     from_date: date | None = None,
     to_date: date | None = None,
     search: str | None = None,
-    sort_by: str | None = None,
+    sort_by: WorkArrangementSort | None = None,
     sort_order: str = Query("desc", pattern="^(asc|desc)$"),
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=100),

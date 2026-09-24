@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.auth import require_permission
 from core.database import get_async_session
 from core.employee_access import get_employee_scope
+from core.sorting import EmployeeReportSort
 from db.models import User
 from schemas.reports import (
     MonthlyAttendanceMatrixReport,
@@ -44,7 +45,7 @@ async def get_monthly_attendance_matrix(
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=100),
     search: str | None = None,
-    sort_by: str | None = None,
+    sort_by: EmployeeReportSort | None = None,
     sort_order: str = Query("asc", pattern="^(asc|desc)$"),
     month: int = Query(..., ge=1, le=12),
     unit_id: int | None = Query(None),
@@ -69,7 +70,7 @@ async def get_leave_summary_report(
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=100),
     search: str | None = None,
-    sort_by: str | None = None,
+    sort_by: EmployeeReportSort | None = None,
     sort_order: str = Query("asc", pattern="^(asc|desc)$"),
     unit_id: int | None = Query(None),
     department_id: int | None = Query(None),

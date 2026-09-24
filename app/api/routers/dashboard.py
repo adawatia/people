@@ -9,6 +9,7 @@ from core.audit import record_audit_event
 from core.auth import fastapi_users, get_user_permissions
 from core.database import get_async_session
 from core.rbac import get_visible_widgets
+from core.sorting import OwnerExceptionSort
 from db.models import (
     Employee,
     User,
@@ -78,7 +79,7 @@ async def get_owner_exceptions(
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=100),
     search: str | None = Query(None),
-    sort_by: str | None = Query(None),
+    sort_by: OwnerExceptionSort | None = Query(None),
     sort_order: str = Query("asc", pattern="^(asc|desc)$"),
     user: User = Depends(fastapi_users.current_user(active=True)),
     session: AsyncSession = Depends(get_async_session),

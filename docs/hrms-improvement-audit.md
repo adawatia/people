@@ -100,7 +100,7 @@ Staging is the configured `app/api/.env` database: read-only transactions only. 
 
 ## Pagination and API contract coverage
 
-Every growing business list now defaults to 25 rows, rejects sizes above 100, applies authorization and domain filters before counting, validates sort fields through an allowlist, and adds the row identifier as a deterministic ordering tie-breaker. `search` is the public parameter; the older `q` parameter remains an alias only where Nuxt previously used it. Responses use the shared `PaginatedResponse` metadata (`total`, `page`, `page_size`, `total_pages`, `has_next`, `has_prev`).
+Every growing business list now defaults to 25 rows, rejects sizes above 100, applies authorization and domain filters before counting, validates sort fields through an allowlist, and adds the row identifier as a deterministic ordering tie-breaker. Each `sort_by` query parameter publishes that endpoint's exact allowlist as an OpenAPI enum, so Nuxt and other generated clients can discover the supported keys. `search` is the public parameter; the older `q` parameter remains an alias only where Nuxt previously used it. Responses use the shared `PaginatedResponse` metadata (`total`, `page`, `page_size`, `total_pages`, `has_next`, `has_prev`).
 
 | Dataset / consumer | Endpoint | Search and sort contract | Scope and count behavior | Result |
 |---|---|---|---|---|
@@ -127,7 +127,7 @@ Approval types remain three independent paginated datasets. Their totals come fr
 
 ## PostgreSQL scope and ordering verification
 
-`tests/test_list_scope_matrix.py` creates two isolated organizational scopes and deliberately gives rows equal primary sort values. It then repeats page 1 and reads page 2 to prove stable ordering, no page overlap, and no records from the other scope. Coverage includes employees, attendance records, attendance punches, leave applications, work arrangements, overtime, shift assignments, employee history, notifications, and shift definitions. `tests/test_list_contracts.py` separately verifies filter/count agreement, escaped search input, invalid pagination and sort rejection, report aggregation over the full filter, employee-first report paging, and bounded query counts.
+`tests/test_list_scope_matrix.py` creates two isolated organizational scopes and deliberately gives rows equal primary sort values. It then repeats page 1 and reads page 2 to prove stable ordering, no page overlap, and no records from the other scope. Coverage includes employees, attendance records, attendance punches, leave applications, work arrangements, overtime, shift assignments, employee history, notifications, and shift definitions. `tests/test_list_contracts.py` separately verifies filter/count agreement, escaped search input, invalid pagination and sort rejection, report aggregation over the full filter, employee-first report paging, and bounded query counts. `tests/test_sort_openapi_contract.py` verifies that every public `sort_by` parameter documents the same finite allowlist enforced by its repository.
 
 All database tests require an explicit PostgreSQL URL whose database name ends in `_test`. SQLite is no longer a permitted test fallback, and the overtime pagination regression test uses the isolated PostgreSQL database.
 

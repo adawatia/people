@@ -8,6 +8,7 @@ from core.auth import UserManager, fastapi_users, get_user_manager, require_perm
 from core.database import get_async_session
 from core.employee_access import get_employee_scope, require_employee_access
 from core.pagination import PaginatedResponse
+from core.sorting import EmployeeHistorySort, EmployeeSort
 from db.models import User
 from schemas.employees import (
     EmployeeCreate,
@@ -28,7 +29,7 @@ async def list_employees(
     page_size: int = Query(25, ge=1, le=100),
     search: str | None = None,
     q: str | None = None,
-    sort_by: str | None = None,
+    sort_by: EmployeeSort | None = None,
     sort_order: str = Query("asc", pattern="^(asc|desc)$"),
     unit_id: int | None = None,
     department_id: int | None = None,
@@ -171,7 +172,7 @@ async def get_employee_work_history(
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=100),
     search: str | None = None,
-    sort_by: str | None = None,
+    sort_by: EmployeeHistorySort | None = None,
     sort_order: str = Query("desc", pattern="^(asc|desc)$"),
     current_user: User = Depends(fastapi_users.current_user(active=True)),
     session: AsyncSession = Depends(get_async_session),

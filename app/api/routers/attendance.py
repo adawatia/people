@@ -12,6 +12,7 @@ from core.employee_access import (
     require_employee_access,
 )
 from core.pagination import PaginatedResponse
+from core.sorting import AttendanceCorrectionSort, AttendancePunchSort, AttendanceRecordSort
 from db.models import User
 from schemas.attendance import (
     AttendanceCorrectionCreate,
@@ -67,7 +68,7 @@ async def list_checkins(
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=100),
     search: str | None = None,
-    sort_by: str | None = None,
+    sort_by: AttendancePunchSort | None = None,
     sort_order: str = Query("desc", pattern="^(asc|desc)$"),
     employee_id: int | None = None,
     from_time: datetime | None = None,
@@ -115,7 +116,7 @@ async def list_attendance(
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=100),
     search: str | None = None,
-    sort_by: str | None = None,
+    sort_by: AttendanceRecordSort | None = None,
     sort_order: str = Query("desc", pattern="^(asc|desc)$"),
     current_user: User = Depends(fastapi_users.current_user(active=True)),
     session: AsyncSession = Depends(get_async_session),
@@ -250,7 +251,7 @@ async def submit_correction(
 async def list_corrections(
     status: str | None = Query(None),
     search: str | None = None,
-    sort_by: str | None = None,
+    sort_by: AttendanceCorrectionSort | None = None,
     sort_order: str = Query("desc", pattern="^(asc|desc)$"),
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=100),

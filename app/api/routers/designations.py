@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.auth import fastapi_users
 from core.database import get_async_session
 from core.pagination import PaginatedResponse
+from core.sorting import LookupSort
 from db.models import Designation, User
 from schemas.designations import DesignationRead
 from services.designation_service import DesignationService
@@ -18,7 +19,7 @@ async def list_designations(
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=100),
     search: str | None = None,
-    sort_by: str | None = None,
+    sort_by: LookupSort | None = None,
     sort_order: str = Query("asc", pattern="^(asc|desc)$"),
     _: User = Depends(fastapi_users.current_user(active=True)),
     session: AsyncSession = Depends(get_async_session),
