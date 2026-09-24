@@ -1,4 +1,5 @@
 from fastapi import HTTPException, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import Department, Organization, Unit
@@ -80,8 +81,15 @@ class OrgService:
                 detail="Organization not found",
             )
         unit = Unit(**data.model_dump(), organization_id=org.id)
-        created = await self.repo.create_unit(unit)
-        await self.session.commit()
+        try:
+            created = await self.repo.create_unit(unit)
+            await self.session.commit()
+        except IntegrityError as exc:
+            await self.session.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"A unit with code '{data.code}' already exists",
+            ) from exc
         return UnitRead.model_validate(created)
 
     async def update_unit(self, unit_id: int, data: UnitUpdate) -> UnitRead:

@@ -333,7 +333,10 @@ def run_leave_feed(client: ErpClient, *, acknowledge: bool) -> None:
 
 def run_workflow(client: ErpClient, *, acknowledge: bool, exercise_lifecycle: bool) -> None:
     data = deepcopy(ERP_DATA)
-    initial_password = os.environ.get("ERP_DEMO_INITIAL_PASSWORD", "ManualERP@2026!")
+    # Deliberately unrelated to the sample employees' names, email addresses,
+    # and usernames so it passes the same personal-information checks as every
+    # other temporary password. Override this for real manual testing.
+    initial_password = os.environ.get("ERP_DEMO_INITIAL_PASSWORD", "Cobalt!Harbor92#")
 
     print("\n[1/11] Organization")
     client.request("PATCH", "integrations/erp/organization", data["organization"])

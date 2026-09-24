@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi_users.exceptions import InvalidPasswordException
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -62,7 +63,16 @@ async def create_employee_from_erp(
     existing = await session.scalar(select(User).where((User.username == username) | (User.email == email)))
     if existing:
         raise HTTPException(status_code=409, detail="ERP employee login already exists")
-    await user_manager.validate_password(data.initial_password, User(email=email, username=username, first_name=data.first_name, last_name=data.last_name))
+    try:
+        await user_manager.validate_password(
+            data.initial_password,
+            User(email=email, username=username, first_name=data.first_name, last_name=data.last_name),
+        )
+    except InvalidPasswordException as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "INVALID_PASSWORD", "reason": exc.reason},
+        ) from exc
     try:
         mobile_number = normalize_indian_mobile(data.phone_number)
     except ValueError as exc:
