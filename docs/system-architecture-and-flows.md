@@ -119,7 +119,8 @@ Module inventory:
 | File | Purpose / notable content |
 |---|---|
 | `main.py` | App factory, lifespan, routers, CORS, middleware, custom OpenAPI security schemes, `/`, `/health`, `/db-health` |
-| `core/auth.py` | fastapi-users wiring, `UserManager` (password policy, 3-way login lookup, dummy hash for unknown users), JWT strategy, `BASE_EMPLOYEE_PERMISSIONS` + `ROLE_PERMISSIONS` + `effective_permissions`, the compatibility `FIXED_ROLE_PERMISSIONS` view, `require_permission`, ERP API-key check, generic rate limiter |
+| `core/auth.py` | fastapi-users wiring, `UserManager` (password policy, 3-way login lookup, dummy hash for unknown users), JWT strategy, workforce/technical permission separation, live-session checks for sensitive routes, and the global rate limiter |
+| `core/erp_auth.py` | scoped ERP client authentication: HMAC request signing, timestamp window, nonce replay protection, development-only legacy key compatibility, and audit events |
 | `core/tokens.py` | The only place credentials are minted/hashed: opaque refresh secrets (`token_urlsafe(48)`), SHA-256 storage hash, short-lived access JWT, **separate-audience** MFA challenge token |
 | `core/session_policy.py` | `SessionPolicy` + `policy_for(privileged=…)`: access/refresh TTL, idle timeout, absolute lifetime, whether MFA is mandated. Two profiles: `business` and `privileged` |
 | `core/auth_throttle.py` | `AuthThrottle` + pluggable `ThrottleStore` (`memory` / `redis`): per-IP, per-account and per-(IP+account) failure budgets with progressive delay and capped blocks |
@@ -174,7 +175,9 @@ Notes that matter operationally:
 | `DATABASE_URL` | `postgresql+psycopg://dev:SuperAdmin@localhost:5432/hrms` | async driver; sync variant derived for Alembic |
 | `JWT_SECRET` | dev default | must be replaced outside development |
 | `ENVIRONMENT` | `development` | `development/dev/test` relax startup rules |
-| `ERP_API_KEY` | `""` (empty) | **empty means every ERP call is rejected** — no dev fallback |
+| `ERP_API_CLIENTS` | `""` | JSON map of ERP client ids to 32+ character HMAC secrets and explicit scopes; mandatory outside development |
+| `ERP_SIGNATURE_MAX_AGE_SECONDS` | `300` | Maximum signed-request clock skew and nonce lifetime |
+| `ERP_API_KEY` | `""` | Development-only compatibility key; rejected outside development |
 | `BOOTSTRAP_SEED_DATA` | `false` | opt-in seeding in non-dev environments |
 | `SUPER_ADMIN_*` | admin@hrms.com / superadmin / SuperAdmin@123 | bootstrap technical account |
 | `MAIL_*`, `FRONTEND_URL` | Zoho SMTP, `http://192.168.103.20:3000` | invitation / reset / alert emails |
@@ -204,7 +207,7 @@ Notes that matter operationally:
 
 **Lifespan (`main.py`)** — in order: log start → `create_db_and_tables()` **only in development** → `ensure_seed_data()` in dev or when `BOOTSTRAP_SEED_DATA=true` → start `notification_cleanup_loop()` as a task → on shutdown cancel the task cleanly.
 
-`validate_runtime_secrets()` runs at import-time startup of `main.py` and raises `RuntimeError` outside development if `JWT_SECRET`, `DATABASE_URL` or `SUPER_ADMIN_PASSWORD` are still defaults, `ERP_API_KEY` is empty, or throttling is configured with `AUTH_THROTTLE_BACKEND` ≠ `redis` / with a missing `REDIS_URL` — i.e. an auth-throttle setup that would silently be per worker is a *startup error* in production. The development shortcut is keyed on an explicit allow-list of environment names, so a typo such as `ENVIRONMENT=Production` cannot disable the checks. `settings.security_warnings()` then logs the non-fatal reminders (per-worker throttling, MFA not yet enforced, remote breach check without a URL, proxy headers not trusted).
+`validate_runtime_secrets()` runs at import-time startup of `main.py` and raises `RuntimeError` outside development if signing/database/bootstrap secrets are defaults, scoped `ERP_API_CLIENTS` credentials are absent or weak, Redis-backed throttling is unavailable, the MFA encryption key is the development key, or Super Admin MFA is not required. The development shortcut uses an explicit environment allow-list. `settings.security_warnings()` logs weaker development posture without exposing secrets.
 
 **Schema management:** Alembic (`app/api/alembic/versions/`, 8 migrations). `create_all` is a development convenience only. Production releases must run `alembic upgrade head` first.
 
@@ -243,7 +246,7 @@ Notes that matter operationally:
 
 **Work arrangements** — `work_arrangement_requests` (type `WORK_FROM_HOME` | `OUT_DUTY` | `FIELD_WORK` | `OFFICE`), status, actioner, rejection reason, plus read-only `employee_name`/`employee_code` properties.
 
-**Notifications** — `notifications` (title, message, `notification_type`, `user_id` **or** `target_role`, `reference_id`/`reference_type`, `link`, `is_read`).
+**Notifications** — `notifications` stores message/audience data; `notification_receipts` stores the unique `(notification_id, user_id)` read state. A shared broadcast can therefore be read by one employee without becoming read for everyone.
 
 Conventions: all timestamps are `DateTime(timezone=True)` defaulted by `now_ist()` (Asia/Kolkata); leave quantities use `Numeric(5,1)` (half days); money `Numeric(12,2)`; ERP-synced entities carry an `erp_*` id column for idempotency.
 
@@ -349,7 +352,7 @@ Unknown accounts get a dummy hash instead of a fast `return None`, all credentia
 
 #### 2.5.8 Security audit events
 
-`services/auth_service.py` writes to the existing append-only `audit_logs` table (no second audit framework): `AUTH_LOGIN_SUCCESS` / `AUTH_LOGIN_FAILED`, `SUPER_ADMIN_LOGIN_SUCCESS` / `_FAILED`, `AUTH_LOGOUT`, `AUTH_SESSION_CREATED`, `AUTH_SESSION_REFRESHED`, `AUTH_REFRESH_FAILED`, `AUTH_REFRESH_REUSE_DETECTED`, `AUTH_SESSION_REVOKED`, `AUTH_ALL_SESSIONS_REVOKED`, `AUTH_PASSWORD_CHANGED`, `AUTH_PASSWORD_RESET`, `AUTH_USERNAME_CHANGED`, `AUTH_MFA_CHALLENGE` / `_ENROLLED` / `_SUCCESS` / `_FAILED` / `_RECOVERY_REGENERATED`. Records carry `user_id` (when known), session id, `request_id`, IP, user agent and a reason category (`invalid` versus `replayed` on an MFA failure, and `activate` versus `verify` for the stage). The correlation id is minted by the request-logging middleware (an inbound `X-Request-ID` / `X-Correlation-ID` is preserved), stored on `request.state` and echoed on the response as `X-Request-ID`, so one id ties a user-visible failure to the API log line *and* the audit rows it produced. **Never** logged: passwords, raw access/refresh tokens, TOTP secrets or recovery codes — identities in failure events are stored as truncated hashes.
+`services/auth_service.py` writes to the existing append-only `audit_logs` table (no second audit framework): `AUTH_LOGIN_SUCCESS` / `AUTH_LOGIN_FAILED`, `SUPER_ADMIN_LOGIN_SUCCESS` / `_FAILED`, `AUTH_LOGOUT`, `AUTH_SESSION_CREATED`, `AUTH_SESSION_REFRESHED`, `AUTH_REFRESH_FAILED`, `AUTH_REFRESH_REUSE_DETECTED`, `AUTH_SESSION_REVOKED`, `AUTH_ALL_SESSIONS_REVOKED`, `AUTH_PASSWORD_CHANGED`, `AUTH_PASSWORD_RESET`, `AUTH_USERNAME_CHANGED`, `AUTH_ACCOUNT_STATUS_CHANGED`, `AUTH_MFA_ADMIN_RESET`, `AUTH_MFA_CHALLENGE` / `_ENROLLED` / `_SUCCESS` / `_FAILED` / `_RECOVERY_REGENERATED`. Records carry `user_id` (when known), session id, `request_id`, IP, user agent and a reason category (`invalid` versus `replayed` on an MFA failure, and `activate` versus `verify` for the stage). The correlation id is minted by the request-logging middleware (an inbound `X-Request-ID` / `X-Correlation-ID` is preserved), stored on `request.state` and echoed on the response as `X-Request-ID`, so one id ties a user-visible failure to the API log line *and* the audit rows it produced. **Never** logged: passwords, raw access/refresh tokens, TOTP secrets or recovery codes — identities in failure events are stored as truncated hashes.
 
 #### 2.5.9 Session lifecycle (state machine)
 
@@ -438,7 +441,7 @@ Auditability: granting or changing an elevated role writes `EMPLOYEE_ROLE_GRANTE
 
 Derived rules worth remembering:
 
-* **Super Admin ⇒ exactly the HR_ADMIN permission set plus organization scope** (`get_user_permissions` / `get_employee_scope` short-circuit). There is no superuser-only permission.
+* **Super Admin ⇒ technical permissions only and no workforce row scope.** Business routers require a linked, initialized workforce account, so the technical identity cannot use HR/manager/employee APIs even when a URL is called directly.
 * **A user with no `Employee` row ⇒ base employee set.** Safe default; also means a "technical" account that is not a superuser sees only self-service.
 * Permissions are **read from the DB on every request** (`get_user_permissions` queries the employee row) — changing `Employee.business_role` or the access scope takes effect on the next call, but the *client's cached permission list* is only refreshed on `/users/me`.
 * Elevated bundles must not repeat base codes, and every enforced code must be granted somewhere: both are asserted by `tests/test_permission_grants.py`.
@@ -533,7 +536,7 @@ Config: `create_period`, `create_type`, `update_type`, `allocate_leaves` (writes
 #### 2.7.8 Notifications & audit
 
 * `routers/notifications.py` exposes `create_notification()` for services plus `GET /notifications`, `GET /notifications/unread-count`, `PATCH /notifications/{id}/read`, `POST /notifications/mark-all-read`.
-* Visibility filter: superuser sees all; everyone else sees direct notifications, `ALL`/`STAFF`, only the linked employee's current business-role audience, and unscoped global `system` notifications. Accounts without a linked employee do not receive employee/HR/manager/owner broadcasts.
+* Visibility includes direct notifications, `ALL`/`STAFF`, the linked employee's current business-role audience, and unscoped global `system` notifications. Technical accounts do not enter this workforce router.
 * `mark_notification_read` applies the same audience rules as listing, preventing guessed IDs from reading or mutating another user's or role's notification.
 * Audit: `GET /dashboard/owner` and `/dashboard/owner/exceptions` write `ORGANIZATION_DASHBOARD_VIEWED` / `ORGANIZATION_EXCEPTION_DRILLDOWN_VIEWED` rows with filters, request id and IP.
 
@@ -568,13 +571,13 @@ Config: `create_period`, `create_type`, `update_type`, `allocate_leaves` (writes
 
 **Manual contract runner:** `app/api/demo.py` is an editable HTTP client for exercising the ERP contract in dependency order. It previews by default and sends requests only with `--execute`; returned unit, department, designation, shift, employee, and attendance IDs are carried into dependent calls. It does not write directly to PostgreSQL. `--leave-feed-only` can be run after a human approves or rejects leave, and acknowledgements require the separate `--ack-leave-changes` flag.
 
-**Local database reset:** `app/api/cleanup_db.py` discovers application tables in PostgreSQL and previews them by default. Execution requires both `--execute` and the exact confirmation text `DELETE ALL HRMS DATA`; remote and non-development targets require additional explicit flags. It truncates application tables with identity reset while preserving `alembic_version`, so the schema and migration history remain intact. The optional `--reseed-bootstrap` flag recreates the minimum organization and Super Admin records from `ORGANIZATION_*` and `SUPER_ADMIN_*` settings. Stop the API during cleanup because development startup can otherwise recreate those bootstrap rows concurrently.
+**Local database reset:** `app/api/cleanup_db.py` previews by default. Execution requires `--execute` plus the exact confirmation text; remote and non-development targets require additional flags. It preserves `alembic_version` and Super Admin accounts by default, removes workforce accounts, and truncates business data. `--delete-super-admin` is accepted only together with `--reseed-bootstrap`, preventing an inaccessible cleaned database.
 
 **Outbound discipline:** HRMS never calls the ERP. Leave approvals/rejections/cancellations queue an event that the ERP polls. Until the ERP acks, `erp_sync_status` stays `PENDING`; rows are visible in `GET /leaves/changes` indefinitely.
 
 ### 2.9 Public API index (grouped by tag)
 
-Every tag below is also an OpenAPI tag declared in `main.py`. Auth column: **E** = employee login, **SA** = super admin, **Any** = any active user, **perm(x)** = `require_permission`, **ERP** = API key. There is no `role:X` auth column any more: capability comes from permissions, reach comes from the caller's access scope (§2.6).
+Every tag below is also an OpenAPI tag declared in `main.py`. Auth column: **E** = workforce login, **SA** = Super Admin, **perm(x)** = `require_permission`, **ERP** = scoped HMAC client. There is no `role:X` auth column: capability comes from permissions and reach comes from the caller's access scope (§2.6).
 
 | Group | Endpoint | Auth | Scope rule |
 |---|---|---|---|
@@ -585,6 +588,12 @@ Every tag below is also an OpenAPI tag declared in `main.py`. Auth column: **E**
 | | `POST /auth/change-password` | Any | clears `must_change_password` **and revokes every session** (`reauthentication_required: true`) |
 | | `PATCH /auth/super-admin/username` | SA + password step-up | conflict-checked |
 | | `POST /auth/hr/employees/{id}/password-reset` | perm(`user.update`) + row scope | revokes sessions, sets `must_change_password` |
+| **Technical account support** | `GET /users/admin/accounts` | Super Admin only | bounded/searchable workforce login directory; excludes Super Admin accounts |
+| | `POST /users/admin/accounts/{id}/temporary-password` | Super Admin + password step-up | generated password shown once; clears recovery token, revokes sessions, forces change |
+| | `POST /users/admin/accounts/{id}/revoke-sessions` | Super Admin + password step-up | revokes every refresh session for the workforce account |
+| | `PATCH /users/admin/accounts/{id}/status` | Super Admin + password step-up | suspends/reactivates login only; does not change ERP employment status |
+| | `POST /users/admin/accounts/{id}/mfa-reset` | Super Admin + password step-up | clears employee MFA/recovery codes and revokes sessions |
+| **Security audit** | `GET /audit` | Super Admin + live session | bounded, searchable audit listing with documented action/entity/date sorting and filters |
 | | `GET /auth/invitation/validate`, `POST /auth/invitation/set-password` | public | 48 h, single-use token |
 | **auth-session** | `POST /auth/session` | Any | issues another chain for an authenticated caller |
 | | `POST /auth/session/refresh` | public (token is the credential), throttled | rotation + replay kill; no access token required |
@@ -620,7 +629,7 @@ Every tag below is also an OpenAPI tag declared in `main.py`. Auth column: **E**
 | **overtime** | `GET /overtime/`, `/{id}`, `/employee/{id}/summary` | Any | business-role scope, self fallback |
 | | `PATCH /{id}/approve`, `PATCH /{id}/reject` | perm(`overtime.approve`) | employee scope + no self-action; approval cannot exceed calculated minutes |
 | **reports** | `GET /reports/attendance-matrix`, `/leave-summary` | perm(`reports.attendance`/`reports.leave`) | scope-forced filters inside the route (org scope may choose unit/department) |
-| **notifications** | `GET /notifications`, `/unread-count`, `PATCH /{id}/read`, `POST /mark-all-read` | Any | user + role broadcasts |
+| **notifications** | `GET /notifications`, `/unread-count`, `PATCH /{id}/read`, `POST /mark-all-read` | workforce account | user + role broadcasts with per-user receipts |
 | **health** | `GET /health` (10/min), `GET /db-health`, `GET /` | public | DB probe + uptime |
 
 **Error conventions:** `400` invalid state/policy · `401` bad credentials/expired token · `403` missing permission, out-of-scope row, or ERP-owned action · `404` not found · `409` conflict (duplicate, started leave, balance race) · `410` retired endpoint · `422` validation (Pydantic) · `503` (db-health). `detail` is a string, or an object `{code, reason}` for password-policy failures surfaced by `legacy/email.py`-era endpoints.
@@ -631,7 +640,7 @@ Every tag below is also an OpenAPI tag declared in `main.py`. Auth column: **E**
 
 ### 3.1 Stack and structure
 
-Nuxt 4 (`app/` directory layout) with `@nuxt/ui`, `@nuxt/icon`, `@nuxt/image`, `nuxt-auth-utils`, `nuxt-echarts` (only `BarChart`, `LineChart`, `PieChart` + a small component set are registered — keeps the owner dashboard bundle small).
+Nuxt 4 (`app/` directory layout) with `@nuxt/ui`, `@nuxt/icon`, `@nuxt/image`, and `nuxt-echarts` (only `BarChart`, `LineChart`, `PieChart` + a small component set are registered — keeps the owner dashboard bundle small). Authentication uses the application's own `/api/session/**` BFF handlers and HttpOnly cookies; no separate Nuxt session module is registered.
 
 ```
 app/web
@@ -757,6 +766,8 @@ The shared Approvals page is available when the user can approve leave, work arr
 
 Mobile has exactly four primary destinations: **Home**, **Workspace**, the permission-filtered contextual section (My: Leave; Team: Approvals; HR: Employees; Executive: Reports; Technical: Settings), and **More**. Workspace opens a Nuxt UI slideover that identifies the active workspace; More holds remaining pages and account actions. The desktop sidebar retains one workspace selector and grouped navigation.
 
+The top-bar search opens a keyboard-accessible (`Ctrl`/`Cmd` + `K`) page finder built from the same permission-filtered navigation for the active workspace. It searches available destinations rather than business records and navigates with a clean workspace query so filters from the current page do not leak into the destination.
+
 The workspace route guard resolves the **destination** query and validated saved preference using pure helpers. It does not instantiate reactive workspace watchers inside middleware or read the previous page's route. Owners receive My + Executive, managers My + Team, HR My + HR, and technical administrators only Technical. Regression checks: `node --test tests/workspace.test.mjs` from `app/web` (Node 24).
 
 The employee directory starts master-data and paginated directory requests independently using lazy loading, allowing client navigation to show its skeleton immediately. Changing unit resets the department filter, and leaving the page clears the search debounce timer.
@@ -783,7 +794,7 @@ The workspace middleware keeps hidden routes out of the current workspace and re
 | `pages/reports/index.vue` | `reports/attendance-matrix`, `reports/leave-summary` | month picker, attendance matrix, leave summary; tabs gated by permission | — |
 | `pages/notifications.vue` | `notifications`, `notifications/{id}/read`, `notifications/mark-all-read` | list, read, mark-all | — |
 | `pages/profile.vue` | `users/me` (via composable) | identity, role label, employee code | — |
-| `pages/settings.vue` | `auth/change-password`, `auth/super-admin/username`, `auth/mfa/*`, `auth/sessions` | password change (ends every session → back to `/login`), username change with password step-up, two-step verification setup/removal, signed-in device list with per-device and global sign-out | MFA and username sections are technical-account oriented; the device list is for everyone |
+| `pages/settings.vue` | `auth/change-password`, `auth/super-admin/username`, `auth/mfa/*`, `auth/sessions`, `users/admin/accounts/*` | own-account security plus paginated workforce-account support for Super Admin | Workforce support can issue a generated temporary password, suspend/reactivate login, reset MFA or revoke sessions; every action requires password step-up and leaves ERP-owned employee/role data unchanged |
 
 ### 3.6 Design system & responsive rules
 
@@ -906,9 +917,10 @@ Owner permissions exclude approval and HR operations permissions. The Owner stil
 
 1. `/login` → **Super Admin login** toggle → username only (`mobile`/`email` inputs are rejected with `400 "This sign-in uses a username"`), must pass `is_superuser` or `403`.
 2. `/` shows the technical workspace: `GET /dashboard/technical-metrics` → users (non-superuser), active employees, active units/departments/designations; plus "ERP ownership" explainer cards. Nav = Dashboard + System administration.
-3. `/settings` → `PATCH /auth/super-admin/username` (uniqueness checked) and `POST /auth/change-password`.
-4. Permissions resolve to the full HR_ADMIN set, and `get_permission_scope` returns **organization** scope — a superuser can read any employee/attendance/leave record. Scope checks are the only guard, so treat this account as break-glass.
-5. Bootstrap: `db/seed.py` creates/repairs this account from `SUPER_ADMIN_*` env values on startup when seeding runs; `reset_super_admin_password.py` exists for recovery.
+3. `/settings` → own-account username/password/MFA/device controls plus a paginated workforce login directory. Support actions require current-password step-up and recent MFA on the current session, and cover generated temporary passwords, login suspension/reactivation, lost-authenticator reset and session revocation. They cannot target another Super Admin or edit ERP-owned employee/role data.
+4. `/audit` API access is technical-only and exposes paginated, searchable security events for operator investigation.
+5. Permissions resolve to the technical administration bundle, and workforce scope is empty. Direct calls to business routers are rejected by `current_business_user`.
+6. Bootstrap: `db/seed.py` creates/repairs this account from `SUPER_ADMIN_*` env values on startup when seeding runs. `reset_super_admin_password.py` provides host-side recovery using the same password policy and Argon2 helper as the API; it invalidates outstanding password-recovery tokens, revokes all refresh sessions, preserves MFA enrollment, and records `AUTH_PASSWORD_RESET` atomically with the new hash.
 
 ### 4.6 F6 — ERP machine flows
 
@@ -966,7 +978,7 @@ OvertimeRecord  PENDING ──approve/reject──▶ APPROVED | REJECTED
 | Concern | Where | Behaviour |
 |---|---|---|
 | **Correlation** | `core/logging.py`, `log_requests` | structured events; `x-request-id` header is stored on audit rows |
-| **Audit** | `core/audit.py` | only owner dashboards/drill-downs today; columns exist for far wider use |
+| **Audit** | `core/audit.py`, `GET /audit` | append-only auth, ERP, role, dashboard, and account-support events; technical read access is paginated |
 | **Rate limiting** | `core/auth.py` | 200/min default, `/health` 10/min, in-process storage |
 | **CORS** | `main.py` | explicit origin list + LAN regex; `allow_credentials=True` |
 | **Secrets** | `core/settings.py` | startup refusal of dev defaults outside development; ERP key fails closed |
@@ -988,6 +1000,7 @@ OvertimeRecord  PENDING ──approve/reject──▶ APPROVED | REJECTED
 | `test_auth_primitives.py` | token/crypto primitives (refresh entropy + hash-only storage, audience separation, expiry, wrong key), TOTP accept/reject, drift attribution (`match_totp_step` reports the step that matched, and `is_totp_replay` treats only a spent step as reuse), secret-box round-trip/nonce-uniqueness/legacy-plaintext/tamper-and-wrong-key failure, password policy (weak, personal-info, passphrase, breach-checker selection + fail-open), and the throttle rules: per-pair blocking, geometric growth with a cap, short delay for a typo, one employee cannot lock out colleagues, success clears counters, separate refresh budget, key normalisation, store-backend misconfiguration, counter expiry |
 | `test_auth_sessions.py` | session lifecycle over HTTP: direct session issuance at login, rotation + old-token rejection, replay of a logged-out token not destroying sibling sessions, logout-everywhere, device listing, idle timeout, absolute timeout that refreshing cannot extend, refresh-TTL expiry, the concurrent-refresh race (exactly one winner), audited reuse detection, malformed tokens |
 | `test_auth_hardening_http.py` | every workforce role through one business endpoint, technical↔business door separation, no account enumeration, secret-free auth audit events, login throttling + recovery, refresh-abuse throttling, password change ending all sessions, access token surviving until expiry, HR temporary-password reset revocation + forced change, must-change-password clearing, Super Admin MFA challenge completion, challenge token not usable as an access token, employee MFA opt-in |
+| `test_security_integrity_hardening.py` | scoped ERP HMAC authentication and nonce replay, technical/workforce separation, per-user broadcast receipts, idempotent ERP shift upsert, and empty-scope denial |
 | `test_mfa_totp.py` | the second factor's own guarantees: a code authenticates exactly once (and a replay says so), a drifted code is accepted once and then spent, recovery codes are unaffected by TOTP single use, an abandoned replacement keeps the existing factor working (the regression where it used to turn MFA off), confirming a replacement promotes the new seed and retires the old one, a Super Admin is never forced to re-enrol after an abandoned reset, seeds are ciphertext at rest and absent from every response, and recovery codes regenerate/step-up correctly |
 | `test_business_role_authorization.py` | the authorization matrix: base permissions for everyone, manager/unit-HR/org-HR/owner/super-admin reach, HR bundle identical across scopes, org scope not conferring owner analytics |
 | `test_business_role_provisioning.py` | role assignment/transfer reconciliation (a moved unit HR cannot keep the old unit's scope), legacy-only rows repaired on write, explicit `null` beating a stale legacy `role`, audited role changes |
@@ -1046,7 +1059,7 @@ These are verified against the current code and are the highest-value item in th
 ### 8.3 Security & correctness notes
 
 * **Stateless access tokens bound the revocation window.** A password change or "sign out everywhere" ends every refresh chain immediately, but an access token already issued stays valid until it expires (15 min business, 5 min privileged) because JWT validation cannot consult the session row. This is deliberate (no per-request session lookup, no cached permissions) and the reason the TTL is minutes — see §2.5.3. A denylist/`jti` check is the upgrade path if that window is ever judged too wide (D7).
-* **Super Admin has organization-wide read scope** via `get_permission_scope`; production posture depends on keeping that account break-glass only. Set `MFA_REQUIRED_FOR_SUPER_ADMIN=true` and enrol before going live — the API logs a startup warning while it is off.
+* **Super Admin is a technical break-glass identity with no workforce scope.** Production startup requires Super Admin MFA, and account-support mutations require recent MFA from the current session plus the current password.
 * **Throttling is only as shared as its store.** `AUTH_THROTTLE_BACKEND=memory` (the default) means each worker counts separately; production validates against this at startup (D9), but a single-worker deployment still has a single point of failure for the counters.
 * **Login throttling feedback**: the BFF forwards the upstream `Retry-After` header and includes the retry countdown in the sign-in error message. The displayed time is the server's retry interval; it is not a client-side lockout timer.
 * **Notification audience isolation**: role broadcasts are limited to the linked employee's current business role; global `system` visibility applies only when no target role is set. Listing, unread counts, mark-all, and single mark-read share the same authorization predicate.
@@ -1117,7 +1130,7 @@ These are verified against the current code and are the highest-value item in th
 
 ### C. Environment variables (backend)
 
-`DATABASE_URL`, `POSTGRES_HOST/PORT/USER/PASSWORD/DB`, `JWT_SECRET`, `ENVIRONMENT`, `ERP_API_KEY`, `API_KEY`, `BOOTSTRAP_SEED_DATA`, `ORGANIZATION_NAME/CODE`, `TIMEZONE`, `CORS_ORIGINS`, `SUPER_ADMIN_EMAIL/USERNAME/PASSWORD/FIRST_NAME/LAST_NAME`, `MAIL_SERVER/PORT/USERNAME/PASSWORD/FROM`, `MAIL_STARTTLS`, `MAIL_SSL_TLS`, `USE_CREDENTIALS`, `VALIDATE_CERTS`, `FRONTEND_URL`, `LOG_LEVEL`, `LOG_FORMAT`, `LOG_TO_FILE`, `LOG_DIR`, `LOG_FILE_NAME`, `LOG_FILE_MAX_BYTES`, `LOG_FILE_BACKUP_COUNT`. Frontend: `NUXT_HRMS_API_BASE` (default `http://127.0.0.1:8000`).
+`DATABASE_URL`, `POSTGRES_HOST/PORT/USER/PASSWORD/DB`, `JWT_SECRET`, `ENVIRONMENT`, `EXPOSE_API_DOCS`, `ERP_API_CLIENTS`, `ERP_SIGNATURE_MAX_AGE_SECONDS`, `ERP_API_KEY` (development only), `BOOTSTRAP_SEED_DATA`, `CORS_ORIGINS`, `SUPER_ADMIN_*`, `AUTH_THROTTLE_BACKEND`, `REDIS_URL`, `MFA_*`, `PASSWORD_*`, mail and logging settings. Frontend: `NUXT_HRMS_API_BASE` (default `http://127.0.0.1:8000`).
 
 ### D. Glossary
 

@@ -7,8 +7,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.auth import verify_erp_api_key
 from core.database import get_async_session
+from core.erp_auth import require_erp_scope
 from db.models import AttendanceRecord, Employee, OvertimeRecord
 
 router = APIRouter(prefix="/integrations/erp/overtime", tags=["erp-overtime"])
@@ -26,7 +26,7 @@ class ErpOvertimeRecord(BaseModel):
     status: str = "APPROVED"
 
 
-@router.post("/records/bulk", dependencies=[Depends(verify_erp_api_key)])
+@router.post("/records/bulk", dependencies=[Depends(require_erp_scope("overtime:write"))])
 async def sync_overtime_bulk(
     records: list[ErpOvertimeRecord] = Body(..., min_length=1, max_length=5000),
     session: AsyncSession = Depends(get_async_session),
@@ -36,7 +36,9 @@ async def sync_overtime_bulk(
     failed: list[dict] = []
     for item in records:
         try:
-            existing = await session.scalar(select(OvertimeRecord).where(OvertimeRecord.erp_event_id == item.erp_event_id))
+            existing = await session.scalar(
+                select(OvertimeRecord).where(OvertimeRecord.erp_event_id == item.erp_event_id)
+            )
             if existing:
                 duplicates.append({"erp_event_id": item.erp_event_id, "id": existing.id})
                 continue

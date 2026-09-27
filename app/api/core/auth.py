@@ -11,16 +11,14 @@ session lifecycle (rotation, revocation, idle/absolute expiry) lives in
 ``services/auth_service.py``.
 """
 
-import secrets
-
-from fastapi import Depends, FastAPI, HTTPException, Request, Security, status
-from fastapi.security import APIKeyHeader
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi_users import BaseUserManager, FastAPIUsers, IntegerIDMixin
 from fastapi_users.authentication import AuthenticationBackend
 from fastapi_users.db import SQLAlchemyUserDatabase
 from fastapi_users.exceptions import InvalidPasswordException
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 from slowapi.util import get_remote_address
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,7 +26,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.business_roles import (
     ELEVATED_BUSINESS_ROLES,
     EMPLOYEE,
-    HR_ADMIN,
     resolve_business_role,
 )
 from core.database import check_database_connection as _check_database_connection
@@ -36,7 +33,8 @@ from core.database import get_async_session
 from core.mobile import normalize_indian_mobile
 from core.password_policy import PasswordCheckContext, PasswordPolicyError, validate_password_policy
 from core.settings import get_settings
-from db.models import Employee, User
+from core.tokens import ACCESS_TOKEN_AUDIENCE, decode_token
+from db.models import AuthSession, Employee, User, now_ist
 from schemas import UserCreate
 
 settings = get_settings()
@@ -184,6 +182,7 @@ from fastapi_users.authentication import BearerTransport
 # dedicated endpoint directly because OAuth2 supports only one tokenUrl here.
 bearer_transport = BearerTransport(tokenUrl="/api/v1/auth/employee/login")
 
+
 def get_jwt_strategy() -> object:
     """Build the JWT strategy used to *validate* bearer tokens.
 
@@ -209,6 +208,42 @@ fastapi_users = FastAPIUsers[User, int](get_user_manager, [auth_backend])
 current_active_user = fastapi_users.current_user(active=True)
 
 
+async def current_sensitive_user(
+    request: Request,
+    user: User = Depends(current_active_user),
+    session: AsyncSession = Depends(get_async_session),
+) -> User:
+    """Require the access token's server-side session to remain live.
+
+    Ordinary business reads accept the short JWT revocation window. Account and
+    security operations use this dependency so a revoked privileged session
+    cannot continue changing credentials until token expiry.
+    """
+    import jwt
+
+    header = request.headers.get("authorization", "")
+    scheme, _, raw_token = header.partition(" ")
+    try:
+        payload = decode_token(raw_token, secret=settings.jwt_secret, audience=ACCESS_TOKEN_AUDIENCE)
+        session_id = int(payload["sid"])
+    except (jwt.PyJWTError, KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session is no longer active") from exc
+    if scheme.lower() != "bearer":
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session is no longer active")
+    auth_session = await session.get(AuthSession, session_id)
+    now = now_ist()
+    if (
+        auth_session is None
+        or auth_session.user_id != user.id
+        or auth_session.revoked_at is not None
+        or auth_session.expires_at <= now
+        or auth_session.absolute_expires_at <= now
+    ):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session is no longer active")
+    request.state.auth_session = auth_session
+    return user
+
+
 async def user_has_permission(user: User, permission_code: str, session: AsyncSession) -> bool:
     """Convenience check: does this user hold the given permission?"""
     permissions = await get_user_permissions(user, session)
@@ -232,28 +267,64 @@ async def get_user_permissions(user: User, session: AsyncSession) -> list[str]:
     """Resolve the effective permission set for a user.
 
     Permissions are the base employee set plus the bundle of the linked
-    employee's elevated business role, if any.  Super Admins receive the full
-    HR bundle they always had; users without an employee profile hold the base
-    employee set.
+    employee's elevated business role, if any. Technical administrators and
+    unlinked accounts are deliberately denied business permissions.
     """
     if user.is_superuser:
-        return sorted(effective_permissions(HR_ADMIN))
+        return sorted(TECHNICAL_ADMIN_PERMISSIONS)
 
     employee = await session.scalar(select(Employee).where(Employee.user_id == user.id))
-    business_role = resolve_business_role(employee) if employee else None
+    if employee is None:
+        return []
+    business_role = resolve_business_role(employee)
     return sorted(effective_permissions(business_role))
+
+
+PASSWORD_CHANGE_REQUIRED = {
+    "code": "PASSWORD_CHANGE_REQUIRED",
+    "message": "Change the temporary password before using People HRMS.",
+}
+TECHNICAL_ADMIN_ONLY = {
+    "code": "TECHNICAL_ADMIN_ONLY",
+    "message": "Technical administrator accounts cannot access workforce operations.",
+}
+WORKFORCE_ACCOUNT_REQUIRED = {
+    "code": "WORKFORCE_ACCOUNT_REQUIRED",
+    "message": "This login account is not linked to an employee record.",
+}
+
+
+async def current_business_user(
+    user: User = Depends(current_active_user),
+    session: AsyncSession = Depends(get_async_session),
+) -> User:
+    """Require an active, fully initialized workforce account.
+
+    Temporary-password sessions are intentionally restricted to account
+    bootstrap routes, and the technical Super Admin is kept outside the ERP
+    and business-role boundary even if a caller bypasses the Nuxt navigation.
+    """
+    if user.must_change_password:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=PASSWORD_CHANGE_REQUIRED)
+    if user.is_superuser:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=TECHNICAL_ADMIN_ONLY)
+    employee_id = await session.scalar(select(Employee.id).where(Employee.user_id == user.id))
+    if employee_id is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=WORKFORCE_ACCOUNT_REQUIRED)
+    return user
 
 
 def require_permission(permission_code: str):
     """FastAPI dependency factory: allow the route only with this permission."""
+
     async def dependency(
-        current_user: User = Depends(fastapi_users.current_user(active=True)),
+        current_user: User = Depends(current_business_user),
         session: AsyncSession = Depends(get_async_session),
     ) -> User:
         if not await user_has_permission(current_user, permission_code, session):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Missing permission: {permission_code}",
+                detail={"code": "FORBIDDEN", "message": "You do not have access to this operation."},
             )
         return current_user
 
@@ -268,32 +339,89 @@ def require_permission(permission_code: str):
 # Employee and are provisioned by ERP; the web UI reads the resolved list from
 # /users/me rather than hard-coding any of this.
 BASE_EMPLOYEE_PERMISSIONS: set[str] = {
-    "employee.view_self", "attendance.view_self", "leave.apply", "leave.view_self",
-    "leave.cancel", "work_arrangement.apply", "work_arrangement.view_self",
-    "work_arrangement.cancel", "shift.view_self", "overtime.view_self",
+    "employee.view_self",
+    "attendance.view_self",
+    "leave.apply",
+    "leave.view_self",
+    "leave.cancel",
+    "work_arrangement.apply",
+    "work_arrangement.view_self",
+    "work_arrangement.cancel",
+    "shift.view_self",
+    "overtime.view_self",
+}
+
+TECHNICAL_ADMIN_PERMISSIONS: set[str] = {
+    "technical.account.view",
+    "technical.account.manage",
+    "technical.system.view",
+    "technical.system.configure",
+    "technical.audit.view",
 }
 
 ROLE_PERMISSIONS: dict[str, set[str]] = {
     "DEPARTMENT_MANAGER": {
-        "employee.view", "attendance.view_department", "leave.approve", "leave.reject",
-        "work_arrangement.approve", "work_arrangement.reject", "overtime.view_department",
-        "overtime.approve", "reports.attendance", "reports.leave",
+        "employee.view",
+        "attendance.view_department",
+        "leave.approve",
+        "leave.reject",
+        "work_arrangement.approve",
+        "work_arrangement.reject",
+        "overtime.view_department",
+        "overtime.approve",
+        "reports.attendance",
+        "reports.leave",
     },
     "HR_ADMIN": {
-        "user.view", "user.create", "user.update", "user.deactivate", "employee.view", "employee.create",
-        "employee.update", "employee.deactivate", "designation.view", "designation.create",
-        "designation.update", "designation.delete", "attendance.view", "attendance.view_unit",
-        "attendance.view_department", "attendance.process", "attendance.correct", "leave.manage",
-        "leave.approve", "leave.reject", "work_arrangement.manage",
-        "work_arrangement.approve", "work_arrangement.reject",
-        "shift.assign", "shift.update", "overtime.approve", "overtime.view_department",
-        "reports.view", "reports.attendance", "reports.leave", "reports.overtime", "reports.salary_cost",
-        "system.configure", "audit.view", "salary_cost.view_unit", "salary_cost.view_department",
+        "user.view",
+        "user.create",
+        "user.update",
+        "user.deactivate",
+        "employee.view",
+        "employee.create",
+        "employee.update",
+        "employee.deactivate",
+        "designation.view",
+        "designation.create",
+        "designation.update",
+        "designation.delete",
+        "attendance.view",
+        "attendance.view_unit",
+        "attendance.view_department",
+        "attendance.process",
+        "attendance.correct",
+        "leave.manage",
+        "leave.approve",
+        "leave.reject",
+        "work_arrangement.manage",
+        "work_arrangement.approve",
+        "work_arrangement.reject",
+        "shift.assign",
+        "shift.update",
+        "overtime.approve",
+        "overtime.view_department",
+        "reports.view",
+        "reports.attendance",
+        "reports.leave",
+        "reports.overtime",
+        "reports.salary_cost",
+        "system.configure",
+        "audit.view",
+        "salary_cost.view_unit",
+        "salary_cost.view_department",
     },
     "ORGANIZATION_OWNER": {
-        "employee.view", "attendance.view", "attendance.view_unit", "attendance.view_department",
-        "overtime.view", "overtime.view_department", "reports.view", "reports.attendance",
-        "reports.leave", "reports.overtime", "dashboard.view_organization",
+        "employee.view",
+        "attendance.view",
+        "attendance.view_unit",
+        "attendance.view_department",
+        "overtime.view",
+        "overtime.view_department",
+        "reports.view",
+        "reports.attendance",
+        "reports.leave",
+        "reports.overtime",
+        "dashboard.view_organization",
     },
 }
 
@@ -306,51 +434,22 @@ assert set(ROLE_PERMISSIONS) == set(ELEVATED_BUSINESS_ROLES)
 # permission-catalog tests; runtime code resolves through
 # ``effective_permissions`` so base permissions stay unduplicated.
 FIXED_ROLE_PERMISSIONS: dict[str, set[str]] = {
-    role: effective_permissions(role)
-    for role in (EMPLOYEE, *ELEVATED_BUSINESS_ROLES)
+    role: effective_permissions(role) for role in (EMPLOYEE, *ELEVATED_BUSINESS_ROLES)
 }
 
 
-limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"], storage_uri="memory://")
+limiter = Limiter(
+    key_func=get_remote_address,
+    default_limits=["200/minute"],
+    storage_uri=settings.redis_url if settings.auth_throttle_backend == "redis" else "memory://",
+)
 
 
 def setup_rate_limits(app: FastAPI) -> None:
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-
-
-def ensure_permission(email: str, path: str, method: str) -> bool:
-    if path in {"/admin"}:
-        return bool(email)
-
-    return bool(email)
+    app.add_middleware(SlowAPIMiddleware)
 
 
 def check_database_connection() -> None:
     _check_database_connection()
-
-
-# ── ERP machine-to-machine authentication ────────────────────────────────────
-
-api_key_header = APIKeyHeader(
-    name="X-API-Key",
-    auto_error=False,
-    description="ERP integration key. Configure ERP_API_KEY on the API server; never expose this key in the browser.",
-)
-
-
-async def verify_api_key(api_key_header: str = Security(api_key_header)):
-    """Validate the ERP integration key sent in the X-API-Key header.
-
-    compare_digest runs in constant time so key length/content cannot be
-    probed via timing differences.
-    """
-    # ERP endpoints carry authoritative workforce data.  They must never fall
-    # back to the generic/development key when ERP_API_KEY is absent.
-    expected = settings.erp_api_key
-    if expected and api_key_header and secrets.compare_digest(api_key_header, expected):
-        return True
-    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Could not validate API KEY")
-
-
-verify_erp_api_key = verify_api_key

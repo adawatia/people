@@ -11,7 +11,16 @@ class DesignationBase(BaseModel):
 
 
 class DesignationCreate(DesignationBase):
-    model_config = ConfigDict(json_schema_extra={"example": {"name": "Senior Engineer", "code": "ENG-SR", "description": "Senior engineering role", "is_active": True}})
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "name": "Senior Engineer",
+                "code": "ENG-SR",
+                "description": "Senior engineering role",
+                "is_active": True,
+            }
+        }
+    )
 
 
 class DesignationUpdate(BaseModel):
@@ -24,6 +33,7 @@ class DesignationUpdate(BaseModel):
 
 class DesignationRead(DesignationBase):
     id: int
+    erp_id: str | None = None
     created_at: datetime
     updated_at: datetime
 

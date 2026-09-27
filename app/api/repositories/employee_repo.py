@@ -1,4 +1,3 @@
-
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -21,11 +20,11 @@ class EmployeeRepository:
         ]
 
     async def get_by_id(self, employee_id: int) -> Employee | None:
-        stmt = (
-            select(Employee)
-            .options(*self._eager_options())
-            .where(Employee.id == employee_id)
-        )
+        stmt = select(Employee).options(*self._eager_options()).where(Employee.id == employee_id)
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def get_by_erp_id(self, erp_id: str) -> Employee | None:
+        stmt = select(Employee).options(*self._eager_options()).where(Employee.erp_id == erp_id)
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
     async def get_by_ids(self, employee_ids: list[int]) -> list[Employee]:
@@ -35,27 +34,15 @@ class EmployeeRepository:
         return list((await self.session.execute(stmt)).scalars().all())
 
     async def get_by_code(self, employee_code: str) -> Employee | None:
-        stmt = (
-            select(Employee)
-            .options(*self._eager_options())
-            .where(Employee.employee_code == employee_code)
-        )
+        stmt = select(Employee).options(*self._eager_options()).where(Employee.employee_code == employee_code)
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
     async def get_by_user_id(self, user_id: int) -> Employee | None:
-        stmt = (
-            select(Employee)
-            .options(*self._eager_options())
-            .where(Employee.user_id == user_id)
-        )
+        stmt = select(Employee).options(*self._eager_options()).where(Employee.user_id == user_id)
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
     async def get_by_email(self, email: str) -> Employee | None:
-        stmt = (
-            select(Employee)
-            .options(*self._eager_options())
-            .where(Employee.official_email == email)
-        )
+        stmt = select(Employee).options(*self._eager_options()).where(Employee.official_email == email)
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
     async def list_paginated(
@@ -111,9 +98,23 @@ class EmployeeRepository:
         total = (await self.session.execute(count_stmt)).scalar_one()
 
         offset = (page - 1) * page_size
-        stmt = ordered(base_query, {"employee_code": Employee.employee_code, "name": Employee.first_name,
-                                   "created_at": Employee.created_at, "status": Employee.status},
-                       sort_by, sort_order, "employee_code", Employee.id).offset(offset).limit(page_size)
+        stmt = (
+            ordered(
+                base_query,
+                {
+                    "employee_code": Employee.employee_code,
+                    "name": Employee.first_name,
+                    "created_at": Employee.created_at,
+                    "status": Employee.status,
+                },
+                sort_by,
+                sort_order,
+                "employee_code",
+                Employee.id,
+            )
+            .offset(offset)
+            .limit(page_size)
+        )
         employees = list((await self.session.execute(stmt)).scalars().all())
 
         return employees, total
@@ -169,10 +170,15 @@ class EmployeeRepository:
         sort_by=None,
         sort_order="desc",
     ):
-        query = (select(EmployeeWorkHistory)
-                 .options(selectinload(EmployeeWorkHistory.unit), selectinload(EmployeeWorkHistory.department),
-                          selectinload(EmployeeWorkHistory.designation))
-                 .where(EmployeeWorkHistory.employee_id == employee_id))
+        query = (
+            select(EmployeeWorkHistory)
+            .options(
+                selectinload(EmployeeWorkHistory.unit),
+                selectinload(EmployeeWorkHistory.department),
+                selectinload(EmployeeWorkHistory.designation),
+            )
+            .where(EmployeeWorkHistory.employee_id == employee_id)
+        )
         if search:
             query = query.where(EmployeeWorkHistory.remarks.icontains(search.strip(), autoescape=True))
         query = ordered(

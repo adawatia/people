@@ -15,6 +15,9 @@ class OrgRepository:
         stmt = select(Organization).order_by(Organization.id).limit(1)
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
+    async def get_organization_by_erp_id(self, erp_id: str) -> Organization | None:
+        return await self.session.scalar(select(Organization).where(Organization.erp_id == erp_id))
+
     async def create_organization(self, organization: Organization) -> Organization:
         self.session.add(organization)
         await self.session.flush()
@@ -30,6 +33,10 @@ class OrgRepository:
 
     async def get_unit_by_id(self, unit_id: int) -> Unit | None:
         stmt = select(Unit).options(selectinload(Unit.departments)).where(Unit.id == unit_id)
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def get_unit_by_erp_id(self, erp_id: str) -> Unit | None:
+        stmt = select(Unit).options(selectinload(Unit.departments)).where(Unit.erp_id == erp_id)
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
     async def create_unit(self, unit: Unit) -> Unit:
@@ -61,6 +68,9 @@ class OrgRepository:
 
     async def get_department_by_id(self, dept_id: int) -> Department | None:
         return await self.session.get(Department, dept_id)
+
+    async def get_department_by_erp_id(self, erp_id: str) -> Department | None:
+        return await self.session.scalar(select(Department).where(Department.erp_id == erp_id))
 
     async def create_department(self, department: Department) -> Department:
         self.session.add(department)

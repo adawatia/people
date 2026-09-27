@@ -15,6 +15,9 @@ class ShiftRepository:
     async def get_by_id(self, shift_id: int) -> Shift | None:
         return await self.session.get(Shift, shift_id)
 
+    async def get_by_erp_id(self, erp_id: str) -> Shift | None:
+        return await self.session.scalar(select(Shift).where(Shift.erp_id == erp_id))
+
     async def get_by_name(self, name: str, unit_id: int | None = None) -> Shift | None:
         stmt = select(Shift).where(Shift.name == name)
         if unit_id is not None:
@@ -196,24 +199,48 @@ class ShiftRepository:
             stmt = stmt.where(ShiftAssignment.status == status.upper())
         return list((await self.session.execute(stmt)).scalars().all())
 
-    async def assignments_page(self, scope, page=1, page_size=25, search=None,
-                               sort_by=None, sort_order="desc", employee_id=None, shift_id=None, status=None):
+    async def assignments_page(
+        self,
+        scope,
+        page=1,
+        page_size=25,
+        search=None,
+        sort_by=None,
+        sort_order="desc",
+        employee_id=None,
+        shift_id=None,
+        status=None,
+    ):
         ids = select(Employee.id)
         if not scope.organization:
-            ids = ids.where(or_(Employee.id.in_(scope.employee_ids), Employee.unit_id.in_(scope.unit_ids),
-                                Employee.department_id.in_(scope.department_ids)))
+            ids = ids.where(
+                or_(
+                    Employee.id.in_(scope.employee_ids),
+                    Employee.unit_id.in_(scope.unit_ids),
+                    Employee.department_id.in_(scope.department_ids),
+                )
+            )
         ids = employee_search(ids, Employee, search)
         query = (
             select(ShiftAssignment)
             .options(selectinload(ShiftAssignment.shift), selectinload(ShiftAssignment.employee))
             .where(ShiftAssignment.employee_id.in_(ids))
         )
-        for column, value in [(ShiftAssignment.employee_id, employee_id), (ShiftAssignment.shift_id, shift_id),
-                              (ShiftAssignment.status, status)]:
+        for column, value in [
+            (ShiftAssignment.employee_id, employee_id),
+            (ShiftAssignment.shift_id, shift_id),
+            (ShiftAssignment.status, status),
+        ]:
             if value is not None:
                 query = query.where(column == value)
-        query = ordered(query, {"effective_from": ShiftAssignment.effective_from, "status": ShiftAssignment.status},
-                        sort_by, sort_order, "effective_from", ShiftAssignment.id)
+        query = ordered(
+            query,
+            {"effective_from": ShiftAssignment.effective_from, "status": ShiftAssignment.status},
+            sort_by,
+            sort_order,
+            "effective_from",
+            ShiftAssignment.id,
+        )
         return await paginate(self.session, query, page, page_size)
 
     async def definitions_page(

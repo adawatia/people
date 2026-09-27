@@ -116,10 +116,10 @@ async def get_employee_scope(user: User, session: AsyncSession) -> EmployeeAcces
 
     Use this when the route already established the *permission* (for example
     with ``require_permission``) and only needs to know which records the
-    caller may touch.  Super Admin keeps the break-glass organization scope.
+    caller may touch. Technical administrators have no workforce row scope.
     """
     if user.is_superuser:
-        return EmployeeAccessScope(organization=True)
+        return EmployeeAccessScope()
     return scope_for_employee(await get_current_employee(user, session))
 
 
@@ -130,7 +130,7 @@ async def get_permission_scope(
 ) -> EmployeeAccessScope:
     """Row scope for a user *for one permission code*.
 
-    - Super Admin → whole organization.
+    - Super Admin → empty (technical accounts are not business identities).
     - Anyone lacking the permission → an empty scope (no access at all).
     - Otherwise the scope of their business role: SELF, DEPARTMENT, UNIT or
       ORGANIZATION (an HR admin's scope follows the assigned access scope).
@@ -139,7 +139,7 @@ async def get_permission_scope(
     accept multiple permission codes merge scopes themselves via `include`.
     """
     if user.is_superuser:
-        return EmployeeAccessScope(organization=True)
+        return EmployeeAccessScope()
     employee = await get_current_employee(user, session)
     if not await _holds_permission(user, permission_code, session):
         return EmployeeAccessScope()

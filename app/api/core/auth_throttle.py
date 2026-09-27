@@ -79,11 +79,8 @@ def _rules(settings: Settings, *, scope: str) -> tuple[ThrottleRule, ...]:
     No rule ever blocks permanently: the block doubles per extra failure and is
     capped, and any successful authentication clears all three counters.
     """
-    base_max = (
-        settings.auth_throttle_max_failures
-        if scope == "login"
-        else settings.auth_refresh_max_failures
-    )
+    strict_scopes = {"login", "mfa", "password_recovery", "step_up", "invitation"}
+    base_max = settings.auth_throttle_max_failures if scope in strict_scopes else settings.auth_refresh_max_failures
     return (
         ThrottleRule(
             kind="ip_account",
@@ -197,9 +194,7 @@ class RedisThrottleStore:
         try:
             from redis.asyncio import Redis
         except ImportError as exc:  # pragma: no cover - depends on install
-            raise RuntimeError(
-                "AUTH_THROTTLE_BACKEND=redis requires the 'redis' package (uv add redis)."
-            ) from exc
+            raise RuntimeError("AUTH_THROTTLE_BACKEND=redis requires the 'redis' package (uv add redis).") from exc
         self._client = Redis.from_url(url, encoding="utf-8", decode_responses=True)
 
     def describe(self) -> str:
@@ -288,7 +283,7 @@ class AuthThrottle:
 
     def _block_seconds_for(self, rule: ThrottleRule, attempts: int) -> int:
         over = max(0, attempts - rule.max_failures)
-        return min(rule.block_seconds * (2 ** over), rule.max_block_seconds)
+        return min(rule.block_seconds * (2**over), rule.max_block_seconds)
 
     async def check(
         self,

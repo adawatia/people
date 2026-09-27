@@ -72,10 +72,14 @@ def test_refresh_tokens_are_long_random_and_stored_only_as_hashes():
     assert first not in token_fingerprint(first)
 
 
+TEST_SIGNING_SECRET = "test-signing-secret-at-least-32-bytes"
+OTHER_SIGNING_SECRET = "other-signing-secret-at-least-32-bytes"
+
+
 def test_access_token_carries_the_service_audience_and_never_a_challenge_one():
     now = now_ist()
-    token = create_access_token(subject=7, secret="test-secret", ttl_seconds=900, now=now, session_id=3)
-    payload = decode_token(token, secret="test-secret", audience=ACCESS_TOKEN_AUDIENCE)
+    token = create_access_token(subject=7, secret=TEST_SIGNING_SECRET, ttl_seconds=900, now=now, session_id=3)
+    payload = decode_token(token, secret=TEST_SIGNING_SECRET, audience=ACCESS_TOKEN_AUDIENCE)
     assert payload["sub"] == "7"
     assert payload["sid"] == 3
     assert payload["typ"] == "access"
@@ -83,23 +87,25 @@ def test_access_token_carries_the_service_audience_and_never_a_challenge_one():
     # An MFA challenge is signed with the same key but a different audience, so
     # presenting it as a bearer token must fail.
     challenge = create_mfa_challenge_token(
-        subject=7, secret="test-secret", ttl_seconds=300, now=now, enrollment_required=True
+        subject=7, secret=TEST_SIGNING_SECRET, ttl_seconds=300, now=now, enrollment_required=True
     )
     with pytest.raises(jwt.InvalidAudienceError):
-        decode_token(challenge, secret="test-secret", audience=ACCESS_TOKEN_AUDIENCE)
-    assert decode_token(challenge, secret="test-secret", audience=MFA_CHALLENGE_AUDIENCE)["enrol"] is True
+        decode_token(challenge, secret=TEST_SIGNING_SECRET, audience=ACCESS_TOKEN_AUDIENCE)
+    assert decode_token(challenge, secret=TEST_SIGNING_SECRET, audience=MFA_CHALLENGE_AUDIENCE)["enrol"] is True
 
 
 def test_expired_access_tokens_are_rejected():
-    stale = create_access_token(subject=1, secret="test-secret", ttl_seconds=1, now=now_ist() - timedelta(minutes=5))
+    stale = create_access_token(
+        subject=1, secret=TEST_SIGNING_SECRET, ttl_seconds=1, now=now_ist() - timedelta(minutes=5)
+    )
     with pytest.raises(jwt.ExpiredSignatureError):
-        decode_token(stale, secret="test-secret")
+        decode_token(stale, secret=TEST_SIGNING_SECRET)
 
 
 def test_a_token_signed_with_another_key_is_rejected():
-    token = create_access_token(subject=1, secret="test-secret", ttl_seconds=900, now=now_ist())
+    token = create_access_token(subject=1, secret=TEST_SIGNING_SECRET, ttl_seconds=900, now=now_ist())
     with pytest.raises(jwt.InvalidSignatureError):
-        decode_token(token, secret="different-secret")
+        decode_token(token, secret=OTHER_SIGNING_SECRET)
 
 
 def test_business_login_identity_is_mobile_or_username_not_email():
@@ -207,9 +213,6 @@ def _check(password: str, **context: str) -> None:
     "password",
     [
         "Short1!",  # under the minimum length
-        "alllowercaseletters",  # no uppercase/digit/symbol
-        "NOLOWERCASE123!",  # no lowercase
-        "NoDigitsOrSymbols",  # no digit/symbol
         "Password@123456",  # on the common-password list
         "Qwerty12345!",  # keyboard run, caught by the local checker
     ],
@@ -229,6 +232,11 @@ def test_password_must_not_contain_personal_information():
 
 def test_a_strong_passphrase_is_accepted_and_long_passwords_are_allowed():
     _check(PASSWORD)
+    # Composition rules are intentionally absent: long, strong values do not
+    # need an uppercase letter, digit, or symbol merely to satisfy a checklist.
+    _check("alllowercaseletters")
+    _check("NOLOWERCASE123!")
+    _check("NoDigitsOrSymbols")
     # Passphrases and password-manager output are welcome: the ceiling is 256.
     _check("gT7#vQ2$mL9!zR4&wK1^")
     with pytest.raises(PasswordPolicyError, match="at most"):
@@ -270,9 +278,7 @@ def _throttle(settings: Settings = SMALL) -> AuthThrottle:
 
 def test_repeated_failures_from_one_ip_and_account_block_that_pair():
     throttle = _throttle()
-    decisions = [
-        run_async(throttle.record_failure(ip="10.0.0.1", account="acct-a", scope="login")) for _ in range(3)
-    ]
+    decisions = [run_async(throttle.record_failure(ip="10.0.0.1", account="acct-a", scope="login")) for _ in range(3)]
     assert [decision.allowed for decision in decisions[:2]] == [True, True]
     assert decisions[-1].allowed is False
     assert decisions[-1].retry_after_seconds == 10
@@ -360,7 +366,10 @@ def test_store_backend_selection_fails_loudly_on_misconfiguration():
         build_store(Settings(auth_throttle_backend="redis", redis_url=""))
 
     if importlib.util.find_spec("redis") is not None:
-        assert build_store(Settings(auth_throttle_backend="redis", redis_url="redis://localhost:6379/0")).describe() == "redis"
+        assert (
+            build_store(Settings(auth_throttle_backend="redis", redis_url="redis://localhost:6379/0")).describe()
+            == "redis"
+        )
     else:
         # Multi-worker deployments need a shared store; asking for one without
         # the client installed must be an error, not per-worker limits.

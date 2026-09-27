@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.auth import fastapi_users
+from core.auth import current_business_user
 from core.business_roles import (
     DEPARTMENT_MANAGER,
     HR_ADMIN,
@@ -99,7 +99,9 @@ async def create_notification(
     return notif
 
 
-@router.get("", response_model=PaginatedResponse[NotificationRead], summary="Fetch recent notifications for logged in user")
+@router.get(
+    "", response_model=PaginatedResponse[NotificationRead], summary="Fetch recent notifications for logged in user"
+)
 async def get_notifications(
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=100),
@@ -107,32 +109,36 @@ async def get_notifications(
     search: str | None = None,
     sort_by: NotificationSort | None = None,
     sort_order: str = Query("desc", pattern="^(asc|desc)$"),
-    current_user: User = Depends(fastapi_users.current_user(active=True)),
+    current_user: User = Depends(current_business_user),
     session: AsyncSession = Depends(get_async_session),
 ):
     filt = await build_notification_filter(current_user, session)
-    return await NotificationRepository(session).list_page(
-        filt, page, page_size, unread, search, sort_by, sort_order)
+    repository = NotificationRepository(session)
+    result = await repository.list_page(filt, current_user.id, page, page_size, unread, search, sort_by, sort_order)
+    read_ids = await repository.read_notification_ids(
+        current_user.id, [item.notification_id for item in result["items"]]
+    )
+    result["items"] = [
+        NotificationRead.model_validate(item).model_copy(update={"is_read": item.notification_id in read_ids})
+        for item in result["items"]
+    ]
+    return result
 
 
 @router.get("/unread-count", response_model=NotificationUnreadCount, summary="Get unread notifications count")
 async def get_unread_count(
-    current_user: User = Depends(fastapi_users.current_user(active=True)),
+    current_user: User = Depends(current_business_user),
     session: AsyncSession = Depends(get_async_session),
 ):
     filt = await build_notification_filter(current_user, session)
-    query = select(func.count(Notification.notification_id)).where(Notification.is_read.is_(False))
-    if filt is not None:
-        query = query.where(filt)
-
-    count = await session.scalar(query) or 0
+    count = await NotificationRepository(session).unread_count(filt, current_user.id)
     return NotificationUnreadCount(unread_count=count)
 
 
 @router.patch("/{id}/read", response_model=NotificationRead, summary="Mark single notification as read")
 async def mark_notification_read(
     id: int,
-    current_user: User = Depends(fastapi_users.current_user(active=True)),
+    current_user: User = Depends(current_business_user),
     session: AsyncSession = Depends(get_async_session),
 ):
     notif = await session.get(Notification, id)
@@ -152,23 +158,17 @@ async def mark_notification_read(
             detail="Not authorized to mark this notification as read.",
         )
 
-    notif.is_read = True
+    await NotificationRepository(session).mark_read(notif.notification_id, current_user.id)
     await session.commit()
-    await session.refresh(notif)
-    return notif
+    return NotificationRead.model_validate(notif).model_copy(update={"is_read": True})
 
 
 @router.post("/mark-all-read", summary="Mark all visible notifications as read")
 async def mark_all_read(
-    current_user: User = Depends(fastapi_users.current_user(active=True)),
+    current_user: User = Depends(current_business_user),
     session: AsyncSession = Depends(get_async_session),
 ):
     filt = await build_notification_filter(current_user, session)
-    query = update(Notification).where(Notification.is_read.is_(False))
-    if filt is not None:
-        query = query.where(filt)
-    query = query.values(is_read=True)
-
-    await session.execute(query)
+    await NotificationRepository(session).mark_visible_read(filt, current_user.id)
     await session.commit()
     return {"message": "All notifications marked as read"}

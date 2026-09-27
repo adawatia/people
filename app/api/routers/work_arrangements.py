@@ -3,7 +3,7 @@ from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.auth import fastapi_users, require_permission
+from core.auth import current_business_user, require_permission
 from core.database import get_async_session
 from core.employee_access import (
     get_current_employee,
@@ -35,17 +35,13 @@ async def list_work_arrangements(
     sort_order: str = Query("desc", pattern="^(asc|desc)$"),
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=100),
-    current_user: User = Depends(fastapi_users.current_user(active=True)),
+    current_user: User = Depends(current_business_user),
     session: AsyncSession = Depends(get_async_session),
 ) -> PaginatedResponse[WorkArrangementRead]:
     service = WorkArrangementService(session)
     scope = await get_permission_scope(current_user, "work_arrangement.manage", session)
-    scope.include(
-        await get_permission_scope(current_user, "work_arrangement.approve", session)
-    )
-    scope.include(
-        await get_permission_scope(current_user, "work_arrangement.reject", session)
-    )
+    scope.include(await get_permission_scope(current_user, "work_arrangement.approve", session))
+    scope.include(await get_permission_scope(current_user, "work_arrangement.reject", session))
     if employee_id is not None:
         employee = await service.employee_repo.get_by_id(employee_id)
         if employee is None:
@@ -65,8 +61,11 @@ async def list_work_arrangements(
         employee_id = (await get_current_employee(current_user, session)).id
 
     return await service.list_requests_page(
-        page=page, page_size=page_size,
-        search=search, sort_by=sort_by, sort_order=sort_order,
+        page=page,
+        page_size=page_size,
+        search=search,
+        sort_by=sort_by,
+        sort_order=sort_order,
         employee_id=employee_id,
         status=status_filter,
         arrangement_type=arrangement_type,
@@ -80,7 +79,7 @@ async def list_work_arrangements(
 @router.get("/{req_id}", response_model=WorkArrangementRead)
 async def get_work_arrangement(
     req_id: int,
-    current_user: User = Depends(fastapi_users.current_user(active=True)),
+    current_user: User = Depends(current_business_user),
     session: AsyncSession = Depends(get_async_session),
 ) -> WorkArrangementRead:
     service = WorkArrangementService(session)
@@ -104,7 +103,7 @@ async def get_work_arrangement(
 @router.post("/", response_model=WorkArrangementRead, status_code=status.HTTP_201_CREATED)
 async def create_work_arrangement(
     data: WorkArrangementCreate,
-    current_user: User = Depends(fastapi_users.current_user(active=True)),
+    current_user: User = Depends(current_business_user),
     session: AsyncSession = Depends(get_async_session),
 ) -> WorkArrangementRead:
     service = WorkArrangementService(session)
@@ -151,7 +150,7 @@ async def reject_work_arrangement(
 @router.patch("/{req_id}/cancel", response_model=WorkArrangementRead)
 async def cancel_work_arrangement(
     req_id: int,
-    current_user: User = Depends(fastapi_users.current_user(active=True)),
+    current_user: User = Depends(current_business_user),
     session: AsyncSession = Depends(get_async_session),
 ) -> WorkArrangementRead:
     service = WorkArrangementService(session)

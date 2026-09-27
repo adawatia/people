@@ -1,12 +1,10 @@
 """Human authentication: business login, Super Admin login, credential changes.
-
 Three authentication domains stay separate (see the architecture reference):
 business users, the Super Admin technical identity, and ERP machine auth
 (``/api/v1/integrations/erp/**``).  Business *roles* never choose a login
 endpoint — an employee, manager, unit HR, organization HR and organization owner
 all authenticate through ``/auth/employee/login`` and only then have their
 permissions and scope resolved.
-
 Both login endpoints now issue a session directly (access + rotating refresh)
 instead of a long-lived intermediate bearer token, and both are throttled by
 account, source IP and the pair.
@@ -25,10 +23,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.audit import add_audit_event
-from core.auth import UserManager, fastapi_users, get_user_manager, require_permission, verify_erp_api_key
+from core.auth import UserManager, current_sensitive_user, get_user_manager, require_permission
 from core.auth_throttle import AuthThrottle, get_auth_throttle
 from core.database import get_async_session
 from core.employee_access import require_employee_access
+from core.erp_auth import require_erp_scope
 from core.mobile import normalize_indian_mobile
 from core.request_context import client_ip, request_id, user_agent
 from core.settings import get_settings
@@ -53,18 +52,21 @@ from services.auth_service import (
 )
 
 router = APIRouter(prefix="/auth")
-
 PASSWORD_RECOVERY_GENERIC = "If the account is eligible, continue with your authenticator code."
 
 
 class PasswordChangeRequest(BaseModel):
     current_password: str = Field(min_length=1)
-    new_password: str = Field(min_length=12)
-    model_config = {"json_schema_extra": {"example": {"current_password": "CurrentPassword@123", "new_password": "NewStrongPassword@456"}}}
+    new_password: str = Field(min_length=1)
+    model_config = {
+        "json_schema_extra": {
+            "example": {"current_password": "CurrentPassword@123", "new_password": "NewStrongPassword@456"}
+        }
+    }
 
 
 class TemporaryPasswordRequest(BaseModel):
-    temporary_password: str = Field(min_length=12)
+    temporary_password: str = Field(min_length=1)
     model_config = {"json_schema_extra": {"example": {"temporary_password": "TemporaryPassword@123"}}}
 
 
@@ -73,12 +75,13 @@ class UsernameChangeRequest(BaseModel):
     # Changing the identifier of a break-glass account is a credential change, so
     # it is a step-up operation: the current password must be supplied again.
     current_password: str = Field(min_length=1)
-    model_config = {"json_schema_extra": {"example": {"username": "platform.admin", "current_password": "CurrentPassword@123"}}}
+    model_config = {
+        "json_schema_extra": {"example": {"username": "platform.admin", "current_password": "CurrentPassword@123"}}
+    }
 
 
 def normalize_business_identity(identity: str) -> str:
     """Resolve a business login identifier.
-
     The login field accepts only an Indian mobile number or username. Email is
     deliberately not a login identifier; it remains account metadata and a
     future recovery-channel option.
@@ -131,10 +134,8 @@ async def _authenticate_human(
     policy_scope = "login"
     identity = (form.username or "").strip()
     key = account_key(identity or "anonymous")
-
     if not identity:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=INVALID_CREDENTIALS)
-
     if not super_admin:
         try:
             identity = normalize_business_identity(identity)
@@ -149,10 +150,7 @@ async def _authenticate_human(
     elif identity.startswith("+") or identity.isdigit() or "@" in identity:
         await record_throttle_failure(throttle, request=request, account=key, scope=policy_scope)
         raise HTTPException(status_code=400, detail="This sign-in uses a username")
-
-    user = await manager.authenticate(
-        type("Credentials", (), {"username": identity, "password": form.password})()
-    )
+    user = await manager.authenticate(type("Credentials", (), {"username": identity, "password": form.password})())
     if user is None or not user.is_active:
         await record_throttle_failure(throttle, request=request, account=key, scope=policy_scope)
         await AuthService(session).record_login(
@@ -166,7 +164,6 @@ async def _authenticate_human(
             request_id=request_id(request),
         )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=INVALID_CREDENTIALS)
-
     if super_admin and not user.is_superuser:
         # Same generic message: a valid employee credential must not learn that a
         # privileged endpoint exists, let alone that this account is not it.
@@ -182,7 +179,6 @@ async def _authenticate_human(
             request_id=request_id(request),
         )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=INVALID_CREDENTIALS)
-
     employee = None
     if not super_admin:
         employee = await session.scalar(select(Employee).where(Employee.user_id == user.id))
@@ -204,7 +200,6 @@ async def _authenticate_human(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="This account is a technical account. Use the technical sign-in.",
             )
-
     return user, employee
 
 
@@ -228,9 +223,7 @@ async def _login(
         throttle=throttle,
         super_admin=super_admin,
     )
-
     await throttle.record_success(ip=client_ip(request), account=account, scope="login")
-
     if service.mfa_required(user):
         challenge = await service.begin_mfa_challenge(
             user,
@@ -249,7 +242,6 @@ async def _login(
             request_id=request_id(request),
         )
         return _mfa_payload(challenge)
-
     issued = await service.issue_session(
         user,
         ip_address=client_ip(request),
@@ -288,9 +280,7 @@ async def employee_login(
     session: AsyncSession = Depends(get_async_session),
     throttle: AuthThrottle = Depends(get_auth_throttle),
 ):
-    return await _login(
-        form, manager, session, request, throttle, super_admin=False
-    )
+    return await _login(form, manager, session, request, throttle, super_admin=False)
 
 
 @router.post(
@@ -311,9 +301,7 @@ async def super_admin_login(
     session: AsyncSession = Depends(get_async_session),
     throttle: AuthThrottle = Depends(get_auth_throttle),
 ):
-    return await _login(
-        form, manager, session, request, throttle, super_admin=True
-    )
+    return await _login(form, manager, session, request, throttle, super_admin=True)
 
 
 @router.post(
@@ -433,25 +421,27 @@ async def reset_password_with_recovery(
 async def change_password(
     payload: PasswordChangeRequest,
     request: Request,
-    user: User = Depends(fastapi_users.current_user(active=True)),
+    user: User = Depends(current_sensitive_user),
     manager: UserManager = Depends(get_user_manager),
     session: AsyncSession = Depends(get_async_session),
+    throttle: AuthThrottle = Depends(get_auth_throttle),
 ):
     """Rotate the password and end every session, including this one.
-
     Deliberate policy: a password change invalidates all outstanding refresh
     tokens, so a stolen session cannot survive the remediation.  The user signs in
     again with the new password — for privileged accounts that is also the
     required behaviour.
     """
+    account = AuthThrottle.account_key(f"user:{user.id}")
+    await guard_throttle(throttle, request=request, account=account, scope="step_up")
     verified, _ = manager.password_helper.verify_and_update(payload.current_password, user.hashed_password)
     if not verified:
+        await record_throttle_failure(throttle, request=request, account=account, scope="step_up")
         raise HTTPException(status_code=400, detail="Current password is incorrect")
     try:
         await manager.validate_password(payload.new_password, user)
     except InvalidPasswordException as exc:
         raise HTTPException(status_code=400, detail=exc.reason) from exc
-
     user.hashed_password = manager.password_helper.hash(payload.new_password)
     user.must_change_password = False
     service = AuthService(session)
@@ -462,6 +452,7 @@ async def change_password(
         ip_address=client_ip(request),
         request_id=request_id(request),
     )
+    await throttle.record_success(ip=client_ip(request), account=account, scope="step_up")
     return {
         "message": "Password changed. All sessions were ended — sign in again with your new password.",
         "reauthentication_required": True,
@@ -472,22 +463,24 @@ async def change_password(
 async def change_super_admin_username(
     payload: UsernameChangeRequest,
     request: Request,
-    user: User = Depends(fastapi_users.current_user(active=True)),
+    user: User = Depends(current_sensitive_user),
     manager: UserManager = Depends(get_user_manager),
     session: AsyncSession = Depends(get_async_session),
+    throttle: AuthThrottle = Depends(get_auth_throttle),
 ):
     """Step-up protected: the current password is re-verified before the change."""
     if not user.is_superuser:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Technical administrator access required")
+    account = AuthThrottle.account_key(f"user:{user.id}")
+    await guard_throttle(throttle, request=request, account=account, scope="step_up")
     verified, _ = manager.password_helper.verify_and_update(payload.current_password, user.hashed_password)
     if not verified:
+        await record_throttle_failure(throttle, request=request, account=account, scope="step_up")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect")
-
     username = payload.username.strip()
     existing = await session.scalar(select(User).where(User.username == username, User.id != user.id))
     if existing:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="That username is already in use")
-
     user.username = username
     add_audit_event(
         session,
@@ -500,6 +493,7 @@ async def change_super_admin_username(
         request_id=request_id(request),
     )
     await session.commit()
+    await throttle.record_success(ip=client_ip(request), account=account, scope="step_up")
     return {"message": "Username updated successfully", "username": username}
 
 
@@ -555,7 +549,7 @@ async def hr_password_reset(
     "/integrations/erp/employees/{employee_id}/password-reset",
     tags=["erp-employees"],
     summary="ERP set employee temporary password",
-    dependencies=[Depends(verify_erp_api_key)],
+    dependencies=[Depends(require_erp_scope("identity:write"))],
 )
 async def erp_password_reset(
     employee_id: int,

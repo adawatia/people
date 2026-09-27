@@ -8,8 +8,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from core.auth import verify_erp_api_key
 from core.database import get_async_session
+from core.erp_auth import require_erp_scope
 from db.models import Employee, LeaveApplication, LeaveBalance, LeaveType, now_ist
 
 router = APIRouter(prefix="/integrations/erp/leaves", tags=["erp-leaves"])
@@ -23,7 +23,6 @@ class ErpLeaveBalance(BaseModel):
     allocated: float = Field(default=0, ge=0)
     used: float = Field(default=0, ge=0)
     pending: float = Field(default=0, ge=0)
-
     model_config = {
         "json_schema_extra": {
             "examples": [
@@ -40,7 +39,7 @@ class ErpLeaveBalance(BaseModel):
     }
 
 
-@router.get("/changes", dependencies=[Depends(verify_erp_api_key)])
+@router.get("/changes", dependencies=[Depends(require_erp_scope("leaves:read"))])
 async def get_leave_changes(
     since: datetime | None = Query(None, description="Return events updated after this timestamp"),
     limit: int = Query(100, ge=1, le=500),
@@ -78,7 +77,7 @@ async def get_leave_changes(
     }
 
 
-@router.post("/changes/ack", dependencies=[Depends(verify_erp_api_key)])
+@router.post("/changes/ack", dependencies=[Depends(require_erp_scope("leaves:write"))])
 async def acknowledge_leave_changes(
     event_ids: list[str],
     session: AsyncSession = Depends(get_async_session),
@@ -95,7 +94,7 @@ async def acknowledge_leave_changes(
     return {"acknowledged": sorted(found), "unknown": sorted(set(event_ids) - found)}
 
 
-@router.post("/balances", dependencies=[Depends(verify_erp_api_key)])
+@router.post("/balances", dependencies=[Depends(require_erp_scope("leaves:write"))])
 async def sync_leave_balances(
     balances: list[ErpLeaveBalance],
     session: AsyncSession = Depends(get_async_session),
@@ -113,11 +112,13 @@ async def sync_leave_balances(
                 raise ValueError(f"Employee {identity!r} not found")
             if leave_type is None:
                 raise ValueError(f"Leave type code {item.leave_code.upper()!r} not found")
-            balance = await session.scalar(select(LeaveBalance).where(
-                LeaveBalance.employee_id == employee.id,
-                LeaveBalance.leave_type_id == leave_type.id,
-                LeaveBalance.year == item.year,
-            ))
+            balance = await session.scalar(
+                select(LeaveBalance).where(
+                    LeaveBalance.employee_id == employee.id,
+                    LeaveBalance.leave_type_id == leave_type.id,
+                    LeaveBalance.year == item.year,
+                )
+            )
             if balance is None:
                 balance = LeaveBalance(employee_id=employee.id, leave_type_id=leave_type.id, year=item.year)
                 session.add(balance)
@@ -134,7 +135,7 @@ async def sync_leave_balances(
 
 @router.post(
     "/balances/bulk",
-    dependencies=[Depends(verify_erp_api_key)],
+    dependencies=[Depends(require_erp_scope("leaves:write"))],
     summary="Bulk sync ERP leave balances",
     description="Synchronizes balances for multiple employees, leave types, and years in one request.",
 )

@@ -6,6 +6,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.erp_sync import acquire_erp_upsert_lock
 from db.models import Employee, Shift, ShiftAssignment, now_ist
 from repositories.employee_repo import EmployeeRepository
 from repositories.shift_repo import ShiftRepository
@@ -96,6 +97,14 @@ class ShiftService:
 
     async def create_shift(self, data: ShiftCreate) -> ShiftRead:
         """Create a shift; start > end (e.g. 22:00 → 06:00) means a night shift."""
+        payload = self._shift_payload(data)
+        shift = Shift(**payload)
+        created = await self.repo.create_shift(shift)
+        await self.session.commit()
+        await self.session.refresh(created)
+        return ShiftRead.model_validate(created)
+
+    def _shift_payload(self, data: ShiftCreate) -> dict:
         start = self.parse_time(data.start_time)
         end = self.parse_time(data.end_time)
         if start == end:
@@ -111,12 +120,7 @@ class ShiftService:
         payload["start_time"] = start
         payload["end_time"] = end
         payload["is_cross_midnight"] = is_cross_midnight
-
-        shift = Shift(**payload)
-        created = await self.repo.create_shift(shift)
-        await self.session.commit()
-        await self.session.refresh(created)
-        return ShiftRead.model_validate(created)
+        return payload
 
     async def update_shift(self, shift_id: int, data: ShiftUpdate) -> ShiftRead:
         shift = await self.get_shift(shift_id)
@@ -143,6 +147,20 @@ class ShiftService:
         await self.session.refresh(shift)
         return ShiftRead.model_validate(shift)
 
+    async def upsert_shift(self, erp_id: str, data: ShiftCreate) -> ShiftRead:
+        await acquire_erp_upsert_lock(self.session, "shift", erp_id)
+        shift = await self.repo.get_by_erp_id(erp_id)
+        if shift is None:
+            shift = Shift(erp_id=erp_id, **self._shift_payload(data))
+            await self.repo.create_shift(shift)
+        else:
+            payload = self._shift_payload(data)
+            for key, value in payload.items():
+                setattr(shift, key, value)
+        await self.session.commit()
+        await self.session.refresh(shift)
+        return ShiftRead.model_validate(shift)
+
     # ── Shift Assignment Logic ─────────────────────────────────────────────────
 
     @staticmethod
@@ -151,8 +169,16 @@ class ShiftService:
         if assignment.shift:
             r.shift_name = assignment.shift.name
             r.shift_code = assignment.shift.code
-            r.start_time = assignment.shift.start_time.strftime("%H:%M") if hasattr(assignment.shift.start_time, "strftime") else str(assignment.shift.start_time)
-            r.end_time = assignment.shift.end_time.strftime("%H:%M") if hasattr(assignment.shift.end_time, "strftime") else str(assignment.shift.end_time)
+            r.start_time = (
+                assignment.shift.start_time.strftime("%H:%M")
+                if hasattr(assignment.shift.start_time, "strftime")
+                else str(assignment.shift.start_time)
+            )
+            r.end_time = (
+                assignment.shift.end_time.strftime("%H:%M")
+                if hasattr(assignment.shift.end_time, "strftime")
+                else str(assignment.shift.end_time)
+            )
         if assignment.employee:
             r.employee_name = f"{assignment.employee.first_name} {assignment.employee.last_name or ''}".strip()
             r.employee_code = assignment.employee.employee_code

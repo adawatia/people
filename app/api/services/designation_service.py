@@ -1,6 +1,7 @@
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.erp_sync import acquire_erp_upsert_lock
 from db.models import Designation
 from repositories.designation_repo import DesignationRepository
 from schemas.designations import DesignationCreate, DesignationUpdate
@@ -72,7 +73,20 @@ class DesignationService:
         await self.session.refresh(designation)
         return designation
 
+    async def upsert_designation(self, erp_id: str, data: DesignationCreate) -> Designation:
+        await acquire_erp_upsert_lock(self.session, "designation", erp_id)
+        designation = await self.repo.get_by_erp_id(erp_id)
+        if designation is None:
+            designation = Designation(**data.model_dump(), erp_id=erp_id)
+            await self.repo.create(designation)
+        else:
+            for key, value in data.model_dump().items():
+                setattr(designation, key, value)
+        await self.session.commit()
+        await self.session.refresh(designation)
+        return designation
+
     async def delete_designation(self, designation_id: int) -> None:
         designation = await self.get_designation(designation_id)
-        await self.repo.delete(designation)
+        designation.is_active = False
         await self.session.commit()

@@ -6,10 +6,8 @@ The command is a read-only preview unless every destructive guard is supplied::
     uv run python cleanup_db.py --execute --confirm "DELETE ALL HRMS DATA"
     uv run python cleanup_db.py --execute --confirm "DELETE ALL HRMS DATA" --reseed-bootstrap
 
-``alembic_version`` is always preserved so the remaining schema stays aligned
-with the migration history. Stop the API before executing this command: in a
-development environment, API startup may recreate bootstrap organization and
-Super Admin rows.
+``alembic_version`` and Super Admin login accounts are preserved by default so
+the cleaned installation remains recoverable. Stop the API before executing.
 """
 
 from __future__ import annotations
@@ -26,7 +24,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from core.settings import get_settings
 
 CONFIRMATION = "DELETE ALL HRMS DATA"
-PRESERVED_TABLES = frozenset({"alembic_version"})
+PRESERVED_TABLES = frozenset({"alembic_version", "users"})
 LOCAL_HOSTS = frozenset({None, "", "localhost", "127.0.0.1", "::1"})
 
 
@@ -60,6 +58,11 @@ def parse_args() -> argparse.Namespace:
         "--reseed-bootstrap",
         action="store_true",
         help="Recreate the bootstrap organization and Super Admin from environment settings after cleanup.",
+    )
+    parser.add_argument(
+        "--delete-super-admin",
+        action="store_true",
+        help="Also delete Super Admin accounts. Use only when --reseed-bootstrap will recreate one.",
     )
     return parser.parse_args()
 
@@ -97,6 +100,8 @@ def validate_execution(args: argparse.Namespace, url: URL) -> None:
         raise CleanupRefused(
             f"Refusing to clean ENVIRONMENT={settings.environment!r}; add --allow-production only for an intentional reset."
         )
+    if args.delete_super_admin and not args.reseed_bootstrap:
+        raise CleanupRefused("--delete-super-admin requires --reseed-bootstrap so the database stays accessible.")
 
 
 async def reseed_bootstrap() -> None:
@@ -113,7 +118,8 @@ async def reseed_bootstrap() -> None:
 def print_preview(url: URL, schema: str, tables: Sequence[str]) -> None:
     print(f"Database: {url.render_as_string(hide_password=True)}")
     print(f"Schema:   {schema}")
-    print(f"Preserved: {', '.join(sorted(PRESERVED_TABLES))}")
+    print("Preserved: alembic_version and Super Admin login accounts")
+    print("Workforce login accounts in users will be deleted.")
     if not tables:
         print("No application tables were found.")
         return
@@ -134,6 +140,8 @@ def main() -> int:
         engine = create_engine(url, pool_pre_ping=True)
         with engine.connect() as connection:
             tables = application_tables(connection, args.schema)
+        if args.delete_super_admin:
+            tables = sorted([*tables, "users"])
         print_preview(url, args.schema, tables)
 
         if not args.execute:
@@ -146,6 +154,9 @@ def main() -> int:
         statement = f"TRUNCATE TABLE {qualified_tables(engine, args.schema, tables)} RESTART IDENTITY CASCADE"
         with engine.begin() as connection:
             connection.exec_driver_sql(statement)
+            if not args.delete_super_admin:
+                users_table = qualified_tables(engine, args.schema, ["users"])
+                connection.exec_driver_sql(f"DELETE FROM {users_table} WHERE is_superuser IS NOT TRUE")
         print(f"\nEmptied {len(tables)} application tables and reset their owned identity sequences.")
         if args.reseed_bootstrap:
             asyncio.run(reseed_bootstrap())
@@ -155,10 +166,7 @@ def main() -> int:
                 f"({settings.super_admin_username!r}, {settings.super_admin_email!r})."
             )
         else:
-            print(
-                "The Super Admin was deleted with the other rows. Development API startup recreates it, "
-                "or rerun cleanup with --reseed-bootstrap."
-            )
+            print("Super Admin login accounts were preserved; workforce accounts were removed.")
         return 0
     except (CleanupRefused, OSError, RuntimeError, SQLAlchemyError) as exc:
         print(f"Database cleanup failed: {exc}", file=sys.stderr)

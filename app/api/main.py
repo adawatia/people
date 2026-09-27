@@ -53,12 +53,12 @@ async def lifespan(_: FastAPI):
     # an API worker cannot unexpectedly create a privileged account.
     if is_development or settings.bootstrap_seed_data:
         await ensure_seed_data()
-    
+
     # Start the background task for cleaning up notifications
     cleanup_task = asyncio.create_task(notification_cleanup_loop())
-    
+
     yield
-    
+
     logger.info("Shutting down HRMS API")
     cleanup_task.cancel()
     try:
@@ -73,24 +73,39 @@ app = FastAPI(
     title="HRMS API",
     version="0.1.0",
     description="People HRMS API. ERP is the source of truth for employee and organization master data.",
-    docs_url="/docs",
-    redoc_url="/redoc",
-    openapi_url="/openapi.json",
+    docs_url="/docs" if settings.is_development or settings.expose_api_docs else None,
+    redoc_url="/redoc" if settings.is_development or settings.expose_api_docs else None,
+    openapi_url="/openapi.json" if settings.is_development or settings.expose_api_docs else None,
     lifespan=lifespan,
     openapi_tags=[
         {"name": "auth-employee", "description": "Regular employee login using Indian mobile number and password."},
         {"name": "auth-super-admin", "description": "Technical Super Admin login using username and password only."},
         {"name": "auth-account", "description": "Authenticated account password and username management."},
-        {"name": "auth-session", "description": "Short-lived access tokens, rotating refresh sessions and signed-in devices."},
+        {
+            "name": "auth-session",
+            "description": "Short-lived access tokens, rotating refresh sessions and signed-in devices.",
+        },
         {"name": "auth-hr", "description": "HR Admin temporary password operations for employee accounts."},
-        {"name": "account", "description": "The authenticated account profile and permissions. Employee provisioning is ERP-only."},
-        {"name": "employees", "description": "Read and manage employee operational records. Creation and identity provisioning are ERP-only."},
+        {
+            "name": "account",
+            "description": "The authenticated account profile and permissions. Employee provisioning is ERP-only.",
+        },
+        {
+            "name": "employees",
+            "description": "Read and manage employee operational records. Creation and identity provisioning are ERP-only.",
+        },
         {"name": "erp-employees", "description": "ERP-only employee and linked-user provisioning and synchronization."},
         {"name": "erp-organization", "description": "ERP-only updates for the single organization record."},
         {"name": "erp-units", "description": "ERP-only unit creation, updates, and deletion."},
         {"name": "erp-departments", "description": "ERP-only department creation, updates, and deletion."},
-        {"name": "erp-designations", "description": "ERP-only designation creation, updates, activation, and deletion."},
-        {"name": "erp-attendance", "description": "ERP-only attendance punches, records, corrections, and reconciliation."},
+        {
+            "name": "erp-designations",
+            "description": "ERP-only designation creation, updates, activation, and deletion.",
+        },
+        {
+            "name": "erp-attendance",
+            "description": "ERP-only attendance punches, records, corrections, and reconciliation.",
+        },
         {"name": "erp-shifts", "description": "ERP-only shifts and employee shift assignments."},
         {"name": "erp-holidays", "description": "ERP-only organization-wide holiday synchronization."},
         {"name": "erp-overtime", "description": "ERP-only overtime record synchronization."},
@@ -111,13 +126,18 @@ CORS_ORIGINS = [
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
-    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|10\.0\.2\.2|192\.168\.\d+\.\d+)(:\d+)?$",
+    allow_origin_regex=(
+        r"^https?://(localhost|127\.0\.0\.1|10\.0\.2\.2|192\.168\.\d+\.\d+)(:\d+)?$"
+        if settings.is_development
+        else None
+    ),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 setup_rate_limits(app)
+
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
@@ -157,6 +177,7 @@ async def log_requests(request: Request, call_next):
 
 from routers import (
     attendance,
+    audit,
     auth_login,
     dashboard,
     designations,
@@ -181,6 +202,7 @@ from routers import (
 
 api_router = APIRouter(prefix="/api/v1")
 
+api_router.include_router(audit.router)
 api_router.include_router(users.router)
 api_router.include_router(notifications.router)
 api_router.include_router(auth_login.router)
@@ -211,12 +233,23 @@ app.include_router(api_router)
 def custom_openapi() -> dict:
     if app.openapi_schema:
         return app.openapi_schema
-    schema = get_openapi(title=app.title, version=app.version, description=app.description, routes=app.routes, tags=app.openapi_tags)
+    schema = get_openapi(
+        title=app.title, version=app.version, description=app.description, routes=app.routes, tags=app.openapi_tags
+    )
     schemes = schema.setdefault("components", {}).setdefault("securitySchemes", {})
     schemes["SuperAdminOAuth2"] = {
         "type": "oauth2",
         "flows": {"password": {"scopes": {}, "tokenUrl": "/api/v1/auth/super-admin/login"}},
         "description": "Super Admin username/password flow. Use the returned access token as Bearer authentication.",
+    }
+    schemes["ErpHmac"] = {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-ERP-Signature",
+        "description": (
+            "HMAC-SHA256 over METHOD, path with query, X-ERP-Timestamp, X-ERP-Nonce, and the SHA-256 body hash, "
+            "joined by newlines. X-ERP-Client-ID, X-ERP-Timestamp, X-ERP-Nonce, and X-ERP-Signature are all required."
+        ),
     }
     for path_item in schema.get("paths", {}).values():
         for operation in path_item.values():
@@ -225,11 +258,18 @@ def custom_openapi() -> dict:
             security = operation.get("security", [])
             if any("OAuth2PasswordBearer" in item for item in security):
                 operation["security"] = [{"OAuth2PasswordBearer": []}, {"SuperAdminOAuth2": []}]
+    for path, path_item in schema.get("paths", {}).items():
+        if not path.startswith("/api/v1/integrations/erp"):
+            continue
+        for operation in path_item.values():
+            if isinstance(operation, dict):
+                operation["security"] = [{"ErpHmac": []}]
     app.openapi_schema = schema
     return schema
 
 
 app.openapi = custom_openapi
+
 
 @app.get("/")
 def root() -> dict[str, str]:
@@ -248,7 +288,8 @@ def health(request: Request) -> dict[str, object]:
         db_detail = "database reachable"
     except Exception as exc:  # pragma: no cover - defensive runtime guard
         db_status = "disconnected"
-        db_detail = str(exc)
+        logger.error("health database check failed", exc_info=exc)
+        db_detail = "database unavailable"
 
     elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
     uptime_seconds = round(time.monotonic() - APP_START_TIME, 3)
@@ -267,15 +308,13 @@ def health(request: Request) -> dict[str, object]:
     }
 
 
-
 @app.get("/db-health")
 def db_health() -> dict[str, str]:
     try:
         check_database_connection()
     except Exception as exc:
-        raise HTTPException(
-            status_code=503, detail=f"database unavailable: {exc}"
-        ) from exc
+        logger.error("database health check failed", exc_info=exc)
+        raise HTTPException(status_code=503, detail="database unavailable") from exc
 
     return {"database": "connected"}
 

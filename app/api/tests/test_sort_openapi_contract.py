@@ -1,6 +1,7 @@
 from main import app
 
 EXPECTED_SORT_FIELDS = {
+    "/api/v1/audit": {"created_at", "action", "entity_type", "id"},
     "/api/v1/attendance/": {"attendance_date", "status", "id"},
     "/api/v1/attendance/checkins": {"punch_time", "punch_type", "source", "is_processed", "id"},
     "/api/v1/attendance/corrections": {"requested_at", "status", "id"},
@@ -20,6 +21,7 @@ EXPECTED_SORT_FIELDS = {
     "/api/v1/reports/leave-summary": {"employee_code", "name"},
     "/api/v1/shifts/": {"name", "code", "start_time", "id"},
     "/api/v1/shifts/assignments": {"effective_from", "status"},
+    "/api/v1/users/admin/accounts": {"username", "email", "created_at", "is_active", "id"},
     "/api/v1/work-arrangements/": {"created_at", "status", "id"},
 }
 

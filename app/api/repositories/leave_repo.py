@@ -58,6 +58,7 @@ class LeaveRepository:
 
     async def list_balances(self, employee_id: int, year: int) -> list:
         from db.models import LeaveBalance
+
         stmt = (
             select(LeaveBalance)
             .options(selectinload(LeaveBalance.leave_type))
@@ -190,6 +191,21 @@ class LeaveRepository:
         )
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
+    async def get_application_by_id_for_update(self, application_id: int) -> LeaveApplication | None:
+        """Lock one application so exactly one concurrent state transition wins."""
+        stmt = (
+            select(LeaveApplication)
+            .options(
+                selectinload(LeaveApplication.employee),
+                selectinload(LeaveApplication.leave_type),
+                selectinload(LeaveApplication.leave_period),
+            )
+            .where(LeaveApplication.id == application_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
     async def find_overlapping_application(
         self,
         employee_id: int,
@@ -293,5 +309,12 @@ class LeaveRepository:
         if search:
             ids = employee_search(select(Employee.id), Employee, search)
             stmt = stmt.where(LeaveApplication.employee_id.in_(ids))
-        stmt = ordered(stmt, {"applied_at": LeaveApplication.applied_at, "status": LeaveApplication.status, "id": LeaveApplication.id}, sort_by, sort_order, "applied_at", LeaveApplication.id)
+        stmt = ordered(
+            stmt,
+            {"applied_at": LeaveApplication.applied_at, "status": LeaveApplication.status, "id": LeaveApplication.id},
+            sort_by,
+            sort_order,
+            "applied_at",
+            LeaveApplication.id,
+        )
         return await paginate(self.session, stmt, page, page_size)

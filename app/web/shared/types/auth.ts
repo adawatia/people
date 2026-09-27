@@ -94,3 +94,30 @@ export interface SessionSummary {
   user_agent?: string | null
   is_current: boolean
 }
+
+/** Workforce login metadata exposed only in Technical Administration. */
+export interface TechnicalAccount {
+  id: number
+  username: string
+  email: string
+  first_name?: string | null
+  last_name?: string | null
+  mobile_number?: string | null
+  is_active: boolean
+  is_verified: boolean
+  must_change_password: boolean
+  mfa_enabled: boolean
+  created_at: string
+  employee_id?: number | null
+  employee_code?: string | null
+  employee_role?: string | null
+}
+
+export interface TechnicalAccountActionResponse {
+  message: string
+  revoked_sessions: number
+}
+
+export interface TemporaryPasswordResponse extends TechnicalAccountActionResponse {
+  temporary_password: string
+}

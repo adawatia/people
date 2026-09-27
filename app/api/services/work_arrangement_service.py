@@ -47,6 +47,7 @@ class WorkArrangementService:
         from sqlalchemy import select
 
         from db.models import LeaveApplication
+
         leave_stmt = select(LeaveApplication).where(
             LeaveApplication.employee_id == data.employee_id,
             LeaveApplication.status.in_(["PENDING", "APPROVED", "CANCELLATION_PENDING"]),
@@ -80,7 +81,7 @@ class WorkArrangementService:
         request_id: int,
         actioned_by_user_id: int,
     ) -> WorkArrangementRead:
-        req = await self.repo.get_by_id(request_id)
+        req = await self.repo.get_by_id_for_update(request_id)
         if not req:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Work arrangement request not found")
         if req.status != "PENDING":
@@ -129,7 +130,7 @@ class WorkArrangementService:
         actioned_by_user_id: int,
         rejection_reason: str | None = None,
     ) -> WorkArrangementRead:
-        req = await self.repo.get_by_id(request_id)
+        req = await self.repo.get_by_id_for_update(request_id)
         if not req:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Work arrangement request not found")
         if req.status != "PENDING":
@@ -156,11 +157,13 @@ class WorkArrangementService:
         request_id: int,
         cancelled_by_user_id: int,
     ) -> WorkArrangementRead:
-        req = await self.repo.get_by_id(request_id)
+        req = await self.repo.get_by_id_for_update(request_id)
         if not req:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Work arrangement request not found")
         if req.status not in ("PENDING", "APPROVED"):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only PENDING or APPROVED requests can be cancelled")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Only PENDING or APPROVED requests can be cancelled"
+            )
 
         was_approved = req.status == "APPROVED"
         req.status = "CANCELLED"
@@ -181,7 +184,6 @@ class WorkArrangementService:
         await self.session.commit()
         await self.session.refresh(req)
         return WorkArrangementRead.model_validate(req)
-
 
     async def get_request(self, request_id: int) -> WorkArrangementRead:
         req = await self.repo.get_by_id(request_id)
@@ -228,8 +230,11 @@ class WorkArrangementService:
         if from_date and to_date and from_date > to_date:
             raise HTTPException(422, "Start date must not be after end date")
         result = await self.repo.list_requests_page(
-            page=page, page_size=page_size,
-            search=search, sort_by=sort_by, sort_order=sort_order,
+            page=page,
+            page_size=page_size,
+            search=search,
+            sort_by=sort_by,
+            sort_order=sort_order,
             employee_id=employee_id,
             status=status,
             arrangement_type=arrangement_type,

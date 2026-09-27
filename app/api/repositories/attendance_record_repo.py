@@ -71,9 +71,7 @@ class AttendanceRecordRepository:
         if status is not None:
             stmt = stmt.where(AttendanceRecord.status == status.upper())
         if unit_id is not None:
-            stmt = stmt.join(Employee, AttendanceRecord.employee_id == Employee.id).where(
-                Employee.unit_id == unit_id
-            )
+            stmt = stmt.join(Employee, AttendanceRecord.employee_id == Employee.id).where(Employee.unit_id == unit_id)
         elif unit_ids or department_ids:
             stmt = stmt.join(Employee, AttendanceRecord.employee_id == Employee.id)
             filters = []
@@ -119,9 +117,7 @@ class AttendanceRecordRepository:
         if status is not None:
             stmt = stmt.where(AttendanceRecord.status == status.upper())
         if unit_id is not None:
-            stmt = stmt.join(Employee, AttendanceRecord.employee_id == Employee.id).where(
-                Employee.unit_id == unit_id
-            )
+            stmt = stmt.join(Employee, AttendanceRecord.employee_id == Employee.id).where(Employee.unit_id == unit_id)
         elif unit_ids or department_ids:
             stmt = stmt.join(Employee, AttendanceRecord.employee_id == Employee.id)
             filters = []
@@ -134,7 +130,18 @@ class AttendanceRecordRepository:
         if search:
             ids = employee_search(select(Employee.id), Employee, search)
             stmt = stmt.where(AttendanceRecord.employee_id.in_(ids))
-        stmt = ordered(stmt, {"attendance_date": AttendanceRecord.attendance_date, "status": AttendanceRecord.status, "id": AttendanceRecord.id}, sort_by, sort_order, "attendance_date", AttendanceRecord.id)
+        stmt = ordered(
+            stmt,
+            {
+                "attendance_date": AttendanceRecord.attendance_date,
+                "status": AttendanceRecord.status,
+                "id": AttendanceRecord.id,
+            },
+            sort_by,
+            sort_order,
+            "attendance_date",
+            AttendanceRecord.id,
+        )
         return await paginate(self.session, stmt, page, page_size)
 
     async def get_month_records(
@@ -155,9 +162,15 @@ class AttendanceRecordRepository:
         return list((await self.session.execute(stmt)).scalars().all())
 
     async def get_correction_by_id(self, correction_id: int) -> AttendanceCorrectionRequest | None:
+        stmt = select(AttendanceCorrectionRequest).where(AttendanceCorrectionRequest.id == correction_id)
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def get_correction_by_id_for_update(self, correction_id: int) -> AttendanceCorrectionRequest | None:
         stmt = (
             select(AttendanceCorrectionRequest)
             .where(AttendanceCorrectionRequest.id == correction_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
@@ -227,7 +240,18 @@ class AttendanceRecordRepository:
             ids = employee_search(select(Employee.id), Employee, search)
             record_ids = select(AttendanceRecord.id).where(AttendanceRecord.employee_id.in_(ids))
             stmt = stmt.where(AttendanceCorrectionRequest.attendance_record_id.in_(record_ids))
-        stmt = ordered(stmt, {"requested_at": AttendanceCorrectionRequest.requested_at, "status": AttendanceCorrectionRequest.status, "id": AttendanceCorrectionRequest.id}, sort_by, sort_order, "requested_at", AttendanceCorrectionRequest.id)
+        stmt = ordered(
+            stmt,
+            {
+                "requested_at": AttendanceCorrectionRequest.requested_at,
+                "status": AttendanceCorrectionRequest.status,
+                "id": AttendanceCorrectionRequest.id,
+            },
+            sort_by,
+            sort_order,
+            "requested_at",
+            AttendanceCorrectionRequest.id,
+        )
         return await paginate(self.session, stmt, page, page_size)
 
     async def delete(self, record: AttendanceRecord) -> None:
@@ -237,5 +261,6 @@ class AttendanceRecordRepository:
     async def pending_correction_ids(self, record_ids):
         query = select(AttendanceCorrectionRequest.attendance_record_id).where(
             AttendanceCorrectionRequest.attendance_record_id.in_(record_ids),
-            AttendanceCorrectionRequest.status == "PENDING")
+            AttendanceCorrectionRequest.status == "PENDING",
+        )
         return set((await self.session.scalars(query)).all())

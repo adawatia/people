@@ -11,6 +11,9 @@ class DesignationRepository:
     async def get_by_id(self, designation_id: int) -> Designation | None:
         return await self.session.get(Designation, designation_id)
 
+    async def get_by_erp_id(self, erp_id: str) -> Designation | None:
+        return await self.session.scalar(select(Designation).where(Designation.erp_id == erp_id))
+
     async def get_by_name(self, name: str) -> Designation | None:
         stmt = select(Designation).where(Designation.name == name)
         return (await self.session.execute(stmt)).scalar_one_or_none()

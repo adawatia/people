@@ -2,13 +2,12 @@
 
 Design notes (deliberate, documented because this is a security control):
 
-* **Length first.** Minimum 12 characters, and the ceiling is generous (256) so
+* **Length first.** Minimum 15 characters, and the ceiling is generous (256) so
   passphrases and password-manager output are never rejected.  Argon2 (the
   configured hasher) has no bcrypt-style 72-byte truncation, so a long password
   is verified in full.
-* **Composition rules are kept.** They add little against a targeted attacker,
-  but removing a control that exists today would be a silent weakening of the
-  policy; they stay and are documented instead.
+* **No composition rules.** NIST SP 800-63B favors length and compromised-value
+  screening over predictable upper/lower/digit/symbol requirements.
 * **Strength scoring.** zxcvbn must rate the password at least 3/4, considering
   the user's own name/email/username as inputs.
 * **Breach checking is pluggable and fail-open.** A password check must never
@@ -44,15 +43,74 @@ class PasswordPolicyError(ValueError):
 # to be a full corpus (that is what the remote checker is for).
 COMMON_PASSWORDS: frozenset[str] = frozenset(
     {
-        "password", "password1", "password123", "password@123", "passw0rd", "p@ssw0rd", "p@ssword123",
-        "123456", "1234567", "12345678", "123456789", "1234567890", "12345678910", "111111", "000000",
-        "qwerty", "qwerty123", "qwertyuiop", "1q2w3e4r", "1qaz2wsx", "asdfghjkl", "zxcvbnm",
-        "letmein", "welcome", "welcome1", "welcome@123", "welcome123", "admin", "administrator", "admin@123",
-        "root", "toor", "changeme", "changeit", "trustno1", "monkey", "dragon", "sunshine", "football",
-        "baseball", "superman", "batman", "iloveyou", "princess", "whatever", "abc123", "abcd1234",
-        "india123", "india@123", "hrms", "hrms@123", "hrms@1234", "people@123", "people123", "people@1234",
-        "datlabs", "datlabs@123", "temp1234", "temporary@123", "test@1234", "test1234", "demo@1234",
-        "employee@123", "company@123", "office@123", "summer2026", "winter2026", "spring2026",
+        "password",
+        "password1",
+        "password123",
+        "password@123",
+        "passw0rd",
+        "p@ssw0rd",
+        "p@ssword123",
+        "123456",
+        "1234567",
+        "12345678",
+        "123456789",
+        "1234567890",
+        "12345678910",
+        "111111",
+        "000000",
+        "qwerty",
+        "qwerty123",
+        "qwertyuiop",
+        "1q2w3e4r",
+        "1qaz2wsx",
+        "asdfghjkl",
+        "zxcvbnm",
+        "letmein",
+        "welcome",
+        "welcome1",
+        "welcome@123",
+        "welcome123",
+        "admin",
+        "administrator",
+        "admin@123",
+        "root",
+        "toor",
+        "changeme",
+        "changeit",
+        "trustno1",
+        "monkey",
+        "dragon",
+        "sunshine",
+        "football",
+        "baseball",
+        "superman",
+        "batman",
+        "iloveyou",
+        "princess",
+        "whatever",
+        "abc123",
+        "abcd1234",
+        "india123",
+        "india@123",
+        "hrms",
+        "hrms@123",
+        "hrms@1234",
+        "people@123",
+        "people123",
+        "people@1234",
+        "datlabs",
+        "datlabs@123",
+        "temp1234",
+        "temporary@123",
+        "test@1234",
+        "test1234",
+        "demo@1234",
+        "employee@123",
+        "company@123",
+        "office@123",
+        "summer2026",
+        "winter2026",
+        "spring2026",
     }
 )
 
@@ -154,14 +212,6 @@ def _check_composition(password: str, settings: Settings) -> None:
         raise PasswordPolicyError(f"Password must be at least {settings.password_min_length} characters long")
     if len(password) > settings.password_max_length:
         raise PasswordPolicyError(f"Password must be at most {settings.password_max_length} characters long")
-    if not re.search(r"[A-Z]", password):
-        raise PasswordPolicyError("Password must contain at least one uppercase letter")
-    if not re.search(r"[a-z]", password):
-        raise PasswordPolicyError("Password must contain at least one lowercase letter")
-    if not re.search(r"\d", password):
-        raise PasswordPolicyError("Password must contain at least one number")
-    if not re.search(r"[^A-Za-z0-9]", password):
-        raise PasswordPolicyError("Password must contain at least one special character")
 
 
 def _squash(value: str) -> str:

@@ -3,7 +3,7 @@ from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.auth import fastapi_users, require_permission, verify_erp_api_key
+from core.auth import current_business_user, require_permission
 from core.database import get_async_session
 from core.employee_access import (
     EmployeeAccessScope,
@@ -11,6 +11,7 @@ from core.employee_access import (
     get_permission_scope,
     require_employee_access,
 )
+from core.erp_auth import require_erp_scope
 from core.pagination import PaginatedResponse
 from core.sorting import LeaveApplicationSort, LookupSort
 from db.models import LeavePeriod, LeaveType, User
@@ -31,7 +32,6 @@ from services.leave_service import LeaveService
 from services.lookup_service import LookupService
 
 router = APIRouter(prefix="/leaves", tags=["leaves"])
-
 LEAVE_MANAGEMENT_PERMISSIONS = ("leave.manage", "leave.approve", "leave.reject")
 
 
@@ -43,7 +43,6 @@ async def _leave_management_scope(user: User, session: AsyncSession) -> Employee
 
 
 # ── Leave Periods ─────────────────────────────────────────────────────────────
-
 @router.get("/periods", response_model=PaginatedResponse[LeavePeriodRead])
 async def list_leave_periods(
     page: int = Query(1, ge=1),
@@ -51,7 +50,7 @@ async def list_leave_periods(
     search: str | None = None,
     sort_by: LookupSort | None = None,
     sort_order: str = Query("asc", pattern="^(asc|desc)$"),
-    _: User = Depends(fastapi_users.current_user(active=True)),
+    _: User = Depends(current_business_user),
     session: AsyncSession = Depends(get_async_session),
 ) -> PaginatedResponse[LeavePeriodRead]:
     return await LookupService(session).list_page(
@@ -69,7 +68,7 @@ async def list_leave_periods(
     "/periods",
     response_model=LeavePeriodRead,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(verify_erp_api_key)],
+    dependencies=[Depends(require_erp_scope("leave-master:write"))],
     tags=["erp-leaves"],
     summary="ERP create leave period",
     description="ERP-only leave-period master-data sync. Requires the X-API-Key header.",
@@ -83,7 +82,6 @@ async def create_leave_period(
 
 
 # ── Leave Types ───────────────────────────────────────────────────────────────
-
 @router.get("/types", response_model=PaginatedResponse[LeaveTypeRead])
 async def list_leave_types(
     is_active: bool | None = Query(True),
@@ -92,7 +90,7 @@ async def list_leave_types(
     search: str | None = None,
     sort_by: LookupSort | None = None,
     sort_order: str = Query("asc", pattern="^(asc|desc)$"),
-    _: User = Depends(fastapi_users.current_user(active=True)),
+    _: User = Depends(current_business_user),
     session: AsyncSession = Depends(get_async_session),
 ) -> PaginatedResponse[LeaveTypeRead]:
     return await LookupService(session).list_page(
@@ -110,7 +108,7 @@ async def list_leave_types(
     "/types",
     response_model=LeaveTypeRead,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(verify_erp_api_key)],
+    dependencies=[Depends(require_erp_scope("leave-master:write"))],
     tags=["erp-leaves"],
     summary="ERP create leave type",
     description="ERP-only leave-type master-data sync. Requires the X-API-Key header.",
@@ -126,7 +124,7 @@ async def create_leave_type(
 @router.get("/types/{type_id}", response_model=LeaveTypeRead)
 async def get_leave_type(
     type_id: int,
-    _: User = Depends(fastapi_users.current_user(active=True)),
+    _: User = Depends(current_business_user),
     session: AsyncSession = Depends(get_async_session),
 ) -> LeaveTypeRead:
     service = LeaveService(session)
@@ -137,7 +135,7 @@ async def get_leave_type(
 @router.patch(
     "/types/{type_id}",
     response_model=LeaveTypeRead,
-    dependencies=[Depends(verify_erp_api_key)],
+    dependencies=[Depends(require_erp_scope("leave-master:write"))],
     tags=["erp-leaves"],
     summary="ERP update leave type",
     description="ERP-only leave-type master-data update. Requires the X-API-Key header.",
@@ -152,12 +150,11 @@ async def update_leave_type(
 
 
 # ── Leave Balances ────────────────────────────────────────────────────────────
-
 @router.get("/balance/employee/{emp_id}", response_model=list[LeaveBalanceRead])
 async def get_leave_balance(
     emp_id: int,
     for_date: date | None = Query(None),
-    current_user: User = Depends(fastapi_users.current_user(active=True)),
+    current_user: User = Depends(current_business_user),
     session: AsyncSession = Depends(get_async_session),
 ) -> list[LeaveBalanceRead]:
     service = LeaveService(session)
@@ -171,7 +168,6 @@ async def get_leave_balance(
 
 
 # ── Leave Applications ────────────────────────────────────────────────────────
-
 @router.get("/", response_model=PaginatedResponse[LeaveApplicationRead])
 async def list_leave_applications(
     employee_id: int | None = None,
@@ -183,7 +179,7 @@ async def list_leave_applications(
     sort_order: str = Query("desc", pattern="^(asc|desc)$"),
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=100),
-    current_user: User = Depends(fastapi_users.current_user(active=True)),
+    current_user: User = Depends(current_business_user),
     session: AsyncSession = Depends(get_async_session),
 ) -> PaginatedResponse[LeaveApplicationRead]:
     service = LeaveService(session)
@@ -202,8 +198,11 @@ async def list_leave_applications(
     elif scope.self_only:
         employee_id = (await get_current_employee(current_user, session)).id
     return await service.list_applications_page(
-        page=page, page_size=page_size,
-        search=search, sort_by=sort_by, sort_order=sort_order,
+        page=page,
+        page_size=page_size,
+        search=search,
+        sort_by=sort_by,
+        sort_order=sort_order,
         employee_id=employee_id,
         status=status_filter,
         from_date=from_date,
@@ -216,7 +215,7 @@ async def list_leave_applications(
 @router.get("/{app_id}", response_model=LeaveApplicationRead)
 async def get_leave_application(
     app_id: int,
-    current_user: User = Depends(fastapi_users.current_user(active=True)),
+    current_user: User = Depends(current_business_user),
     session: AsyncSession = Depends(get_async_session),
 ) -> LeaveApplicationRead:
     service = LeaveService(session)
@@ -236,7 +235,7 @@ async def get_leave_application(
 @router.post("/", response_model=LeaveApplicationRead, status_code=status.HTTP_201_CREATED)
 async def apply_leave(
     data: LeaveApplicationCreate,
-    current_user: User = Depends(fastapi_users.current_user(active=True)),
+    current_user: User = Depends(current_business_user),
     session: AsyncSession = Depends(get_async_session),
 ) -> LeaveApplicationRead:
     service = LeaveService(session)
@@ -281,7 +280,7 @@ async def reject_leave(
 async def cancel_leave(
     app_id: int,
     request: LeaveCancellationRequest | None = None,
-    current_user: User = Depends(fastapi_users.current_user(active=True)),
+    current_user: User = Depends(current_business_user),
     session: AsyncSession = Depends(get_async_session),
 ) -> LeaveApplicationRead:
     service = LeaveService(session)

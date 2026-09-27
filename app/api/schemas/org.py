@@ -41,6 +41,7 @@ class OrganizationUpdate(BaseModel):
 
 class OrganizationRead(OrganizationBase):
     id: int
+    erp_id: str | None = None
     created_at: datetime
     updated_at: datetime
     model_config = ConfigDict(from_attributes=True)
@@ -54,7 +55,9 @@ class DepartmentBase(BaseModel):
 
 class DepartmentCreate(DepartmentBase):
     unit_id: int
-    model_config = ConfigDict(json_schema_extra={"example": {"name": "Engineering", "code": "ENG", "unit_id": 1, "is_active": True}})
+    model_config = ConfigDict(
+        json_schema_extra={"example": {"name": "Engineering", "code": "ENG", "unit_id": 1, "is_active": True}}
+    )
 
 
 class DepartmentUpdate(BaseModel):
@@ -66,6 +69,7 @@ class DepartmentUpdate(BaseModel):
 
 class DepartmentRead(DepartmentBase):
     id: int
+    erp_id: str | None = None
     unit_id: int
     created_at: datetime
     updated_at: datetime
@@ -80,7 +84,9 @@ class UnitBase(BaseModel):
 
 
 class UnitCreate(UnitBase):
-    model_config = ConfigDict(json_schema_extra={"example": {"name": "Mumbai Unit", "code": "MUM", "city": "Mumbai", "is_active": True}})
+    model_config = ConfigDict(
+        json_schema_extra={"example": {"name": "Mumbai Unit", "code": "MUM", "city": "Mumbai", "is_active": True}}
+    )
 
 
 class UnitUpdate(BaseModel):
@@ -93,6 +99,7 @@ class UnitUpdate(BaseModel):
 
 class UnitRead(UnitBase):
     id: int
+    erp_id: str | None = None
     organization_id: int
     created_at: datetime
     updated_at: datetime

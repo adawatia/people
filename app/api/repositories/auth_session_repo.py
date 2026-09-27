@@ -30,6 +30,7 @@ class AuthSessionRepository:
         token_hash: str,
         expires_at: datetime,
         absolute_expires_at: datetime,
+        mfa_verified_at: datetime | None = None,
         ip_address: str | None = None,
         user_agent: str | None = None,
     ) -> AuthSession:
@@ -40,6 +41,7 @@ class AuthSessionRepository:
             expires_at=expires_at,
             absolute_expires_at=absolute_expires_at,
             last_used_at=None,
+            mfa_verified_at=mfa_verified_at,
             ip_address=(ip_address or None) and ip_address[:64],
             user_agent=(user_agent or None) and user_agent[:255],
         )

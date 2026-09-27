@@ -1,3 +1,4 @@
+import json
 from functools import lru_cache
 
 from pydantic import Field
@@ -19,6 +20,7 @@ class Settings(BaseSettings):
     )
     jwt_secret: str = Field(default="hrms-jwt-secret-key-32chars-min-2026-auth", alias="JWT_SECRET")
     environment: str = Field(default="development", alias="ENVIRONMENT")
+    expose_api_docs: bool = Field(default=False, alias="EXPOSE_API_DOCS")
 
     # Logging (12-factor: stdout by default; file appender is opt-in, e.g. prod)
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
@@ -49,12 +51,14 @@ class Settings(BaseSettings):
     mail_ssl_tls: bool = Field(default=False, alias="MAIL_SSL_TLS")
     use_credentials: bool = Field(default=True, alias="USE_CREDENTIALS")
     validate_certs: bool = Field(default=True, alias="VALIDATE_CERTS")
-    
+
     frontend_url: str = Field(default="http://192.168.103.20:3000", alias="FRONTEND_URL")
 
     # API Keys for M2M Integration
     api_key: str = Field(default="hrms_api_key_dev_only", alias="API_KEY")
     erp_api_key: str = Field(default="", alias="ERP_API_KEY")
+    erp_api_clients: str = Field(default="", alias="ERP_API_CLIENTS")
+    erp_signature_max_age_seconds: int = Field(default=300, ge=30, le=900, alias="ERP_SIGNATURE_MAX_AGE_SECONDS")
     bootstrap_seed_data: bool = Field(default=False, alias="BOOTSTRAP_SEED_DATA")
 
     # ── Authentication: token and session policy ───────────────────────────────
@@ -73,9 +77,13 @@ class Settings(BaseSettings):
     session_idle_timeout_seconds: int = Field(default=60 * 60, ge=300, alias="SESSION_IDLE_TIMEOUT_SECONDS")
     session_absolute_timeout_seconds: int = Field(default=12 * 3600, ge=1800, alias="SESSION_ABSOLUTE_TIMEOUT_SECONDS")
     # Privileged (Super Admin) sessions are deliberately much tighter.
-    privileged_access_token_ttl_seconds: int = Field(default=300, ge=60, le=900, alias="PRIVILEGED_ACCESS_TOKEN_TTL_SECONDS")
+    privileged_access_token_ttl_seconds: int = Field(
+        default=300, ge=60, le=900, alias="PRIVILEGED_ACCESS_TOKEN_TTL_SECONDS"
+    )
     privileged_idle_timeout_seconds: int = Field(default=15 * 60, ge=120, alias="PRIVILEGED_IDLE_TIMEOUT_SECONDS")
-    privileged_absolute_timeout_seconds: int = Field(default=2 * 3600, ge=600, alias="PRIVILEGED_ABSOLUTE_TIMEOUT_SECONDS")
+    privileged_absolute_timeout_seconds: int = Field(
+        default=2 * 3600, ge=600, alias="PRIVILEGED_ABSOLUTE_TIMEOUT_SECONDS"
+    )
 
     # ── Authentication: brute-force protection ────────────────────────────────
     # failed attempts before a key starts collecting a progressive delay / block.
@@ -102,6 +110,9 @@ class Settings(BaseSettings):
     mfa_challenge_ttl_seconds: int = Field(default=300, ge=60, le=900, alias="MFA_CHALLENGE_TTL_SECONDS")
     password_recovery_ttl_seconds: int = Field(default=600, ge=60, le=1800, alias="PASSWORD_RECOVERY_TTL_SECONDS")
     mfa_pending_ttl_seconds: int = Field(default=900, ge=60, le=86400, alias="MFA_PENDING_TTL_SECONDS")
+    sensitive_action_mfa_max_age_seconds: int = Field(
+        default=600, ge=60, le=3600, alias="SENSITIVE_ACTION_MFA_MAX_AGE_SECONDS"
+    )
     # AES-256 key protecting TOTP seeds at rest (base64).  This key must live
     # outside the database - a dump that also contains the key protects nothing -
     # and it is separate from the JWT key on purpose: rotating a signing key, or
@@ -112,7 +123,7 @@ class Settings(BaseSettings):
     mfa_encryption_key: str = Field(default="", alias="MFA_ENCRYPTION_KEY")
 
     # ── Password policy ───────────────────────────────────────────────────────
-    password_min_length: int = Field(default=12, ge=12, alias="PASSWORD_MIN_LENGTH")
+    password_min_length: int = Field(default=15, ge=15, alias="PASSWORD_MIN_LENGTH")
     # Argon2 has no bcrypt-style truncation, but an unbounded password is a
     # cheap way to burn server CPU, so keep a generous ceiling.
     password_max_length: int = Field(default=256, ge=64, alias="PASSWORD_MAX_LENGTH")
@@ -143,21 +154,37 @@ class Settings(BaseSettings):
         if self.is_development:
             return
 
+        try:
+            erp_clients = json.loads(self.erp_api_clients)
+            erp_clients_valid = (
+                bool(erp_clients)
+                and isinstance(erp_clients, dict)
+                and all(
+                    isinstance(client_id, str)
+                    and client_id.strip()
+                    and isinstance(config, dict)
+                    and len(str(config.get("secret", ""))) >= 32
+                    and isinstance(config.get("scopes"), list)
+                    and bool(config["scopes"])
+                    for client_id, config in erp_clients.items()
+                )
+            )
+        except json.JSONDecodeError, TypeError:
+            erp_clients_valid = False
+
         insecure = {
             "JWT_SECRET": self.jwt_secret == "hrms-jwt-secret-key-32chars-min-2026-auth",
             "DATABASE_URL": self.database_url == "postgresql+psycopg://dev:SuperAdmin@localhost:5432/hrms",
             "SUPER_ADMIN_PASSWORD": self.super_admin_password == "SuperAdmin@123",
-            "ERP_API_KEY": not self.erp_api_key,
+            "ERP_API_CLIENTS": not erp_clients_valid,
             "AUTH_THROTTLE_BACKEND": self.auth_throttle_backend != "redis",
             "REDIS_URL": self.auth_throttle_backend == "redis" and not self.redis_url,
             "MFA_ENCRYPTION_KEY": self.mfa_secret_key() == DEVELOPMENT_MFA_KEY,
+            "MFA_REQUIRED_FOR_SUPER_ADMIN": not self.mfa_enabled or not self.mfa_required_for_super_admin,
         }
         missing = [name for name, is_insecure in insecure.items() if is_insecure]
         if missing:
-            raise RuntimeError(
-                "Production configuration requires secure values for: "
-                f"{', '.join(missing)}"
-            )
+            raise RuntimeError(f"Production configuration requires secure values for: {', '.join(missing)}")
 
     def security_warnings(self) -> list[str]:
         """Non-fatal hardening reminders, logged once at startup."""
@@ -172,7 +199,9 @@ class Settings(BaseSettings):
         elif not self.mfa_required_for_super_admin:
             warnings.append("MFA_REQUIRED_FOR_SUPER_ADMIN=false: Super Admin MFA is optional")
         if self.password_breach_check == "remote" and not self.password_breach_check_url:
-            warnings.append("PASSWORD_BREACH_CHECK=remote without PASSWORD_BREACH_CHECK_URL falls back to the local list")
+            warnings.append(
+                "PASSWORD_BREACH_CHECK=remote without PASSWORD_BREACH_CHECK_URL falls back to the local list"
+            )
         if self.mfa_secret_key() == DEVELOPMENT_MFA_KEY:
             warnings.append(
                 "MFA_ENCRYPTION_KEY is the development default: enrolled authenticator secrets "
@@ -202,17 +231,13 @@ class Settings(BaseSettings):
 
         password = self.postgres_password
         auth = self.postgres_user if not password else f"{self.postgres_user}:{password}"
-        return (
-            f"postgresql+asyncpg://{auth}"
-            f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
-        )
+        return f"postgresql+asyncpg://{auth}@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
 
     def resolved_database_url_sync(self) -> str:
         url = self.resolved_database_url()
         if url.startswith("postgresql+asyncpg://"):
             return url.replace("postgresql+asyncpg://", "postgresql+psycopg://", 1)
         return url
-
 
 
 @lru_cache(maxsize=1)

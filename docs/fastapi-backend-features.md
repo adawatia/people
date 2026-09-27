@@ -59,7 +59,7 @@ Identity management is handled by `fastapi-users` combined with custom invitatio
 ### Key Features
 - **Public Registration Disabled**: All user accounts are provisioned by authorized administrators (`user.create` permission).
 - **Admin-Invited Onboarding**: When an employee is created, an invitation token is generated, and an invitation email is queued asynchronously via `EmailService`.
-- **Password Complexity Engine**: Enforces minimum 12 characters, uppercase, lowercase, numeric, special character rules, and a `zxcvbn` strength score $\ge 3$.
+- **Password Policy Engine**: Enforces a minimum of 15 characters, rejects compromised and personal-information-based values, and requires a `zxcvbn` strength score $\ge 3$ without composition rules.
 
 ---
 

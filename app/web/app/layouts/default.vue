@@ -19,6 +19,8 @@ const currentWorkspace = workspace.current
 const workspaceDefinition = computed(() => workspace.definition.value || WORKSPACES[0]!)
 const mobileOpen = ref(false)
 const mobileGroup = ref('More')
+const globalSearchOpen = ref(false)
+const globalSearchQuery = ref('')
 const isTechnicalAdmin = computed(() => Boolean(auth.user.value?.is_superuser))
 const navByWorkspace: Record<string, NavItem[]> = {
   MY: [
@@ -90,6 +92,17 @@ const accountItems: NavItem[] = [
   { label: 'Settings', icon: 'i-lucide-settings', to: '/settings' },
   { label: 'Notifications', icon: 'i-lucide-bell', to: '/notifications' }
 ]
+const globalSearchItems = computed(() => {
+  const items = [...visibleItems.value, ...accountItems]
+    .filter(item => workspace.canVisit(item.to))
+    .map(item => item.to === '/settings' && isTechnicalAdmin.value ? { ...item, label: 'System administration' } : item)
+  return Array.from(new Map(items.map(item => [item.to, item])).values())
+})
+const globalSearchResults = computed(() => {
+  const query = globalSearchQuery.value.trim().toLocaleLowerCase()
+  if (!query) return globalSearchItems.value
+  return globalSearchItems.value.filter(item => item.label.toLocaleLowerCase().includes(query))
+})
 const mobilePrimary = computed(() => {
   const targets: Record<Workspace, string> = { MY: '/leaves', TEAM: '/approvals', HR: '/employees', EXECUTIVE: '/reports', TECHNICAL: '/settings' }
   const path = targets[currentWorkspace.value]
@@ -100,6 +113,15 @@ function openMobileGroup(label: string) {
   mobileGroup.value = label
   mobileOpen.value = true
 }
+function openGlobalSearch() {
+  globalSearchQuery.value = ''
+  globalSearchOpen.value = true
+}
+async function visitSearchResult(item: NavItem) {
+  globalSearchOpen.value = false
+  globalSearchQuery.value = ''
+  await navigateTo(workspace.link(item.to))
+}
 async function changeWorkspace(event: Event) {
   const next = (event.target as HTMLSelectElement).value as Workspace
   await workspace.select(next)
@@ -107,14 +129,25 @@ async function changeWorkspace(event: Event) {
 watch(() => route.fullPath, () => {
   // Navigating should always collapse the mobile drawer.
   mobileOpen.value = false
+  globalSearchOpen.value = false
 })
 onMounted(() => {
   const desktop = window.matchMedia('(min-width: 1024px)')
   const closeOnDesktop = () => {
     if (desktop.matches) mobileOpen.value = false
   }
+  const openSearchShortcut = (event: KeyboardEvent) => {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === 'k') {
+      event.preventDefault()
+      openGlobalSearch()
+    }
+  }
   desktop.addEventListener('change', closeOnDesktop)
-  onBeforeUnmount(() => desktop.removeEventListener('change', closeOnDesktop))
+  window.addEventListener('keydown', openSearchShortcut)
+  onBeforeUnmount(() => {
+    desktop.removeEventListener('change', closeOnDesktop)
+    window.removeEventListener('keydown', openSearchShortcut)
+  })
 })
 </script>
 
@@ -241,7 +274,9 @@ onMounted(() => {
           icon="i-lucide-search"
           color="neutral"
           variant="ghost"
-          aria-label="Search"
+          aria-label="Search pages"
+          title="Search pages (Ctrl+K)"
+          @click="openGlobalSearch"
         />
         <UButton
           icon="i-lucide-bell"
@@ -256,6 +291,68 @@ onMounted(() => {
         <slot />
       </main>
     </div>
+    <UModal
+      v-model:open="globalSearchOpen"
+      title="Search People"
+      description="Open a page available in your current workspace."
+    >
+      <template #body>
+        <section class="w-full max-w-xl rounded-t-3xl bg-[var(--people-surface)] p-5 shadow-2xl sm:rounded-2xl sm:p-6">
+          <UInput
+            v-model="globalSearchQuery"
+            icon="i-lucide-search"
+            placeholder="Search pages"
+            autocomplete="off"
+            autofocus
+            size="lg"
+            class="w-full"
+            @keydown.enter="globalSearchResults[0] && visitSearchResult(globalSearchResults[0])"
+          />
+          <p class="mt-3 text-xs text-muted">
+            Searching {{ workspaceDefinition.label }} · Press Enter to open the first result
+          </p>
+          <div
+            v-if="globalSearchResults.length"
+            class="mt-4 grid max-h-80 gap-1 overflow-y-auto"
+          >
+            <button
+              v-for="item in globalSearchResults"
+              :key="item.to"
+              type="button"
+              class="flex min-h-12 w-full items-center gap-3 rounded-xl px-3 text-left text-sm font-medium transition-colors hover:bg-muted/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+              @click="visitSearchResult(item)"
+            >
+              <span
+                class="people-icon size-8 shrink-0"
+                :class="item.iconTone || 'people-icon--blue'"
+              >
+                <UIcon
+                  :name="item.icon"
+                  class="size-4"
+                />
+              </span>
+              <span class="min-w-0 flex-1 truncate">{{ item.label }}</span>
+              <UIcon
+                name="i-lucide-arrow-right"
+                class="size-4 text-muted"
+              />
+            </button>
+          </div>
+          <div
+            v-else
+            class="mt-4 rounded-xl border border-dashed border-[var(--people-border)] px-4 py-8 text-center"
+            role="status"
+          >
+            <p class="font-semibold">
+              No matching pages
+            </p>
+            <p class="mt-1 text-sm text-muted">
+              Try another page name.
+            </p>
+          </div>
+        </section>
+      </template>
+    </UModal>
     <nav
       class="fixed inset-x-0 bottom-0 z-40 border-t border-[var(--people-border)] bg-[var(--people-surface)]/95 px-2 pb-[env(safe-area-inset-bottom)] pt-2 shadow-[0_-8px_24px_rgba(15,23,42,0.08)] backdrop-blur-xl lg:hidden"
       aria-label="Mobile navigation"

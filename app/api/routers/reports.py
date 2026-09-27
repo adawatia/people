@@ -57,7 +57,12 @@ async def get_monthly_attendance_matrix(
     unit_id, department_id = await _scoped_report_filters(_, session, unit_id, department_id)
     service = ReportService(session)
     return await service.get_monthly_attendance_matrix(
-        year=year, page=page, page_size=page_size, search=search, sort_by=sort_by, sort_order=sort_order,
+        year=year,
+        page=page,
+        page_size=page_size,
+        search=search,
+        sort_by=sort_by,
+        sort_order=sort_order,
         month=month,
         unit_id=unit_id,
         department_id=department_id,
@@ -81,7 +86,12 @@ async def get_leave_summary_report(
     unit_id, department_id = await _scoped_report_filters(_, session, unit_id, department_id)
     service = ReportService(session)
     return await service.get_leave_balance_summary(
-        year=year, page=page, page_size=page_size, search=search, sort_by=sort_by, sort_order=sort_order,
+        year=year,
+        page=page,
+        page_size=page_size,
+        search=search,
+        sort_by=sort_by,
+        sort_order=sort_order,
         unit_id=unit_id,
         department_id=department_id,
     )

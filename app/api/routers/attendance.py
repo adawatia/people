@@ -3,7 +3,7 @@ from datetime import date, datetime
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.auth import fastapi_users, require_permission
+from core.auth import current_business_user, require_permission
 from core.database import get_async_session
 from core.employee_access import (
     EmployeeAccessScope,
@@ -45,10 +45,11 @@ async def _attendance_read_scope(user: User, session: AsyncSession) -> EmployeeA
 
 # ── Raw Biometric / Mobile Punch Ingestion ────────────────────────────────────
 
+
 @router.post("/checkins", response_model=AttendancePunchRead, status_code=status.HTTP_201_CREATED)
 async def record_checkin(
     data: AttendancePunchCreate,
-    current_user: User = Depends(fastapi_users.current_user(active=True)),
+    current_user: User = Depends(current_business_user),
     session: AsyncSession = Depends(get_async_session),
 ) -> AttendancePunchRead:
     raise HTTPException(status_code=403, detail="Attendance punches are supplied by ERP")
@@ -74,7 +75,7 @@ async def list_checkins(
     from_time: datetime | None = None,
     to_time: datetime | None = None,
     is_processed: bool | None = None,
-    current_user: User = Depends(fastapi_users.current_user(active=True)),
+    current_user: User = Depends(current_business_user),
     session: AsyncSession = Depends(get_async_session),
 ) -> PaginatedResponse[AttendancePunchRead]:
     service = AttendanceService(session)
@@ -118,7 +119,7 @@ async def list_attendance(
     search: str | None = None,
     sort_by: AttendanceRecordSort | None = None,
     sort_order: str = Query("desc", pattern="^(asc|desc)$"),
-    current_user: User = Depends(fastapi_users.current_user(active=True)),
+    current_user: User = Depends(current_business_user),
     session: AsyncSession = Depends(get_async_session),
 ) -> PaginatedResponse[AttendanceRecordRead]:
     service = AttendanceService(session)
@@ -137,7 +138,9 @@ async def list_attendance(
     elif scope.self_only:
         employee_id = (await get_current_employee(current_user, session)).id
     return await service.list_attendance_page(
-        search=search, sort_by=sort_by, sort_order=sort_order,
+        search=search,
+        sort_by=sort_by,
+        sort_order=sort_order,
         employee_id=employee_id,
         from_date=from_date,
         to_date=to_date,
@@ -152,7 +155,7 @@ async def list_attendance(
 @router.get("/records/{record_id}", response_model=AttendanceRecordRead)
 async def get_attendance_record(
     record_id: int,
-    current_user: User = Depends(fastapi_users.current_user(active=True)),
+    current_user: User = Depends(current_business_user),
     session: AsyncSession = Depends(get_async_session),
 ) -> AttendanceRecordRead:
     service = AttendanceService(session)
@@ -174,7 +177,7 @@ async def get_employee_calendar(
     emp_id: int,
     year: int = Query(...),
     month: int = Query(...),
-    current_user: User = Depends(fastapi_users.current_user(active=True)),
+    current_user: User = Depends(current_business_user),
     session: AsyncSession = Depends(get_async_session),
 ) -> list[AttendanceRecordRead]:
     """Return all attendance records for an employee in a given month — for calendar view."""
@@ -191,7 +194,7 @@ async def get_attendance_summary(
     emp_id: int,
     year: int = Query(...),
     month: int = Query(...),
-    current_user: User = Depends(fastapi_users.current_user(active=True)),
+    current_user: User = Depends(current_business_user),
     session: AsyncSession = Depends(get_async_session),
 ) -> AttendanceSummaryRead:
     service = AttendanceService(session)
@@ -203,6 +206,7 @@ async def get_attendance_summary(
 
 
 # ── Automated Attendance Processing Engine ───────────────────────────────────
+
 
 @router.post("/process", response_model=ProcessAttendanceResponse)
 async def process_attendance(
@@ -222,11 +226,14 @@ async def process_attendance(
         if not scope.organization and req.unit_id not in scope.unit_ids:
             raise HTTPException(status_code=403, detail="You cannot process attendance for this unit")
     elif not scope.organization:
-        raise HTTPException(status_code=403, detail="A scoped attendance run must specify an authorized unit or employee")
+        raise HTTPException(
+            status_code=403, detail="A scoped attendance run must specify an authorized unit or employee"
+        )
     return await service.process_attendance_batch(req)
 
 
 # ── Attendance Correction Workflow ─────────────────────────────────────────
+
 
 @router.post("/corrections", response_model=AttendanceCorrectionRead, status_code=status.HTTP_201_CREATED)
 async def submit_correction(
@@ -255,7 +262,7 @@ async def list_corrections(
     sort_order: str = Query("desc", pattern="^(asc|desc)$"),
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=100),
-    current_user: User = Depends(fastapi_users.current_user(active=True)),
+    current_user: User = Depends(current_business_user),
     session: AsyncSession = Depends(get_async_session),
 ) -> PaginatedResponse[AttendanceCorrectionRead]:
     """List attendance correction requests.
@@ -268,8 +275,11 @@ async def list_corrections(
     if scope.self_only:
         employee_id = (await get_current_employee(current_user, session)).id
     return await service.list_corrections_page(
-        page=page, page_size=page_size,
-        search=search, sort_by=sort_by, sort_order=sort_order,
+        page=page,
+        page_size=page_size,
+        search=search,
+        sort_by=sort_by,
+        sort_order=sort_order,
         status=status,
         employee_id=employee_id,
         unit_ids=None if scope.organization else scope.unit_ids,

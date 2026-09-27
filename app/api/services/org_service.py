@@ -2,6 +2,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.erp_sync import acquire_erp_upsert_lock
 from db.models import Department, Organization, Unit
 from repositories.org_repo import OrgRepository
 from schemas.org import (
@@ -58,6 +59,21 @@ class OrgService:
         await self.session.commit()
         return OrganizationRead.model_validate(org)
 
+    async def upsert_organization(self, erp_id: str, data: OrganizationCreate) -> OrganizationRead:
+        await acquire_erp_upsert_lock(self.session, "organization", erp_id)
+        org = await self.repo.get_organization_by_erp_id(erp_id)
+        if org is None:
+            org = await self.repo.get_organization()
+        if org is None:
+            org = await self.repo.create_organization(Organization(**data.model_dump(), erp_id=erp_id))
+        else:
+            for key, value in data.model_dump().items():
+                setattr(org, key, value)
+            org.erp_id = erp_id
+        await self.session.commit()
+        await self.session.refresh(org)
+        return OrganizationRead.model_validate(org)
+
     # Units
 
     async def list_units(self, organization_id: int | None = None) -> list[UnitRead]:
@@ -68,8 +84,8 @@ class OrgService:
         unit = await self.repo.get_unit_by_id(unit_id)
         if not unit:
             raise HTTPException(
-                 status_code=status.HTTP_404_NOT_FOUND,
-                 detail=f'Unit with ID {unit_id} not found',
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Unit with ID {unit_id} not found",
             )
         return unit
 
@@ -101,15 +117,26 @@ class OrgService:
         refreshed = await self.repo.get_unit_by_id(unit_id)
         return UnitRead.model_validate(refreshed)
 
+    async def upsert_unit(self, erp_id: str, data: UnitCreate) -> UnitRead:
+        await acquire_erp_upsert_lock(self.session, "unit", erp_id)
+        unit = await self.repo.get_unit_by_erp_id(erp_id)
+        if unit is None:
+            org = await self.repo.get_organization()
+            if org is None:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Organization must be synced first")
+            unit = await self.repo.create_unit(Unit(**data.model_dump(), organization_id=org.id, erp_id=erp_id))
+        else:
+            for key, value in data.model_dump().items():
+                setattr(unit, key, value)
+        await self.session.commit()
+        refreshed = await self.repo.get_unit_by_erp_id(erp_id)
+        return UnitRead.model_validate(refreshed)
+
     async def delete_unit(self, unit_id: int) -> None:
         unit = await self.get_unit(unit_id)
-        blocking_dependencies = await self.repo.count_unit_blocking_dependencies(unit_id)
-        if blocking_dependencies:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Unit cannot be deleted while employees or holidays reference it",
-            )
-        await self.repo.delete_unit(unit)
+        # ERP master-data history is referenced by employee and attendance
+        # records. A DELETE therefore means tombstone, never physical removal.
+        unit.is_active = False
         await self.session.commit()
 
     # Departments
@@ -123,7 +150,7 @@ class OrgService:
         if not dept:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f'Department with ID {dept_id} not found',
+                detail=f"Department with ID {dept_id} not found",
             )
         return dept
 
@@ -142,13 +169,20 @@ class OrgService:
         await self.session.commit()
         return DepartmentRead.model_validate(dept)
 
+    async def upsert_department(self, erp_id: str, data: DepartmentCreate) -> DepartmentRead:
+        await acquire_erp_upsert_lock(self.session, "department", erp_id)
+        await self.get_unit(data.unit_id)
+        department = await self.repo.get_department_by_erp_id(erp_id)
+        if department is None:
+            department = await self.repo.create_department(Department(**data.model_dump(), erp_id=erp_id))
+        else:
+            for key, value in data.model_dump().items():
+                setattr(department, key, value)
+        await self.session.commit()
+        await self.session.refresh(department)
+        return DepartmentRead.model_validate(department)
+
     async def delete_department(self, dept_id: int) -> None:
         dept = await self.get_department(dept_id)
-        blocking_dependencies = await self.repo.count_department_blocking_dependencies(dept_id)
-        if blocking_dependencies:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Department cannot be deleted while employees reference it",
-            )
-        await self.repo.delete_department(dept)
+        dept.is_active = False
         await self.session.commit()

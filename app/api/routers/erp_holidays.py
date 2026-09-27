@@ -1,7 +1,6 @@
 from db.models import now_ist
 
 """ERP-owned organization-wide holiday synchronization."""
-
 from datetime import date
 
 from fastapi import APIRouter, Body, Depends
@@ -9,8 +8,8 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.auth import verify_erp_api_key
 from core.database import get_async_session
+from core.erp_auth import require_erp_scope
 from db.models import Holiday, HolidayList
 
 router = APIRouter(prefix="/integrations/erp/holidays", tags=["erp-holidays"])
@@ -24,13 +23,15 @@ class ErpHoliday(BaseModel):
     is_active: bool = True
 
 
-@router.post("/bulk", dependencies=[Depends(verify_erp_api_key)])
+@router.post("/bulk", dependencies=[Depends(require_erp_scope("holidays:write"))])
 async def sync_holidays_bulk(
     holidays: list[ErpHoliday] = Body(..., min_length=1, max_length=5000),
     session: AsyncSession = Depends(get_async_session),
 ):
     # One organization-wide calendar is used for all employees.
-    calendar = await session.scalar(select(HolidayList).where(HolidayList.is_default.is_(True)).order_by(HolidayList.id))
+    calendar = await session.scalar(
+        select(HolidayList).where(HolidayList.is_default.is_(True)).order_by(HolidayList.id)
+    )
     if calendar is None:
         calendar = HolidayList(
             name="ERP Holiday Calendar",
@@ -41,7 +42,6 @@ async def sync_holidays_bulk(
         )
         session.add(calendar)
         await session.flush()
-
     accepted: list[str] = []
     failed: list[dict] = []
     for item in holidays:

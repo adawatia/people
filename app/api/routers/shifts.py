@@ -3,7 +3,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.auth import fastapi_users
+from core.auth import current_business_user
 from core.business_roles import resolve_business_access
 from core.database import get_async_session
 from core.employee_access import EmployeeAccessScope, get_current_employee, get_employee_scope
@@ -55,7 +55,7 @@ async def list_shifts(
     employee_id: int | None = None,
     unit_id: int | None = None,
     is_active: bool | None = True,
-    user: User = Depends(fastapi_users.current_user(active=True)),
+    user: User = Depends(current_business_user),
     session: AsyncSession = Depends(get_async_session),
 ) -> PaginatedResponse[ShiftRead]:
     service = ShiftService(session)
@@ -89,26 +89,37 @@ async def list_shift_assignments(
     shift_id: int | None = None,
     employee_id: int | None = None,
     status: str | None = None,
-    user: User = Depends(fastapi_users.current_user(active=True)),
+    user: User = Depends(current_business_user),
     session: AsyncSession = Depends(get_async_session),
 ) -> PaginatedResponse[ShiftAssignmentRead]:
     service = ShiftService(session)
     scope = await get_employee_scope(user, session)
-    return await service.assignments_page(scope, page=page, page_size=page_size, search=search,
-        sort_by=sort_by, sort_order=sort_order, shift_id=shift_id, employee_id=employee_id, status=status)
+    return await service.assignments_page(
+        scope,
+        page=page,
+        page_size=page_size,
+        search=search,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        shift_id=shift_id,
+        employee_id=employee_id,
+        status=status,
+    )
 
 
 @router.get("/assignments/{assignment_id}", response_model=ShiftAssignmentRead)
 async def get_shift_assignment(
     assignment_id: int,
-    user: User = Depends(fastapi_users.current_user(active=True)),
+    user: User = Depends(current_business_user),
     session: AsyncSession = Depends(get_async_session),
 ) -> ShiftAssignmentRead:
     service = ShiftService(session)
     assignment = await service.get_assignment(assignment_id)
     employee = await _employee_self_scope(user, session)
     if employee and assignment.employee_id != employee.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have access to this shift assignment")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="You do not have access to this shift assignment"
+        )
     target = await service.employee_repo.get_by_id(assignment.employee_id)
     if target is None or not (await get_employee_scope(user, session)).allows(target):
         raise HTTPException(403, "You do not have access to this shift assignment")
@@ -119,7 +130,7 @@ async def get_shift_assignment(
 async def get_employee_shift_schedule(
     emp_id: int,
     for_timestamp: datetime | None = None,
-    user: User = Depends(fastapi_users.current_user(active=True)),
+    user: User = Depends(current_business_user),
     session: AsyncSession = Depends(get_async_session),
 ) -> EmployeeShiftScheduleRead:
     service = ShiftService(session)
@@ -137,7 +148,7 @@ async def get_employee_shift_schedule(
 @router.get("/{shift_id}", response_model=ShiftRead)
 async def get_shift(
     shift_id: int,
-    user: User = Depends(fastapi_users.current_user(active=True)),
+    user: User = Depends(current_business_user),
     session: AsyncSession = Depends(get_async_session),
 ) -> ShiftRead:
     service = ShiftService(session)

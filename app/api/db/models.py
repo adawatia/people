@@ -43,7 +43,9 @@ class User(SQLAlchemyBaseUserTable[int], Base):
     # E.164 format, e.g. +919876543210. Used as a secondary login identifier.
     mobile_number: Mapped[str | None] = mapped_column(String(20), unique=True, nullable=True, index=True)
     must_change_password: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="false")
-    created_by: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True)
+    created_by: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_ist)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_ist, onupdate=now_ist)
@@ -98,6 +100,7 @@ class AuthSession(Base):
     absolute_expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_ist, nullable=False)
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    mfa_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     revoked_reason: Mapped[str | None] = mapped_column(String(40), nullable=True)
     replaced_by_id: Mapped[int | None] = mapped_column(
@@ -126,7 +129,9 @@ class Notification(Base):
     title: Mapped[str] = mapped_column(String(150), nullable=False)
     message: Mapped[str] = mapped_column(Text, nullable=False)
     notification_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
-    user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.user_id", ondelete="CASCADE"), nullable=True, index=True)
+    user_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("users.user_id", ondelete="CASCADE"), nullable=True, index=True
+    )
     target_role: Mapped[str | None] = mapped_column(String(50), nullable=True)
     reference_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     reference_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
@@ -135,6 +140,20 @@ class Notification(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_ist, index=True)
 
     user: Mapped[User | None] = relationship("User", foreign_keys=[user_id])
+
+
+class NotificationReceipt(Base):
+    """Per-user read state for personal notifications and shared broadcasts."""
+
+    __tablename__ = "notification_receipts"
+    __table_args__ = (UniqueConstraint("notification_id", "user_id", name="uq_notification_receipt_user"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    notification_id: Mapped[int] = mapped_column(
+        ForeignKey("notifications.notification_id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True)
+    read_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_ist, nullable=False)
 
 
 class AuditLog(Base):
@@ -159,11 +178,13 @@ class AuditLog(Base):
 # Org Structure
 # -----------------------------------------------------------------------------
 
+
 class Organization(Base):
     __tablename__ = "organizations"
     __table_args__ = (UniqueConstraint("singleton_key"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    erp_id: Mapped[str | None] = mapped_column(String(120), unique=True, nullable=True, index=True)
     singleton_key: Mapped[int] = mapped_column(Integer, default=1, server_default="1", nullable=False)
     name: Mapped[str] = mapped_column(String(200), unique=True, nullable=False)
     short_name: Mapped[str | None] = mapped_column(String(50), nullable=True)
@@ -188,7 +209,10 @@ class Unit(Base):
     __tablename__ = "units"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    erp_id: Mapped[str | None] = mapped_column(String(120), unique=True, nullable=True, index=True)
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     code: Mapped[str | None] = mapped_column(String(30), unique=True, nullable=True)
     city: Mapped[str | None] = mapped_column(String(100), nullable=True)
@@ -205,6 +229,7 @@ class Department(Base):
     __tablename__ = "departments"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    erp_id: Mapped[str | None] = mapped_column(String(120), unique=True, nullable=True, index=True)
     unit_id: Mapped[int] = mapped_column(ForeignKey("units.id", ondelete="CASCADE"), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     code: Mapped[str | None] = mapped_column(String(30), nullable=True)
@@ -214,13 +239,16 @@ class Department(Base):
 
     unit: Mapped[Unit] = relationship(back_populates="departments")
     employees: Mapped[list[Employee]] = relationship(back_populates="department")
-    approvers: Mapped[list[DepartmentApprover]] = relationship(back_populates="department", cascade="all, delete-orphan")
+    approvers: Mapped[list[DepartmentApprover]] = relationship(
+        back_populates="department", cascade="all, delete-orphan"
+    )
 
 
 class Designation(Base):
     __tablename__ = "designations"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    erp_id: Mapped[str | None] = mapped_column(String(120), unique=True, nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(120), unique=True, nullable=False, index=True)
     code: Mapped[str | None] = mapped_column(String(30), unique=True, nullable=True, index=True)
     description: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -233,10 +261,13 @@ class Designation(Base):
 
 class DepartmentApprover(Base):
     """Links a department to designated approvers for leaves, shifts, expenses, and work arrangements."""
+
     __tablename__ = "department_approvers"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    department_id: Mapped[int] = mapped_column(ForeignKey("departments.id", ondelete="CASCADE"), nullable=False, index=True)
+    department_id: Mapped[int] = mapped_column(
+        ForeignKey("departments.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     user_id: Mapped[int] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True)
     approver_type: Mapped[str] = mapped_column(String(30), nullable=False)  # LEAVE | SHIFT | EXPENSE | WORK_ARRANGEMENT
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_ist)
@@ -249,11 +280,15 @@ class DepartmentApprover(Base):
 # Employees
 # -----------------------------------------------------------------------------
 
+
 class Employee(Base):
     __tablename__ = "employees"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True, unique=True, index=True)
+    erp_id: Mapped[str | None] = mapped_column(String(120), unique=True, nullable=True, index=True)
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True, unique=True, index=True
+    )
     employee_code: Mapped[str] = mapped_column(String(30), unique=True, nullable=False, index=True)
     # Compatibility mirror of the elevated role ("EMPLOYEE" = none). Still the
     # field ERP integrations write; business_role is the authorization source
@@ -301,8 +336,12 @@ class Employee(Base):
     # Organization & Hierarchy
     department_id: Mapped[int | None] = mapped_column(ForeignKey("departments.id"), nullable=True, index=True)
     unit_id: Mapped[int | None] = mapped_column(ForeignKey("units.id"), nullable=True, index=True)
-    designation_id: Mapped[int | None] = mapped_column(ForeignKey("designations.id", ondelete="SET NULL"), nullable=True, index=True)
-    designation: Mapped[str | None] = mapped_column(String(150), nullable=True)  # cached title for backwards compatibility
+    designation_id: Mapped[int | None] = mapped_column(
+        ForeignKey("designations.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    designation: Mapped[str | None] = mapped_column(
+        String(150), nullable=True
+    )  # cached title for backwards compatibility
     reporting_manager_id: Mapped[int | None] = mapped_column(ForeignKey("employees.id"), nullable=True, index=True)
     shift_id: Mapped[int | None] = mapped_column(ForeignKey("shifts.id"), nullable=True)
 
@@ -326,20 +365,27 @@ class Employee(Base):
     unit: Mapped[Unit | None] = relationship()
     designation_rel: Mapped[Designation | None] = relationship(back_populates="employees")
     shift: Mapped[Shift | None] = relationship()
-    reporting_manager: Mapped[Employee | None] = relationship("Employee", remote_side=[id], back_populates="direct_reports")
+    reporting_manager: Mapped[Employee | None] = relationship(
+        "Employee", remote_side=[id], back_populates="direct_reports"
+    )
     direct_reports: Mapped[list[Employee]] = relationship("Employee", back_populates="reporting_manager")
-    work_history: Mapped[list[EmployeeWorkHistory]] = relationship(back_populates="employee", cascade="all, delete-orphan")
+    work_history: Mapped[list[EmployeeWorkHistory]] = relationship(
+        back_populates="employee", cascade="all, delete-orphan"
+    )
 
 
 class EmployeeWorkHistory(Base):
     """Records internal movements: transfer between units/departments, promotions, designation changes."""
+
     __tablename__ = "employee_work_histories"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     employee_id: Mapped[int] = mapped_column(ForeignKey("employees.id", ondelete="CASCADE"), nullable=False, index=True)
     unit_id: Mapped[int | None] = mapped_column(ForeignKey("units.id", ondelete="SET NULL"), nullable=True)
     department_id: Mapped[int | None] = mapped_column(ForeignKey("departments.id", ondelete="SET NULL"), nullable=True)
-    designation_id: Mapped[int | None] = mapped_column(ForeignKey("designations.id", ondelete="SET NULL"), nullable=True)
+    designation_id: Mapped[int | None] = mapped_column(
+        ForeignKey("designations.id", ondelete="SET NULL"), nullable=True
+    )
     from_date: Mapped[date] = mapped_column(Date, nullable=False)
     to_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     remarks: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -355,10 +401,12 @@ class EmployeeWorkHistory(Base):
 # Shifts, Holidays, Weekly Offs
 # -----------------------------------------------------------------------------
 
+
 class Shift(Base):
     __tablename__ = "shifts"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    erp_id: Mapped[str | None] = mapped_column(String(120), unique=True, nullable=True, index=True)
     unit_id: Mapped[int | None] = mapped_column(ForeignKey("units.id", ondelete="CASCADE"), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     code: Mapped[str | None] = mapped_column(String(30), nullable=True)
@@ -418,7 +466,9 @@ class Holiday(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     erp_holiday_id: Mapped[str | None] = mapped_column(String(120), unique=True, nullable=True, index=True)
-    holiday_list_id: Mapped[int | None] = mapped_column(ForeignKey("holiday_lists.id", ondelete="CASCADE"), nullable=True, index=True)
+    holiday_list_id: Mapped[int | None] = mapped_column(
+        ForeignKey("holiday_lists.id", ondelete="CASCADE"), nullable=True, index=True
+    )
     unit_id: Mapped[int | None] = mapped_column(ForeignKey("units.id"), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -432,6 +482,7 @@ class Holiday(Base):
 # -----------------------------------------------------------------------------
 # Leaves
 # -----------------------------------------------------------------------------
+
 
 class LeavePeriod(Base):
     __tablename__ = "leave_periods"
@@ -461,6 +512,9 @@ class LeaveType(Base):
 
 class LeaveAllocation(Base):
     __tablename__ = "leave_allocations"
+    __table_args__ = (
+        UniqueConstraint("employee_id", "leave_type_id", "leave_period_id", name="uq_leave_allocation_period"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     employee_id: Mapped[int] = mapped_column(ForeignKey("employees.id", ondelete="CASCADE"), nullable=False, index=True)
@@ -479,12 +533,16 @@ class LeaveAllocation(Base):
 
 class LeaveLedgerEntry(Base):
     """Frappe HR double-entry ledger record for immutable leave transaction tracking."""
+
     __tablename__ = "leave_ledger_entries"
+    __table_args__ = (UniqueConstraint("transaction_type", "transaction_id", name="uq_leave_ledger_transaction"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     employee_id: Mapped[int] = mapped_column(ForeignKey("employees.id", ondelete="CASCADE"), nullable=False, index=True)
     leave_type_id: Mapped[int] = mapped_column(ForeignKey("leave_types.id"), nullable=False, index=True)
-    transaction_type: Mapped[str] = mapped_column(String(30), nullable=False)  # "ALLOCATION" | "APPLICATION" | "REVERSAL" | "EXPIRY"
+    transaction_type: Mapped[str] = mapped_column(
+        String(30), nullable=False
+    )  # "ALLOCATION" | "APPLICATION" | "REVERSAL" | "EXPIRY"
     transaction_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     leaves: Mapped[float] = mapped_column(Numeric(5, 1), nullable=False)  # Positive for credit, negative for debit
     from_date: Mapped[date] = mapped_column(Date, nullable=False)
@@ -499,6 +557,7 @@ class LeaveLedgerEntry(Base):
 
 class LeaveBalance(Base):
     __tablename__ = "leave_balances"
+    __table_args__ = (UniqueConstraint("employee_id", "leave_type_id", "year", name="uq_leave_balance_year"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     employee_id: Mapped[int] = mapped_column(ForeignKey("employees.id", ondelete="CASCADE"), nullable=False, index=True)
@@ -517,7 +576,9 @@ class LeaveApplication(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     employee_id: Mapped[int] = mapped_column(ForeignKey("employees.id", ondelete="CASCADE"), nullable=False, index=True)
     leave_type_id: Mapped[int] = mapped_column(ForeignKey("leave_types.id"), nullable=False)
-    leave_period_id: Mapped[int | None] = mapped_column(ForeignKey("leave_periods.id", ondelete="SET NULL"), nullable=True)
+    leave_period_id: Mapped[int | None] = mapped_column(
+        ForeignKey("leave_periods.id", ondelete="SET NULL"), nullable=True
+    )
     from_date: Mapped[date] = mapped_column(Date, nullable=False)
     to_date: Mapped[date] = mapped_column(Date, nullable=False)
     half_day: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -547,11 +608,14 @@ class LeaveApplication(Base):
 
 class WorkArrangementRequest(Base):
     """WFH, On-Duty, Field Work arrangement requests."""
+
     __tablename__ = "work_arrangement_requests"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     employee_id: Mapped[int] = mapped_column(ForeignKey("employees.id", ondelete="CASCADE"), nullable=False, index=True)
-    arrangement_type: Mapped[str] = mapped_column(String(30), nullable=False)  # "WORK_FROM_HOME", "OUT_DUTY", "FIELD_WORK", "OFFICE"
+    arrangement_type: Mapped[str] = mapped_column(
+        String(30), nullable=False
+    )  # "WORK_FROM_HOME", "OUT_DUTY", "FIELD_WORK", "OFFICE"
     from_date: Mapped[date] = mapped_column(Date, nullable=False)
     to_date: Mapped[date] = mapped_column(Date, nullable=False)
     reason: Mapped[str] = mapped_column(Text, nullable=False)
@@ -576,10 +640,10 @@ class WorkArrangementRequest(Base):
         return self.employee.employee_code if self.employee is not None else None
 
 
-
 # -----------------------------------------------------------------------------
 # Attendance
 # -----------------------------------------------------------------------------
+
 
 class AttendanceRecord(Base):
     __tablename__ = "attendance_records"
@@ -605,9 +669,9 @@ class AttendanceRecord(Base):
     shift: Mapped[Shift | None] = relationship()
 
 
-
 class AttendancePunch(Base):
     """Raw check-in punch log from biometric devices, mobile apps, or web."""
+
     __tablename__ = "attendance_punches"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -625,7 +689,9 @@ class AttendancePunch(Base):
     shift_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Processing state
-    attendance_record_id: Mapped[int | None] = mapped_column(ForeignKey("attendance_records.id", ondelete="SET NULL"), nullable=True, index=True)
+    attendance_record_id: Mapped[int | None] = mapped_column(
+        ForeignKey("attendance_records.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     is_processed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     # Geolocation if applicable
@@ -642,7 +708,9 @@ class AttendanceDiscrepancy(Base):
     __tablename__ = "attendance_discrepancies"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    attendance_record_id: Mapped[int] = mapped_column(ForeignKey("attendance_records.id", ondelete="CASCADE"), nullable=False)
+    attendance_record_id: Mapped[int] = mapped_column(
+        ForeignKey("attendance_records.id", ondelete="CASCADE"), nullable=False
+    )
     discrepancy_type: Mapped[str] = mapped_column(String(50), nullable=False)
     status: Mapped[str] = mapped_column(String(30), default="PENDING", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_ist)
@@ -652,7 +720,9 @@ class AttendanceCorrectionRequest(Base):
     __tablename__ = "attendance_correction_requests"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    attendance_record_id: Mapped[int] = mapped_column(ForeignKey("attendance_records.id", ondelete="CASCADE"), nullable=False)
+    attendance_record_id: Mapped[int] = mapped_column(
+        ForeignKey("attendance_records.id", ondelete="CASCADE"), nullable=False
+    )
     requested_punch_in: Mapped[time | None] = mapped_column(Time, nullable=True)
     requested_punch_out: Mapped[time | None] = mapped_column(Time, nullable=True)
     reason: Mapped[str] = mapped_column(Text, nullable=False)
@@ -670,6 +740,7 @@ class AttendanceCorrectionRequest(Base):
 # -----------------------------------------------------------------------------
 # Overtime
 # -----------------------------------------------------------------------------
+
 
 class OvertimeRecord(Base):
     __tablename__ = "overtime_records"
@@ -696,7 +767,9 @@ class OvertimeApproval(Base):
     __tablename__ = "overtime_approvals"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    overtime_record_id: Mapped[int] = mapped_column(ForeignKey("overtime_records.id", ondelete="CASCADE"), nullable=False)
+    overtime_record_id: Mapped[int] = mapped_column(
+        ForeignKey("overtime_records.id", ondelete="CASCADE"), nullable=False
+    )
     approved_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
     actioned_by: Mapped[int] = mapped_column(ForeignKey("users.user_id"), nullable=False)
     actioned_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_ist)

@@ -80,9 +80,12 @@ class AttendanceService:
             punch_type=data.punch_type,
         )
         if data.erp_event_id:
-            duplicate = await self.session.scalar(
-                select(AttendancePunch).where(AttendancePunch.erp_event_id == data.erp_event_id)
-            ) or duplicate
+            duplicate = (
+                await self.session.scalar(
+                    select(AttendancePunch).where(AttendancePunch.erp_event_id == data.erp_event_id)
+                )
+                or duplicate
+            )
         if duplicate:
             return AttendancePunchRead.model_validate(duplicate)
 
@@ -195,9 +198,7 @@ class AttendanceService:
             )
 
         # 3. Check Holiday / Weekly Off
-        is_hol_or_off, is_weekly_off, _ = await self.holiday_service.is_holiday_or_weekly_off(
-            employee.id, target_date
-        )
+        is_hol_or_off, is_weekly_off, _ = await self.holiday_service.is_holiday_or_weekly_off(employee.id, target_date)
 
         # 4. Check Approved Leaves
         leave_stmt = select(LeaveApplication).where(
@@ -283,7 +284,9 @@ class AttendanceService:
 
                 # Overtime check
                 if shift and window:
-                    scheduled_minutes = int((window.shift_end - window.shift_start).total_seconds() / 60) - shift.break_minutes
+                    scheduled_minutes = (
+                        int((window.shift_end - window.shift_start).total_seconds() / 60) - shift.break_minutes
+                    )
                     if worked_minutes > scheduled_minutes:
                         overtime_minutes = worked_minutes - scheduled_minutes
             else:
@@ -425,12 +428,16 @@ class AttendanceService:
         if requested_in and requested_out and requested_out <= requested_in:
             raise HTTPException(status_code=400, detail="Punch-out time must be later than punch-in time")
 
-        existing = await self.session.scalar(select(AttendanceCorrectionRequest).where(
-            AttendanceCorrectionRequest.attendance_record_id == record.id,
-            AttendanceCorrectionRequest.status == "PENDING",
-        ))
+        existing = await self.session.scalar(
+            select(AttendanceCorrectionRequest).where(
+                AttendanceCorrectionRequest.attendance_record_id == record.id,
+                AttendanceCorrectionRequest.status == "PENDING",
+            )
+        )
         if existing:
-            raise HTTPException(status_code=409, detail="A correction request is already pending for this attendance record")
+            raise HTTPException(
+                status_code=409, detail="A correction request is already pending for this attendance record"
+            )
 
         correction = AttendanceCorrectionRequest(
             attendance_record_id=record.id,
@@ -451,7 +458,7 @@ class AttendanceService:
         correction_id: int,
         actioned_by_user_id: int,
     ) -> AttendanceCorrectionRead:
-        correction = await self.record_repo.get_correction_by_id(correction_id)
+        correction = await self.record_repo.get_correction_by_id_for_update(correction_id)
         if not correction:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Correction request not found")
         if correction.status != "PENDING":
@@ -502,7 +509,7 @@ class AttendanceService:
         actioned_by_user_id: int,
         rejection_reason: str | None = None,
     ) -> AttendanceCorrectionRead:
-        correction = await self.record_repo.get_correction_by_id(correction_id)
+        correction = await self.record_repo.get_correction_by_id_for_update(correction_id)
         if not correction:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Correction request not found")
         if correction.status != "PENDING":
@@ -568,7 +575,9 @@ class AttendanceService:
         if from_date and to_date and from_date > to_date:
             raise HTTPException(422, "Start date must not be after end date")
         result = await self.record_repo.list_records_page(
-            search=search, sort_by=sort_by, sort_order=sort_order,
+            search=search,
+            sort_by=sort_by,
+            sort_order=sort_order,
             employee_id=employee_id,
             from_date=from_date,
             to_date=to_date,
@@ -579,7 +588,10 @@ class AttendanceService:
             department_ids=department_ids,
         )
         pending_ids = await self.record_repo.pending_correction_ids([r.id for r in result["items"]])
-        items = [AttendanceRecordRead.model_validate(r).model_copy(update={"has_pending_correction": r.id in pending_ids}) for r in result["items"]]
+        items = [
+            AttendanceRecordRead.model_validate(r).model_copy(update={"has_pending_correction": r.id in pending_ids})
+            for r in result["items"]
+        ]
 
         return PaginatedResponse[AttendanceRecordRead](**dict(result, items=items))
 
@@ -606,7 +618,10 @@ class AttendanceService:
 
         records = await self.record_repo.get_month_records(emp_id, from_date, to_date)
         pending_ids = await self.record_repo.pending_correction_ids([r.id for r in records])
-        return [AttendanceRecordRead.model_validate(r).model_copy(update={"has_pending_correction": r.id in pending_ids}) for r in records]
+        return [
+            AttendanceRecordRead.model_validate(r).model_copy(update={"has_pending_correction": r.id in pending_ids})
+            for r in records
+        ]
 
     async def get_attendance_summary(
         self,
@@ -672,8 +687,11 @@ class AttendanceService:
         page_size: int = 25,
     ) -> PaginatedResponse[AttendanceCorrectionRead]:
         result = await self.record_repo.list_corrections_page(
-            page=page, page_size=page_size,
-            search=search, sort_by=sort_by, sort_order=sort_order,
+            page=page,
+            page_size=page_size,
+            search=search,
+            sort_by=sort_by,
+            sort_order=sort_order,
             status=status,
             employee_id=employee_id,
             unit_ids=unit_ids,

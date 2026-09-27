@@ -19,7 +19,7 @@ This report records the completed audit, implemented changes, measured evidence,
 
 ## Router inventory
 
-Every decorated endpoint below was inventoried for method, auth dependencies, response shape and consumer coverage. ERP routes retain contracts; no new audit-log product page is introduced.
+Every decorated endpoint below was inventoried for method, auth dependencies, response shape and consumer coverage. ERP routes retain their ownership boundary and now support scoped signed clients and idempotent master-data upserts. A technical, read-only paginated audit API was added; no workforce audit page was introduced.
 
 - `app/api/routers/attendance.py`: POST /checkins, POST /checkins/bulk, GET /checkins, GET /, GET /records/{record_id}, GET /employee/{emp_id}/calendar, GET /employee/{emp_id}/summary, POST /process, POST /corrections, GET /corrections
 - `app/api/routers/auth_invitation.py`: GET /validate, POST /set-password
@@ -40,6 +40,7 @@ Every decorated endpoint below was inventoried for method, auth dependencies, re
 - `app/api/routers/holidays.py`: GET /lists, GET /lists/{list_id}
 - `app/api/routers/leaves.py`: GET /periods, POST /periods, GET /types, POST /types, GET /types/{type_id}, PATCH /types/{type_id}, GET /balance/employee/{emp_id}, GET /, GET /{app_id}, POST /, PATCH /{app_id}/approve, PATCH /{app_id}/reject, PATCH /{app_id}/cancel, PATCH /{app_id}/cancellation/approve, PATCH /{app_id}/cancellation/reject
 - `app/api/routers/notifications.py`: GET , GET /unread-count, PATCH /{id}/read, POST /mark-all-read
+- `app/api/routers/audit.py`: GET (technical-only paginated security-event listing)
 - `app/api/routers/organizations.py`: GET
 - `app/api/routers/overtime.py`: GET /, GET /{ot_id}, GET /employee/{emp_id}/summary, PATCH /{ot_id}/approve, PATCH /{ot_id}/reject
 - `app/api/routers/reports.py`: GET /attendance-matrix, GET /leave-summary
@@ -119,6 +120,7 @@ Every growing business list now defaults to 25 rows, rejects sizes above 100, ap
 | Attendance report rows / Reports page | `GET /reports/attendance-matrix` | Employee search; employee code/name allowlist | Employees are paged first; records are batch-loaded only for that page; full-filter totals are independent | Complete |
 | Leave report rows / Reports page | `GET /reports/leave-summary` | Employee search; employee code/name allowlist | Employees are paged first; balances are batch-loaded; breakdown totals use the complete filtered population | Complete |
 | Owner exception drill-down / Executive dashboard | `GET /dashboard/owner/exceptions` | Employee search; code/name/unit/department/id allowlist | Organization permission and optional unit predicate precede count; employee hydration is one bounded batch | Complete |
+| Workforce login accounts / Technical Administration | `GET /users/admin/accounts` | Name, username, email, mobile and employee-code search; username/email/created/status/id allowlist | Explicit Super Admin gate precedes the query; Super Admin accounts are excluded from support actions | Complete |
 | Units, departments, designations, holiday lists / lookup selectors | respective list endpoints | Name search; name/id sort allowlist | Domain filters precede count; remote selectors search server-side | Complete |
 
 The following collections are deliberately bounded rather than paginated: one employee-month attendance calendar, one employee-month attendance or overtime summary, one employee's leave balances by leave type, one employee's effective shift schedule window, one holiday list's entries, the current user's policy-limited authentication sessions, widget definitions, and aggregate dashboard series. ERP ingestion and change-feed contracts retain their integration shapes.
@@ -191,7 +193,7 @@ The old application build was not deployed to staging, so a staging endpoint bef
 | Shifts | Definitions, assignments, assignment detail, employee schedule | List and detail scope checks use central employee scope; definitions/assignments paginated; ERP owns shift mutations |
 | Notifications | List, unread count, read one, mark visible as read | Personal and normalized role audiences are applied to reads and updates; queue count is independent; list contract complete |
 | Reports | Attendance matrix and leave summary | Explicit report permission and forced row scope; employees paged before related data; full-filter SQL aggregates are independent of the page |
-| ERP attendance/employees/holidays/leaves/master data/overtime/shifts | Existing ingest, acknowledgement, activation, and synchronization actions | API-key gates and ERP contract shapes retained; no HRMS workflow or ownership expansion introduced |
+| ERP attendance/employees/holidays/leaves/master data/overtime/shifts | Existing ingest, acknowledgement, activation, synchronization, and idempotent master-data upserts | Scoped HMAC client authentication, timestamp validation and nonce replay protection replace the shared production key; the legacy key is development-only; ERP ownership remains unchanged |
 
 ## Page and BFF verification register
 
@@ -216,7 +218,7 @@ The old application build was not deployed to staging, so a staging endpoint bef
 
 The change set includes focused regression coverage for BFF retry status preservation, URL list state, stale request handling, workspace navigation, MFA replacement/recovery, PostgreSQL pagination, counts, scope isolation, deterministic ordering, and report query bounds. Final results on 2026-09-24:
 
-- Backend: `196 passed` against isolated PostgreSQL; 72 non-failing dependency/test-secret warnings.
+- Backend: `206 passed` against isolated PostgreSQL; one non-failing Starlette/httpx test-client deprecation warning remains.
 - Python quality: `uv run ruff check .` passed.
 - Frontend: `pnpm lint`, `pnpm typecheck`, and `pnpm build` passed.
 - Frontend regressions: 4 Node test files passed (`bff`, `list-state`, `upstream-error`, `workspace`).

@@ -215,9 +215,7 @@ async def test_scope_isolation_and_deterministic_ordering_across_business_lists(
 
     attendance_repo = AttendanceRecordRepository(session)
     await assert_pages(
-        lambda **paging: attendance_repo.list_records_page(
-            unit_ids={unit_id}, sort_by="attendance_date", **paging
-        )
+        lambda **paging: attendance_repo.list_records_page(unit_ids={unit_id}, sort_by="attendance_date", **paging)
     )
     punch_repo = AttendancePunchRepository(session)
     await assert_pages(
@@ -225,25 +223,17 @@ async def test_scope_isolation_and_deterministic_ordering_across_business_lists(
     )
     leave_repo = LeaveRepository(session)
     await assert_pages(
-        lambda **paging: leave_repo.list_applications_page(
-            department_ids={department_id}, sort_by="status", **paging
-        )
+        lambda **paging: leave_repo.list_applications_page(department_ids={department_id}, sort_by="status", **paging)
     )
     work_repo = WorkArrangementRepository(session)
-    await assert_pages(
-        lambda **paging: work_repo.list_requests_page(unit_ids={unit_id}, sort_by="status", **paging)
-    )
+    await assert_pages(lambda **paging: work_repo.list_requests_page(unit_ids={unit_id}, sort_by="status", **paging))
     overtime_repo = OvertimeRepository(session)
     await assert_pages(
-        lambda **paging: overtime_repo.list_page(
-            unit_ids={unit_id}, sort_by="attendance_date", **paging
-        )
+        lambda **paging: overtime_repo.list_page(unit_ids={unit_id}, sort_by="attendance_date", **paging)
     )
     shift_repo = ShiftRepository(session)
     scope = EmployeeAccessScope(unit_ids={unit_id})
-    await assert_pages(
-        lambda **paging: shift_repo.assignments_page(scope, sort_by="effective_from", **paging)
-    )
+    await assert_pages(lambda **paging: shift_repo.assignments_page(scope, sort_by="effective_from", **paging))
 
     employee_repo = EmployeeRepository(session)
     page_one, total = await employee_repo.list_paginated(
@@ -300,6 +290,7 @@ async def test_deterministic_ordering_for_history_notifications_and_lookup_lists
     async def notifications(page):
         return await notification_repo.list_page(
             audience,
+            999999,
             page,
             2,
             search=f"Matrix notification {suffix}",
@@ -389,6 +380,4 @@ async def test_shift_definitions_and_assignments_follow_employee_scope(list_matr
             search=suffix,
         )
         assert assignments["total"] == expected_assignment_counts[label]
-        assert {item.employee_id for item in assignments["items"]} <= {
-            employee.id for employee in employees_a
-        }
+        assert {item.employee_id for item in assignments["items"]} <= {employee.id for employee in employees_a}

@@ -127,6 +127,7 @@ async def _setup_audit_env(session, suffix: str):
 
 # ── 1. Leave Self-Approval Prevention ─────────────────────────────────────────
 
+
 def test_leave_self_approval_prevention(unique_suffix):
     async def _test():
         async with async_session_maker() as session:
@@ -182,6 +183,7 @@ def test_leave_self_approval_prevention(unique_suffix):
 
 # ── 2. Leave Cancellation Cleans Attendance Records ──────────────────────────
 
+
 def test_in_progress_leave_early_return_preserves_taken_day_and_restores_unused_days(unique_suffix, monkeypatch):
     monkeypatch.setattr(leave_service_module, "now_ist", lambda: datetime(2026, 5, 5, 10, 0, tzinfo=UTC))
 
@@ -225,12 +227,18 @@ def test_in_progress_leave_early_return_preserves_taken_day_and_restores_unused_
             await leave_service.approve_leave(app.id, actioned_by_user_id=mgr_user.id)
 
             # Verify ON_LEAVE records exist
-            records = (await session.execute(
-                select(AttendanceRecord).where(
-                    AttendanceRecord.employee_id == emp.id,
-                    AttendanceRecord.status == "ON_LEAVE",
+            records = (
+                (
+                    await session.execute(
+                        select(AttendanceRecord).where(
+                            AttendanceRecord.employee_id == emp.id,
+                            AttendanceRecord.status == "ON_LEAVE",
+                        )
+                    )
                 )
-            )).scalars().all()
+                .scalars()
+                .all()
+            )
             assert len(records) >= 2
 
             requested = await leave_service.request_leave_cancellation(
@@ -251,13 +259,19 @@ def test_in_progress_leave_early_return_preserves_taken_day_and_restores_unused_
             assert balance.used == 1.0
 
             # The taken day remains ON_LEAVE; only the unused day is removed.
-            post_records = (await session.execute(
-                select(AttendanceRecord).where(
-                    AttendanceRecord.employee_id == emp.id,
-                    AttendanceRecord.status == "ON_LEAVE",
-                    AttendanceRecord.attendance_date.in_([date(2026, 5, 4), date(2026, 5, 5)]),
+            post_records = (
+                (
+                    await session.execute(
+                        select(AttendanceRecord).where(
+                            AttendanceRecord.employee_id == emp.id,
+                            AttendanceRecord.status == "ON_LEAVE",
+                            AttendanceRecord.attendance_date.in_([date(2026, 5, 4), date(2026, 5, 5)]),
+                        )
+                    )
                 )
-            )).scalars().all()
+                .scalars()
+                .all()
+            )
             assert [record.attendance_date for record in post_records] == [date(2026, 5, 4)]
 
             monkeypatch.setattr(leave_service_module, "now_ist", lambda: datetime(2026, 5, 6, 10, 0, tzinfo=UTC))
@@ -274,6 +288,7 @@ def test_in_progress_leave_early_return_preserves_taken_day_and_restores_unused_
 
 
 # ── 3. Attendance Correction Self-Approval Prevention ─────────────────────────
+
 
 def test_attendance_correction_self_approval_prevention(unique_suffix):
     async def _test():
@@ -322,6 +337,7 @@ def test_attendance_correction_self_approval_prevention(unique_suffix):
 
 
 # ── 4. Overtime Self-Approval & Rejection ─────────────────────────────────────
+
 
 def test_overtime_self_approval_and_rejection(unique_suffix):
     async def _test():
@@ -398,6 +414,7 @@ def test_overtime_self_approval_and_rejection(unique_suffix):
 
 # ── 5. Overtime Monthly Summary Filtering ─────────────────────────────────────
 
+
 def test_overtime_monthly_summary_filtering(unique_suffix):
     async def _test():
         async with async_session_maker() as session:
@@ -459,6 +476,7 @@ def test_overtime_monthly_summary_filtering(unique_suffix):
 
 # ── 6. Work Arrangement Self-Approval & Attendance Reversion ─────────────────
 
+
 def test_work_arrangement_workflow_and_attendance(unique_suffix):
     async def _test():
         async with async_session_maker() as session:
@@ -485,29 +503,42 @@ def test_work_arrangement_workflow_and_attendance(unique_suffix):
             assert approved.status == "APPROVED"
 
             # Attendance records created
-            recs = (await session.execute(
-                select(AttendanceRecord).where(
-                    AttendanceRecord.employee_id == emp.id,
-                    AttendanceRecord.attendance_date.in_([date(2026, 9, 1), date(2026, 9, 2)]),
+            recs = (
+                (
+                    await session.execute(
+                        select(AttendanceRecord).where(
+                            AttendanceRecord.employee_id == emp.id,
+                            AttendanceRecord.attendance_date.in_([date(2026, 9, 1), date(2026, 9, 2)]),
+                        )
+                    )
                 )
-            )).scalars().all()
+                .scalars()
+                .all()
+            )
             assert len(recs) == 2
             assert all(r.status == "WORK_FROM_HOME" for r in recs)
 
             # Cancel cleans attendance records
             await wa_service.cancel_request(req.id, cancelled_by_user_id=emp_user.id)
-            recs_after = (await session.execute(
-                select(AttendanceRecord).where(
-                    AttendanceRecord.employee_id == emp.id,
-                    AttendanceRecord.attendance_date.in_([date(2026, 9, 1), date(2026, 9, 2)]),
+            recs_after = (
+                (
+                    await session.execute(
+                        select(AttendanceRecord).where(
+                            AttendanceRecord.employee_id == emp.id,
+                            AttendanceRecord.attendance_date.in_([date(2026, 9, 1), date(2026, 9, 2)]),
+                        )
+                    )
                 )
-            )).scalars().all()
+                .scalars()
+                .all()
+            )
             assert len(recs_after) == 0
 
     run_async(_test())
 
 
 # ── 7. WFH Recognition in Batch Attendance Processor ─────────────────────────
+
 
 def test_wfh_awareness_in_attendance_processor(unique_suffix):
     async def _test():
@@ -546,6 +577,7 @@ def test_wfh_awareness_in_attendance_processor(unique_suffix):
 
 
 # ── 8. OrgService CRUD and Validation ────────────────────────────────────────
+
 
 def test_org_service_crud_and_validation(unique_suffix):
     async def _test():
@@ -597,18 +629,15 @@ def test_org_service_crud_and_validation(unique_suffix):
                 )
             )
             await org_service.delete_department(unused_dept.id)
-            with pytest.raises(HTTPException) as exc_info:
-                await org_service.get_department(unused_dept.id)
-            assert exc_info.value.status_code == 404
+            assert (await org_service.get_department(unused_dept.id)).is_active is False
 
-            # Cannot delete a Department with employee references.
+            # Soft deactivation preserves employee history and references.
             with pytest.raises(HTTPException) as exc_info:
                 await org_service.delete_department(999999)
             assert exc_info.value.status_code == 404
 
-            with pytest.raises(HTTPException) as exc_info:
-                await org_service.delete_department(fixture_dept.id)
-            assert exc_info.value.status_code == 409
+            await org_service.delete_department(fixture_dept.id)
+            assert (await org_service.get_department(fixture_dept.id)).is_active is False
 
             # Delete unused Unit.
             unused_unit = await org_service.create_unit(
@@ -618,18 +647,15 @@ def test_org_service_crud_and_validation(unique_suffix):
                 )
             )
             await org_service.delete_unit(unused_unit.id)
-            with pytest.raises(HTTPException) as exc_info:
-                await org_service.get_unit(unused_unit.id)
-            assert exc_info.value.status_code == 404
+            assert (await org_service.get_unit(unused_unit.id)).is_active is False
 
-            # Cannot delete a Unit with employee or holiday references.
+            # Units are also deactivated rather than physically deleted.
             with pytest.raises(HTTPException) as exc_info:
                 await org_service.delete_unit(999999)
             assert exc_info.value.status_code == 404
 
-            with pytest.raises(HTTPException) as exc_info:
-                await org_service.delete_unit(fixture_unit.id)
-            assert exc_info.value.status_code == 409
+            await org_service.delete_unit(fixture_unit.id)
+            assert (await org_service.get_unit(fixture_unit.id)).is_active is False
 
             # Validation: cannot create department under nonexistent unit
             with pytest.raises(HTTPException) as exc_info:
@@ -646,6 +672,7 @@ def test_org_service_crud_and_validation(unique_suffix):
 
 
 # ── 9. Completed Detail / Single-Resource Retrieval Endpoints ────────────────
+
 
 def test_completed_detail_endpoints(unique_suffix):
     async def _test():
@@ -738,6 +765,7 @@ def test_completed_detail_endpoints(unique_suffix):
             # 6. Shift Assignment Get
             from schemas.shifts import ShiftAssignmentCreate, ShiftCreate
             from services.shift_service import ShiftService
+
             shift_svc = ShiftService(session)
             shift = await shift_svc.create_shift(
                 ShiftCreate(
@@ -762,6 +790,7 @@ def test_completed_detail_endpoints(unique_suffix):
 
 
 # ── 10. Notification Read Authorization & Manager Dashboard Metrics ──────────
+
 
 def test_notification_and_manager_dashboard_workflow(unique_suffix):
     async def _test():

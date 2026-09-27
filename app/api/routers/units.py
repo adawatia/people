@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.auth import fastapi_users
+from core.auth import current_business_user
 from core.database import get_async_session
 from core.pagination import PaginatedResponse
 from core.sorting import LookupSort
@@ -21,17 +21,24 @@ async def list_units(
     search: str | None = None,
     sort_by: LookupSort | None = None,
     sort_order: str = Query("asc", pattern="^(asc|desc)$"),
-    _: User = Depends(fastapi_users.current_user(active=True)),
+    _: User = Depends(current_business_user),
     session: AsyncSession = Depends(get_async_session),
 ) -> PaginatedResponse[UnitRead]:
-    return await LookupService(session).list_page(Unit, page=page, page_size=page_size,
-        search=search, sort_by=sort_by, sort_order=sort_order, filters={"organization_id": organization_id})
+    return await LookupService(session).list_page(
+        Unit,
+        page=page,
+        page_size=page_size,
+        search=search,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        filters={"organization_id": organization_id},
+    )
 
 
 @router.get("/{unit_id}", response_model=UnitRead)
 async def get_unit(
     unit_id: int,
-    _: User = Depends(fastapi_users.current_user(active=True)),
+    _: User = Depends(current_business_user),
     session: AsyncSession = Depends(get_async_session),
 ) -> UnitRead:
     service = OrgService(session)

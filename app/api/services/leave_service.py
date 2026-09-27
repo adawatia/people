@@ -237,15 +237,16 @@ class LeaveService:
         return results
 
     async def _get_leave_balance(
-        self, employee_id: int, leave_type_id: int, year: int
+        self, employee_id: int, leave_type_id: int, year: int, *, for_update: bool = False
     ) -> LeaveBalance | None:
-        return await self.session.scalar(
-            select(LeaveBalance).where(
-                LeaveBalance.employee_id == employee_id,
-                LeaveBalance.leave_type_id == leave_type_id,
-                LeaveBalance.year == year,
-            )
+        statement = select(LeaveBalance).where(
+            LeaveBalance.employee_id == employee_id,
+            LeaveBalance.leave_type_id == leave_type_id,
+            LeaveBalance.year == year,
         )
+        if for_update:
+            statement = statement.with_for_update().execution_options(populate_existing=True)
+        return await self.session.scalar(statement)
 
     # ── Leave Application Workflow ─────────────────────────────────────────────
 
@@ -377,7 +378,7 @@ class LeaveService:
         application_id: int,
         actioned_by_user_id: int,
     ) -> LeaveApplicationRead:
-        app = await self.repo.get_application_by_id(application_id)
+        app = await self.repo.get_application_by_id_for_update(application_id)
         if not app:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Leave application not found")
         if app.status != "PENDING":
@@ -410,7 +411,9 @@ class LeaveService:
         app.actioned_at = now_ist()
 
         if app.leave_type and app.leave_type.is_paid:
-            balance = await self._get_leave_balance(app_employee_id, app_leave_type_id, app_from_date.year)
+            balance = await self._get_leave_balance(
+                app_employee_id, app_leave_type_id, app_from_date.year, for_update=True
+            )
             if balance is None or balance.pending < int(app_days_count):
                 raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Leave balance is no longer available")
             balance.pending -= int(app_days_count)
@@ -475,7 +478,7 @@ class LeaveService:
         actioned_by_user_id: int,
         rejection_reason: str | None = None,
     ) -> LeaveApplicationRead:
-        app = await self.repo.get_application_by_id(application_id)
+        app = await self.repo.get_application_by_id_for_update(application_id)
         if not app:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Leave application not found")
         if app.status != "PENDING":
@@ -498,7 +501,9 @@ class LeaveService:
         app.actioned_at = now_ist()
         app.rejection_reason = rejection_reason
         if is_paid:
-            balance = await self._get_leave_balance(app_employee_id, app_leave_type_id, app_from_date.year)
+            balance = await self._get_leave_balance(
+                app_employee_id, app_leave_type_id, app_from_date.year, for_update=True
+            )
             if balance is not None:
                 balance.pending = max(0, balance.pending - int(app_days_count))
         await self.session.commit()
@@ -516,11 +521,13 @@ class LeaveService:
         application_id: int,
         cancelled_by_user_id: int,
     ) -> LeaveApplicationRead:
-        app = await self.repo.get_application_by_id(application_id)
+        app = await self.repo.get_application_by_id_for_update(application_id)
         if not app:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Leave application not found")
         if app.status not in ("PENDING", "APPROVED"):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only PENDING or APPROVED leave can be cancelled")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Only PENDING or APPROVED leave can be cancelled"
+            )
         if app.status == "APPROVED" and now_ist().date() >= app.from_date:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -545,7 +552,9 @@ class LeaveService:
         app.actioned_at = now_ist()
 
         if app.leave_type and app.leave_type.is_paid:
-            balance = await self._get_leave_balance(app_employee_id, app_leave_type_id, app_from_date.year)
+            balance = await self._get_leave_balance(
+                app_employee_id, app_leave_type_id, app_from_date.year, for_update=True
+            )
             if balance is not None:
                 if was_approved:
                     balance.used = max(0, balance.used - int(app_days_count))
@@ -595,13 +604,15 @@ class LeaveService:
         effective_date: date | None,
         reason: str | None,
     ) -> LeaveApplicationRead:
-        app = await self.repo.get_application_by_id(application_id)
+        app = await self.repo.get_application_by_id_for_update(application_id)
         if not app:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Leave application not found")
         if app.status == "PENDING":
             return await self.cancel_leave(application_id, requested_by_user_id)
         if app.status != "APPROVED":
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only pending or approved leave can be cancelled")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Only pending or approved leave can be cancelled"
+            )
 
         today = now_ist().date()
         if today < app.from_date:
@@ -613,10 +624,16 @@ class LeaveService:
             )
         normalized_reason = reason.strip() if reason else ""
         if not normalized_reason:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="An early-return reason is required")
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="An early-return reason is required"
+            )
 
         requested_effective_date = effective_date or today
-        if requested_effective_date != today or requested_effective_date < app.from_date or requested_effective_date > app.to_date:
+        if (
+            requested_effective_date != today
+            or requested_effective_date < app.from_date
+            or requested_effective_date > app.to_date
+        ):
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="The early-return date must be today and within the approved leave period",
@@ -631,14 +648,18 @@ class LeaveService:
         return await self.get_application(application_id)
 
     async def approve_leave_cancellation(self, application_id: int, actioned_by_user_id: int) -> LeaveApplicationRead:
-        app = await self.repo.get_application_by_id(application_id)
+        app = await self.repo.get_application_by_id_for_update(application_id)
         if not app:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Leave application not found")
         if app.status != "CANCELLATION_PENDING" or app.cancellation_effective_date is None:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No cancellation request is awaiting approval")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="No cancellation request is awaiting approval"
+            )
         employee = await self.employee_repo.get_by_id(app.employee_id)
         if employee and employee.user_id == actioned_by_user_id:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Approvers cannot approve their own leave cancellation")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Approvers cannot approve their own leave cancellation"
+            )
 
         effective_date = app.cancellation_effective_date
         refundable_days = await self.calculate_leave_days(
@@ -647,7 +668,9 @@ class LeaveService:
         original_from_date, original_to_date = app.from_date, app.to_date
         original_days = float(app.days_count)
         if app.leave_type.is_paid:
-            balance = await self._get_leave_balance(app.employee_id, app.leave_type_id, original_from_date.year)
+            balance = await self._get_leave_balance(
+                app.employee_id, app.leave_type_id, original_from_date.year, for_update=True
+            )
             if balance is not None:
                 balance.used = max(0, balance.used - int(refundable_days))
         await self.repo.create_ledger_entry(
@@ -689,11 +712,13 @@ class LeaveService:
     async def reject_leave_cancellation(
         self, application_id: int, actioned_by_user_id: int, rejection_reason: str | None
     ) -> LeaveApplicationRead:
-        app = await self.repo.get_application_by_id(application_id)
+        app = await self.repo.get_application_by_id_for_update(application_id)
         if not app:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Leave application not found")
         if app.status != "CANCELLATION_PENDING":
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No cancellation request is awaiting approval")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="No cancellation request is awaiting approval"
+            )
         app.status = "APPROVED"
         app.cancellation_actioned_by = actioned_by_user_id
         app.cancellation_actioned_at = now_ist()
@@ -747,8 +772,11 @@ class LeaveService:
         if from_date and to_date and from_date > to_date:
             raise HTTPException(422, "Start date must not be after end date")
         result = await self.repo.list_applications_page(
-            page=page, page_size=page_size,
-            search=search, sort_by=sort_by, sort_order=sort_order,
+            page=page,
+            page_size=page_size,
+            search=search,
+            sort_by=sort_by,
+            sort_order=sort_order,
             employee_id=employee_id,
             status=status,
             from_date=from_date,

@@ -151,4 +151,4 @@ class PasswordRecoveryVerifyRequest(BaseModel):
 
 class PasswordRecoveryResetRequest(BaseModel):
     reset_token: str = Field(..., min_length=16)
-    new_password: str = Field(..., min_length=12)
+    new_password: str = Field(..., min_length=1, description="Must satisfy the configured password policy")

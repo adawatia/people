@@ -23,7 +23,7 @@ import json
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.auth import UserManager, fastapi_users, get_user_manager
+from core.auth import UserManager, current_sensitive_user, get_user_manager
 from core.auth_throttle import AuthThrottle, get_auth_throttle
 from core.database import get_async_session
 from core.request_context import client_ip, request_id
@@ -200,7 +200,7 @@ async def verify_mfa(
 def _status_payload(user: User) -> MfaStatusResponse:
     try:
         hashes = json.loads(user.mfa_recovery_code_hashes) if user.mfa_recovery_code_hashes else []
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         hashes = []
     return MfaStatusResponse(
         enabled=bool(user.mfa_enabled),
@@ -208,15 +208,14 @@ def _status_payload(user: User) -> MfaStatusResponse:
         last_verified_at=user.last_mfa_verified_at,
         recovery_codes_remaining=len(hashes) if isinstance(hashes, list) else 0,
         replacement_pending=bool(
-            user.mfa_pending_secret
-            and (user.mfa_pending_expires_at is None or user.mfa_pending_expires_at > now_ist())
+            user.mfa_pending_secret and (user.mfa_pending_expires_at is None or user.mfa_pending_expires_at > now_ist())
         ),
     )
 
 
 @router.get("/status", response_model=MfaStatusResponse, summary="My MFA status")
 async def mfa_status(
-    user: User = Depends(fastapi_users.current_user(active=True)),
+    user: User = Depends(current_sensitive_user),
 ):
     return _status_payload(user)
 
@@ -234,7 +233,7 @@ async def mfa_status(
 async def confirm_mfa(
     payload: MfaConfirmRequest,
     request: Request,
-    user: User = Depends(fastapi_users.current_user(active=True)),
+    user: User = Depends(current_sensitive_user),
     manager: UserManager = Depends(get_user_manager),
     session: AsyncSession = Depends(get_async_session),
     throttle: AuthThrottle = Depends(get_auth_throttle),
@@ -242,7 +241,9 @@ async def confirm_mfa(
     """Step-up protected: password *and* a code from the pending secret."""
     account = await _verify_management_password(payload, user, manager, throttle, request)
     try:
-        await AuthService(session).activate_enrollment(user, payload.code, ip_address=client_ip(request), request_id=request_id(request))
+        await AuthService(session).activate_enrollment(
+            user, payload.code, ip_address=client_ip(request), request_id=request_id(request)
+        )
     except HTTPException:
         await record_throttle_failure(throttle, request=request, account=account, scope="mfa")
         raise
@@ -264,7 +265,7 @@ async def confirm_mfa(
 async def regenerate_recovery_codes(
     payload: MfaPasswordRequest,
     request: Request,
-    user: User = Depends(fastapi_users.current_user(active=True)),
+    user: User = Depends(current_sensitive_user),
     manager: UserManager = Depends(get_user_manager),
     session: AsyncSession = Depends(get_async_session),
     throttle: AuthThrottle = Depends(get_auth_throttle),
@@ -283,7 +284,7 @@ async def regenerate_recovery_codes(
 async def reset_mfa(
     payload: MfaPasswordRequest,
     request: Request,
-    user: User = Depends(fastapi_users.current_user(active=True)),
+    user: User = Depends(current_sensitive_user),
     manager: UserManager = Depends(get_user_manager),
     session: AsyncSession = Depends(get_async_session),
     throttle: AuthThrottle = Depends(get_auth_throttle),
@@ -310,7 +311,7 @@ async def reset_mfa(
 async def disable_mfa(
     payload: MfaPasswordRequest,
     request: Request,
-    user: User = Depends(fastapi_users.current_user(active=True)),
+    user: User = Depends(current_sensitive_user),
     manager: UserManager = Depends(get_user_manager),
     session: AsyncSession = Depends(get_async_session),
     throttle: AuthThrottle = Depends(get_auth_throttle),

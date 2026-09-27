@@ -25,7 +25,7 @@ DASHBOARD_WIDGETS: list[dict[str, str | None]] = [
 
 async def get_visible_widgets(user: User, session: AsyncSession) -> list[str]:
     if user.is_superuser:
-        return [widget["key"] for widget in DASHBOARD_WIDGETS]
+        return ["system_health"]
     permissions = set(await get_user_permissions(user, session))
     return [
         widget["key"]

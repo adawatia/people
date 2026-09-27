@@ -29,16 +29,18 @@ def create_invitation_for_user(user: User) -> str:
     """
     raw_token = generate_invitation_token()
     token_hash = hash_token(raw_token)
-    
+
     user.invitation_token_hash = token_hash
     user.invitation_sent_at = now_ist()
     user.invitation_expires_at = now_ist() + timedelta(hours=INVITATION_EXPIRE_HOURS)
     user.invitation_used_at = None
-    
+
     return raw_token
 
 
-async def find_user_by_invitation_token(session: AsyncSession, raw_token: str) -> tuple[User | None, str | None]:
+async def find_user_by_invitation_token(
+    session: AsyncSession, raw_token: str, *, for_update: bool = False
+) -> tuple[User | None, str | None]:
     """
     Locates user by raw token and verifies expiration & usage.
     Returns (User, None) if valid, or (None, error_reason) if invalid/expired/used.
@@ -48,6 +50,8 @@ async def find_user_by_invitation_token(session: AsyncSession, raw_token: str) -
 
     token_hash = hash_token(raw_token)
     query = select(User).where(User.invitation_token_hash == token_hash)
+    if for_update:
+        query = query.with_for_update().execution_options(populate_existing=True)
     result = await session.execute(query)
     user = result.scalars().first()
 

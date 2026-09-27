@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.auth import UserManager, fastapi_users, get_user_manager, require_permission
+from core.auth import UserManager, current_business_user, get_user_manager, require_permission
 from core.database import get_async_session
 from core.employee_access import get_employee_scope, require_employee_access
 from core.pagination import PaginatedResponse
@@ -36,7 +36,7 @@ async def list_employees(
     designation_id: int | None = None,
     status: str | None = None,
     reporting_manager_id: int | None = None,
-    _: User = Depends(fastapi_users.current_user(active=True)),
+    _: User = Depends(current_business_user),
     session: AsyncSession = Depends(get_async_session),
 ) -> PaginatedEmployeesResponse:
     current_user = _
@@ -64,7 +64,9 @@ async def list_employees(
     return await service.list_employees(
         page=page,
         page_size=page_size,
-        q=search if search is not None else q, sort_by=sort_by, sort_order=sort_order,
+        q=search if search is not None else q,
+        sort_by=sort_by,
+        sort_order=sort_order,
         unit_id=unit_id,
         department_id=department_id,
         designation_id=designation_id,
@@ -111,12 +113,15 @@ async def onboard_employee(
             raise HTTPException(status_code=400, detail=f"A user with this {conflict} already exists")
         password = data.initial_password
         try:
-            await user_manager.validate_password(data.initial_password, User(
-                email=email,
-                username=username,
-                first_name=data.first_name,
-                last_name=data.last_name,
-            ))
+            await user_manager.validate_password(
+                data.initial_password,
+                User(
+                    email=email,
+                    username=username,
+                    first_name=data.first_name,
+                    last_name=data.last_name,
+                ),
+            )
         except fu_exceptions.InvalidPasswordException as exc:
             raise HTTPException(status_code=400, detail={"code": "INVALID_PASSWORD", "reason": exc.reason}) from exc
         user_payload = {
@@ -143,7 +148,9 @@ async def onboard_employee(
         user_id = created_user.id
         created_user.is_verified = True
 
-        employee_data = EmployeeCreate(**data.model_dump(exclude={"create_user_account", "username", "initial_password"}, exclude_unset=True))
+        employee_data = EmployeeCreate(
+            **data.model_dump(exclude={"create_user_account", "username", "initial_password"}, exclude_unset=True)
+        )
         employee_data.user_id = user_id
         employee = await EmployeeService(session).create_employee(employee_data, commit=False)
         await session.commit()
@@ -157,7 +164,7 @@ async def onboard_employee(
 @router.get("/{emp_id}", response_model=EmployeeDirectoryRead)
 async def get_employee(
     emp_id: int,
-    current_user: User = Depends(fastapi_users.current_user(active=True)),
+    current_user: User = Depends(current_business_user),
     session: AsyncSession = Depends(get_async_session),
 ) -> EmployeeRead:
     service = EmployeeService(session)
@@ -174,7 +181,7 @@ async def get_employee_work_history(
     search: str | None = None,
     sort_by: EmployeeHistorySort | None = None,
     sort_order: str = Query("desc", pattern="^(asc|desc)$"),
-    current_user: User = Depends(fastapi_users.current_user(active=True)),
+    current_user: User = Depends(current_business_user),
     session: AsyncSession = Depends(get_async_session),
 ) -> PaginatedResponse[EmployeeWorkHistoryRead]:
     service = EmployeeService(session)

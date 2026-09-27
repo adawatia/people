@@ -50,11 +50,21 @@ class UserRead(BaseUser[int]):
 
 class UserCreate(BaseUserCreate):
     username: str = Field(..., min_length=3, max_length=50, examples=["johndoe"], description="Unique login username")
-    password: str | None = Field(default=None, min_length=8, examples=["SecurePass123!"], description="Password")
+    password: str | None = Field(
+        default=None,
+        min_length=1,
+        examples=["violet river compass 47"],
+        description="Password or passphrase",
+    )
     email: str = Field(..., max_length=255, examples=["john.doe@example.com"], description="User email address")
     first_name: str = Field(..., min_length=1, max_length=100, examples=["John"], description="User first name")
     last_name: str | None = Field(default=None, max_length=100, examples=["Doe"], description="User last name")
-    mobile_number: str | None = Field(default=None, max_length=20, examples=["+919876543210"], description="E.164 mobile number (optional, usable for login)")
+    mobile_number: str | None = Field(
+        default=None,
+        max_length=20,
+        examples=["+919876543210"],
+        description="E.164 mobile number (optional, usable for login)",
+    )
     must_change_password: bool = Field(default=False, description="Force password change on first login")
     role: Literal["EMPLOYEE", "DEPARTMENT_MANAGER", "HR_ADMIN", "ORGANIZATION_OWNER"] = Field(
         default="EMPLOYEE", description="Fixed business role"
@@ -104,7 +114,7 @@ class UserUpdate(BaseUserUpdate):
 
 class SetPasswordRequest(BaseModel):
     token: str = Field(..., min_length=10, description="Invitation token")
-    password: str = Field(..., min_length=12, description="New password")
+    password: str = Field(..., min_length=1, description="New password; must satisfy the configured password policy")
 
 
 class ValidateInvitationResponse(BaseModel):
@@ -126,3 +136,42 @@ class UserStats(BaseModel):
 
 
 PaginatedUsersResponse = PaginatedResponse[UserRead]
+
+
+class TechnicalAccountRead(BaseModel):
+    id: int
+    username: str
+    email: str
+    first_name: str | None = None
+    last_name: str | None = None
+    mobile_number: str | None = None
+    is_active: bool
+    is_verified: bool
+    must_change_password: bool
+    mfa_enabled: bool
+    created_at: datetime
+    employee_id: int | None = None
+    employee_code: str | None = None
+    employee_role: str | None = None
+
+
+class SuperAdminStepUpRequest(BaseModel):
+    current_password: str = Field(..., min_length=1, max_length=256)
+
+
+class SuperAdminAccountStatusRequest(SuperAdminStepUpRequest):
+    is_active: bool
+
+
+class TemporaryPasswordResponse(BaseModel):
+    temporary_password: str
+    revoked_sessions: int
+    message: str
+
+
+class SuperAdminAccountActionResponse(BaseModel):
+    message: str
+    revoked_sessions: int = 0
+
+
+PaginatedTechnicalAccountsResponse = PaginatedResponse[TechnicalAccountRead]

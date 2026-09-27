@@ -184,7 +184,10 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="max-w-3xl space-y-6">
+  <div
+    class="space-y-6"
+    :class="isTechnicalAdmin ? 'max-w-6xl' : 'max-w-3xl'"
+  >
     <div>
       <p class="text-sm font-medium text-primary">
         {{ isTechnicalAdmin ? 'Technical access' : 'Account security' }}
@@ -212,6 +215,8 @@ onMounted(async () => {
       title="Technical account"
       description="This account is separate from employee records. Use it for system setup, integrations, access configuration and operational support."
     />
+
+    <TechnicalAccountAdministration v-if="isTechnicalAdmin" />
 
     <section
       v-if="isTechnicalAdmin"

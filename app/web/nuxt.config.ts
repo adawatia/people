@@ -1,10 +1,17 @@
+const securityHeaders = {
+  'content-security-policy': `default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'`,
+  'referrer-policy': 'strict-origin-when-cross-origin',
+  'x-content-type-options': 'nosniff',
+  'x-frame-options': 'DENY',
+  'permissions-policy': 'camera=(), microphone=(), geolocation=()'
+}
+
 export default defineNuxtConfig({
   modules: [
     '@nuxt/eslint',
     '@nuxt/ui',
     '@nuxt/icon',
     '@nuxt/image',
-    'nuxt-auth-utils',
     'nuxt-echarts'
   ],
 
@@ -21,6 +28,15 @@ export default defineNuxtConfig({
     // origin differs from what the BFF sees, e.g. behind a TLS-terminating
     // proxy or an additional hostname.
     hrmsAllowedOrigins: import.meta.env.NUXT_HRMS_ALLOWED_ORIGINS?.split(',').map((entry: string) => entry.trim()).filter(Boolean) || []
+  },
+
+  routeRules: {
+    '/**': {
+      headers: {
+        ...securityHeaders,
+        ...(import.meta.dev ? {} : { 'strict-transport-security': 'max-age=31536000; includeSubDomains' })
+      }
+    }
   },
 
   compatibilityDate: '2026-06-30',

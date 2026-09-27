@@ -7,7 +7,7 @@ class ShiftBase(BaseModel):
     name: str
     code: str | None = None
     start_time: time | str  # "HH:MM" or time object
-    end_time: time | str    # "HH:MM" or time object
+    end_time: time | str  # "HH:MM" or time object
     grace_minutes: int = 10
     break_minutes: int = 30
     is_cross_midnight: bool = False
@@ -47,6 +47,7 @@ class ShiftUpdate(BaseModel):
 
 class ShiftRead(ShiftBase):
     id: int
+    erp_id: str | None = None
     unit_id: int | None = None
     model_config = ConfigDict(from_attributes=True)
 

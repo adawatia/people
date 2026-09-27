@@ -14,7 +14,7 @@ import jwt
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.auth import fastapi_users
+from core.auth import current_sensitive_user
 from core.auth_throttle import AuthThrottle, get_auth_throttle
 from core.database import get_async_session
 from core.request_context import client_ip, request_id, user_agent
@@ -76,9 +76,7 @@ async def guard_throttle(
     await throttle.apply_delay(decision)
 
 
-async def record_throttle_failure(
-    throttle: AuthThrottle, *, request: Request, account: str | None, scope: str
-) -> None:
+async def record_throttle_failure(throttle: AuthThrottle, *, request: Request, account: str | None, scope: str) -> None:
     """Count a failure; escalate to a 429 once the budget is exhausted."""
     decision = await throttle.record_failure(ip=client_ip(request), account=account, scope=scope)
     if not decision.allowed:
@@ -119,7 +117,7 @@ def current_session_id(request: Request | None) -> int | None:
 )
 async def create_session(
     request: Request,
-    user: User = Depends(fastapi_users.current_user(active=True)),
+    user: User = Depends(current_sensitive_user),
     session: AsyncSession = Depends(get_async_session),
 ):
     issued = await AuthService(session).issue_session(
@@ -188,12 +186,10 @@ async def revoke_session(
 )
 async def list_sessions(
     request: Request,
-    user: User = Depends(fastapi_users.current_user(active=True)),
+    user: User = Depends(current_sensitive_user),
     session: AsyncSession = Depends(get_async_session),
 ):
-    summaries = await AuthService(session).list_sessions(
-        user, current_session_id=current_session_id(request)
-    )
+    summaries = await AuthService(session).list_sessions(user, current_session_id=current_session_id(request))
     return _summaries(summaries)
 
 
@@ -205,7 +201,7 @@ async def list_sessions(
 )
 async def revoke_all_sessions(
     request: Request,
-    user: User = Depends(fastapi_users.current_user(active=True)),
+    user: User = Depends(current_sensitive_user),
     session: AsyncSession = Depends(get_async_session),
 ):
     revoked = await AuthService(session).revoke_all(
@@ -221,7 +217,7 @@ async def revoke_all_sessions(
 async def revoke_own_session(
     request: Request,
     session_id: int,
-    user: User = Depends(fastapi_users.current_user(active=True)),
+    user: User = Depends(current_sensitive_user),
     session: AsyncSession = Depends(get_async_session),
 ):
     revoked = await AuthService(session).revoke_session(user, session_id)
@@ -233,7 +229,7 @@ async def revoke_own_session(
 @router.get("/session", response_model=SessionSummaryResponse, summary="Describe the current session")
 async def describe_current_session(
     request: Request,
-    user: User = Depends(fastapi_users.current_user(active=True)),
+    user: User = Depends(current_sensitive_user),
     session: AsyncSession = Depends(get_async_session),
 ):
     session_id = current_session_id(request)

@@ -4,8 +4,8 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.auth import verify_erp_api_key
 from core.database import get_async_session
+from core.erp_auth import require_erp_scope
 from db.models import AttendanceRecord, Employee, Shift, now_ist
 from schemas.attendance import ErpAttendanceRecordBulkCreate, ErpAttendanceRecordCreate, ErpSyncResult
 
@@ -26,7 +26,7 @@ async def _employee(session: AsyncSession, employee_id: int | None, employee_cod
     response_model=ErpSyncResult,
     summary="Sync processed ERP attendance records",
     description="Stores ERP-calculated daily attendance. Send one record per employee/date. Re-sending the same erp_record_id is idempotent.",
-    dependencies=[Depends(verify_erp_api_key)],
+    dependencies=[Depends(require_erp_scope("attendance:write"))],
 )
 async def sync_records(
     records: list[ErpAttendanceRecordCreate],
@@ -36,14 +36,18 @@ async def sync_records(
     for item in records:
         try:
             employee = await _employee(session, item.employee_id, item.employee_code)
-            record = await session.scalar(select(AttendanceRecord).where(AttendanceRecord.erp_record_id == item.erp_record_id))
+            record = await session.scalar(
+                select(AttendanceRecord).where(AttendanceRecord.erp_record_id == item.erp_record_id)
+            )
             if record is not None:
                 result.duplicates.append({"erp_record_id": item.erp_record_id, "id": record.id})
                 continue
-            record = await session.scalar(select(AttendanceRecord).where(
-                AttendanceRecord.employee_id == employee.id,
-                AttendanceRecord.attendance_date == item.attendance_date,
-            ))
+            record = await session.scalar(
+                select(AttendanceRecord).where(
+                    AttendanceRecord.employee_id == employee.id,
+                    AttendanceRecord.attendance_date == item.attendance_date,
+                )
+            )
             if record is None:
                 record = AttendanceRecord(employee_id=employee.id, attendance_date=item.attendance_date)
                 session.add(record)
@@ -84,7 +88,7 @@ async def sync_records(
         "Records may represent past, current, or planned attendance. Each item is "
         "resolved by employee_code or employee_id and erp_record_id makes retries idempotent."
     ),
-    dependencies=[Depends(verify_erp_api_key)],
+    dependencies=[Depends(require_erp_scope("attendance:write"))],
 )
 async def sync_records_bulk(
     payload: ErpAttendanceRecordBulkCreate,

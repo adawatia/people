@@ -20,6 +20,16 @@ class WorkArrangementRepository:
         )
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
+    async def get_by_id_for_update(self, request_id: int) -> WorkArrangementRequest | None:
+        stmt = (
+            select(WorkArrangementRequest)
+            .options(selectinload(WorkArrangementRequest.employee))
+            .where(WorkArrangementRequest.id == request_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
     async def create(self, req: WorkArrangementRequest) -> WorkArrangementRequest:
         self.session.add(req)
         await self.session.flush()
@@ -118,5 +128,16 @@ class WorkArrangementRepository:
         if search:
             ids = employee_search(select(Employee.id), Employee, search)
             stmt = stmt.where(WorkArrangementRequest.employee_id.in_(ids))
-        stmt = ordered(stmt, {"created_at": WorkArrangementRequest.created_at, "status": WorkArrangementRequest.status, "id": WorkArrangementRequest.id}, sort_by, sort_order, "created_at", WorkArrangementRequest.id)
+        stmt = ordered(
+            stmt,
+            {
+                "created_at": WorkArrangementRequest.created_at,
+                "status": WorkArrangementRequest.status,
+                "id": WorkArrangementRequest.id,
+            },
+            sort_by,
+            sort_order,
+            "created_at",
+            WorkArrangementRequest.id,
+        )
         return await paginate(self.session, stmt, page, page_size)

@@ -91,6 +91,8 @@ class AuditAction:
     MFA_SUCCESS = "AUTH_MFA_SUCCESS"
     MFA_FAILED = "AUTH_MFA_FAILED"
     MFA_RECOVERY_REGENERATED = "AUTH_MFA_RECOVERY_REGENERATED"
+    MFA_ADMIN_RESET = "AUTH_MFA_ADMIN_RESET"
+    ACCOUNT_STATUS_CHANGED = "AUTH_ACCOUNT_STATUS_CHANGED"
 
 
 @dataclass(frozen=True)
@@ -248,6 +250,7 @@ class AuthService:
             token_hash=hash_refresh_token(raw_refresh),
             expires_at=policy.refresh_expiry(now),
             absolute_expires_at=policy.absolute_expiry(now),
+            mfa_verified_at=now if mfa_verified else None,
             ip_address=ip_address,
             user_agent=user_agent,
         )
@@ -385,6 +388,7 @@ class AuthService:
             # never extend a session beyond its absolute lifetime.
             expires_at=min(policy.refresh_expiry(now), auth_session.absolute_expires_at),
             absolute_expires_at=auth_session.absolute_expires_at,
+            mfa_verified_at=auth_session.mfa_verified_at,
             ip_address=ip_address,
             user_agent=user_agent,
         )
@@ -511,13 +515,14 @@ class AuthService:
         *,
         reason: str,
         action: str = AuditAction.ALL_SESSIONS_REVOKED,
+        actor: User | None = None,
         ip_address: str | None = None,
         request_id: str | None = None,
     ) -> int:
         """Revoke every live session of a user (logout-everywhere, password events)."""
         revoked = await self.repo.revoke_all_for_user(user_id=user.id, now=now_ist(), reason=reason)
         self._audit(
-            actor=user,
+            actor=actor or user,
             action=action,
             entity_type="user",
             entity_id=str(user.id),
@@ -601,9 +606,7 @@ class AuthService:
         access token even though it is signed with the same key.
         """
         try:
-            payload = decode_token(
-                challenge_token, secret=self.settings.jwt_secret, audience=MFA_CHALLENGE_AUDIENCE
-            )
+            payload = decode_token(challenge_token, secret=self.settings.jwt_secret, audience=MFA_CHALLENGE_AUDIENCE)
         except jwt.PyJWTError as exc:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED, detail="Your verification window has expired. Sign in again."
@@ -743,7 +746,9 @@ class AuthService:
                 user.mfa_pending_secret = None
                 user.mfa_pending_expires_at = None
                 await self.session.commit()
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="MFA enrolment expired; start again")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST, detail="MFA enrolment expired; start again"
+                )
             try:
                 pending = decrypt_secret(user.mfa_pending_secret, self._secret_key())
             except SecretBoxError:
@@ -941,6 +946,6 @@ def _encode_recovery_hashes(codes: list[str], *, already_hashed: list[str] | Non
 def _decode_recovery_hashes(payload: str) -> list[str]:
     try:
         value = json.loads(payload)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return []
     return [str(item) for item in value] if isinstance(value, list) else []

@@ -70,57 +70,65 @@ def plain_employee(**overrides) -> SimpleNamespace:
 
 
 def department_manager(**overrides) -> SimpleNamespace:
-    return employee(**{
-        "id": 2,
-        "user_id": 2,
-        "role": DEPARTMENT_MANAGER,
-        "business_role": DEPARTMENT_MANAGER,
-        "access_scope": SCOPE_DEPARTMENT,
-        "access_scope_id": 20,
-        "department_id": 20,
-        "unit_id": 7,
-        **overrides,
-    })
+    return employee(
+        **{
+            "id": 2,
+            "user_id": 2,
+            "role": DEPARTMENT_MANAGER,
+            "business_role": DEPARTMENT_MANAGER,
+            "access_scope": SCOPE_DEPARTMENT,
+            "access_scope_id": 20,
+            "department_id": 20,
+            "unit_id": 7,
+            **overrides,
+        }
+    )
 
 
 def unit_hr(**overrides) -> SimpleNamespace:
-    return employee(**{
-        "id": 3,
-        "user_id": 3,
-        "role": HR_ADMIN,
-        "business_role": HR_ADMIN,
-        "access_scope": SCOPE_UNIT,
-        "access_scope_id": 7,
-        "unit_id": 7,
-        **overrides,
-    })
+    return employee(
+        **{
+            "id": 3,
+            "user_id": 3,
+            "role": HR_ADMIN,
+            "business_role": HR_ADMIN,
+            "access_scope": SCOPE_UNIT,
+            "access_scope_id": 7,
+            "unit_id": 7,
+            **overrides,
+        }
+    )
 
 
 def organization_hr(**overrides) -> SimpleNamespace:
     """Organization HR: the HR role with organization scope, never a unit."""
-    return employee(**{
-        "id": 4,
-        "user_id": 4,
-        "role": HR_ADMIN,
-        "business_role": HR_ADMIN,
-        "access_scope": SCOPE_ORGANIZATION,
-        "access_scope_id": None,
-        "unit_id": None,
-        "department_id": None,
-        **overrides,
-    })
+    return employee(
+        **{
+            "id": 4,
+            "user_id": 4,
+            "role": HR_ADMIN,
+            "business_role": HR_ADMIN,
+            "access_scope": SCOPE_ORGANIZATION,
+            "access_scope_id": None,
+            "unit_id": None,
+            "department_id": None,
+            **overrides,
+        }
+    )
 
 
 def organization_owner(**overrides) -> SimpleNamespace:
-    return employee(**{
-        "id": 5,
-        "user_id": 5,
-        "role": ORGANIZATION_OWNER,
-        "business_role": ORGANIZATION_OWNER,
-        "access_scope": SCOPE_ORGANIZATION,
-        "access_scope_id": None,
-        **overrides,
-    })
+    return employee(
+        **{
+            "id": 5,
+            "user_id": 5,
+            "role": ORGANIZATION_OWNER,
+            "business_role": ORGANIZATION_OWNER,
+            "access_scope": SCOPE_ORGANIZATION,
+            "access_scope_id": None,
+            **overrides,
+        }
+    )
 
 
 def user(user_id: int = 1, *, is_superuser: bool = False) -> SimpleNamespace:
@@ -393,23 +401,23 @@ def test_super_admin_keeps_the_hr_bundle_it_always_had():
 
 
 @pytest.mark.asyncio
-async def test_super_admin_short_circuits_to_organization_scope(monkeypatch):
+async def test_super_admin_has_no_business_permission_scope(monkeypatch):
     lookup = AsyncMock()
     monkeypatch.setattr(employee_access, "get_current_employee", lookup)
 
     scope = await employee_access.get_permission_scope(user(1, is_superuser=True), "attendance.correct", AsyncMock())
 
-    assert scope.organization is True
+    assert scope == employee_access.EmployeeAccessScope()
     assert lookup.await_count == 0
 
 
 @pytest.mark.asyncio
-async def test_super_admin_scope_helper_is_organization_wide(monkeypatch):
+async def test_super_admin_has_no_workforce_scope(monkeypatch):
     monkeypatch.setattr(employee_access, "get_current_employee", AsyncMock())
 
     scope = await employee_access.get_employee_scope(user(1, is_superuser=True), AsyncMock())
 
-    assert scope.organization is True
+    assert scope == employee_access.EmployeeAccessScope()
 
 
 # ── Assignment path (ERP / employee administration) ───────────────────────────
