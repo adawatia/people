@@ -522,7 +522,7 @@ Config: `create_period`, `create_type`, `update_type`, `allocate_leaves` (writes
 
 #### 2.7.5 Holidays (`services/holiday_service.py`)
 
-`create_holiday_list` can auto-generate a year of `is_weekly_off` rows from `weekly_off_day`; `resolve_holiday_list_for_employee` picks unit list → default list; `is_holiday_or_weekly_off` and `get_holidays_in_range` (with `skip_weekly_offs`) are the primitives used by the leave calculator and the attendance engine. Public API is read-only (`GET /holidays/lists`, `GET /holidays/lists/{id}`).
+`create_holiday_list` can auto-generate a year of `is_weekly_off` rows from `weekly_off_day`; `resolve_holiday_list_for_employee` picks unit list → default list; `is_holiday_or_weekly_off` and `get_holidays_in_range` (with `skip_weekly_offs`) are the primitives used by the leave calculator and the attendance engine. Public API is read-only (`GET /holidays/lists`, `GET /holidays/lists/{id}`). The Holidays page is a display-only viewer: unit filtering with paging/sorting, a calendar rail at 1024px and above replaced by a labeled picker below it, a compact summary of the selected calendar's holidays, weekly offs and next holiday, and month-grouped holiday/weekly-off records rendered as a table at 768px and above and as cards below it.
 
 #### 2.7.6 Overtime (`services/overtime_service.py`)
 
@@ -801,7 +801,7 @@ The workspace middleware keeps hidden routes out of the current workspace and re
 | `pages/work-arrangements/index.vue` | `work-arrangements/` | My request/list/cancel; Team/HR scoped request list | only WFH accepted server-side |
 | `pages/approvals/index.vue` | Leave, work-arrangement, and overtime queues | queues and controls gated by matching permissions; rejection requires a reason; overtime approval defaults to calculated minutes | attendance corrections are ERP-confirmed, not approved here; overtime rows currently show employee IDs |
 | `pages/shifts/index.vue` | `shifts/`, `shifts/assignments`, `org/units`, `employees/` | read-only shift definitions and assignments synchronized from ERP | writes intentionally not offered; ERP owns the source data |
-| `pages/holidays/index.vue` | `holidays/lists`, `org/units` | calendar + holiday list viewer | `canManage` hard-coded `false` (correct, ERP-owned) |
+| `pages/holidays/index.vue` | `holidays/lists`, `org/units` | read-only calendar viewer: unit filter, calendar rail/picker, compact summary and month-grouped holiday records | `canManage` hard-coded `false` (correct, ERP-owned) |
 | `pages/organization/index.vue` | `org/organization`, `org/units`, `org/departments`, `designations/` | read-only tabs for organization structure synchronized from ERP | writes intentionally not offered |
 | `pages/overtime/index.vue` | My: `overtime/`, `overtime/employee/{id}/summary`; Team/HR: `overtime/` | My monthly summary and records; Team/HR scoped records | management collection has no employee name or date filters yet |
 | `pages/reports/index.vue` | `reports/attendance-matrix`, `reports/leave-summary` | month picker, attendance matrix, leave summary; tabs gated by permission | — |
