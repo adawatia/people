@@ -15,6 +15,12 @@ const toast = useToast()
 const employeeId = computed(() => auth.user.value?.employee_id)
 const personalView = computed(() => workspace.current.value === 'MY')
 const monthCursor = ref(new Date(new Date().getFullYear(), new Date().getMonth(), 1))
+const monthChanged = computed(() => monthCursor.value.getFullYear() !== new Date().getFullYear() || monthCursor.value.getMonth() !== new Date().getMonth())
+function resetAttendanceFilters() {
+  list.clear()
+  correctionList.clear()
+  monthCursor.value = new Date(new Date().getFullYear(), new Date().getMonth(), 1)
+}
 const correctionRecord = ref<AttendanceRecord | null>(null)
 const correction = reactive({ requested_punch_in: '', requested_punch_out: '', reason: '' })
 const correctionLoading = ref(false)
@@ -34,7 +40,7 @@ watch(monthCursor, () => {
 const monthKey = computed(() => `${monthCursor.value.getFullYear()}-${monthCursor.value.getMonth() + 1}`)
 const monthLabel = computed(() => new Intl.DateTimeFormat('en-IN', { month: 'long', year: 'numeric' }).format(monthCursor.value))
 
-const { data: attendanceData, pending, error, refresh } = await useAsyncData(
+const { data: rawAttendanceData, pending, error, refresh } = await useAsyncData(
   'my-attendance',
   async () => {
     if (!personalView.value || !employeeId.value) return null
@@ -51,7 +57,8 @@ const { data: attendanceData, pending, error, refresh } = await useAsyncData(
   },
   { watch: [monthKey, employeeId, personalView, correctionList.query] }
 )
-const { data: scopedRecords, pending: scopedPending, error: scopedError, refresh: refreshScoped } = await useAsyncData(
+const attendanceData = useRetainedData(rawAttendanceData)
+const { data: rawScopedRecords, pending: scopedPending, error: scopedError, refresh: refreshScoped } = await useAsyncData(
   'scoped-attendance',
   async () => {
     if (personalView.value) return null
@@ -67,6 +74,7 @@ const { data: scopedRecords, pending: scopedPending, error: scopedError, refresh
   },
   { watch: [monthKey, personalView, list.query] }
 )
+const scopedRecords = useRetainedData(rawScopedRecords)
 
 const records = computed(() => attendanceData.value?.records || [])
 const recordMap = computed(() => new Map(records.value.map(record => [record.attendance_date, record])))
@@ -98,18 +106,20 @@ const summaryCards = computed(() => {
 const statusSegments = computed(() => {
   const summary = attendanceData.value?.summary
   return [
-    { label: 'Present', value: summary?.total_present ?? 0, color: '#10b981' },
-    { label: 'Half day', value: summary?.total_half_day ?? 0, color: '#0d9488' },
-    { label: 'On leave', value: summary?.total_leave ?? 0, color: '#2563eb' },
-    { label: 'Absent', value: summary?.total_absent ?? 0, color: '#f43f5e' },
-    { label: 'Missed punch', value: summary?.total_missed_punch ?? 0, color: '#f59e0b' },
-    { label: 'Weekly off', value: summary?.total_weekly_off ?? 0, color: '#94a3b8' },
-    { label: 'Public holiday', value: summary?.total_holiday ?? 0, color: '#0ea5e9' }
+    { label: 'Present', value: summary?.total_present ?? 0, color: chartTheme.value ? '#94d8b4' : '#226747' },
+    { label: 'Half day', value: summary?.total_half_day ?? 0, color: chartTheme.value ? '#ebbb94' : '#925025' },
+    { label: 'On leave', value: summary?.total_leave ?? 0, color: chartTheme.value ? '#c9b2ff' : '#5637a5' },
+    { label: 'Absent', value: summary?.total_absent ?? 0, color: chartTheme.value ? '#f2acbd' : '#a52b46' },
+    { label: 'Missed punch', value: summary?.total_missed_punch ?? 0, color: chartTheme.value ? '#efd184' : '#805900' },
+    { label: 'Weekly off', value: summary?.total_weekly_off ?? 0, color: chartTheme.value ? '#beb2ce' : '#665e70' },
+    { label: 'Public holiday', value: summary?.total_holiday ?? 0, color: chartTheme.value ? '#abc9f5' : '#345a96' }
   ].filter(segment => segment.value > 0)
 })
 
 const chartTotal = computed(() => statusSegments.value.reduce((total, segment) => total + segment.value, 0))
 const attendanceChartOption = computed<ECOption>(() => ({
+  animation: false,
+  backgroundColor: 'transparent',
   tooltip: {
     trigger: 'item',
     confine: true,
@@ -120,8 +130,8 @@ const attendanceChartOption = computed<ECOption>(() => ({
     subtext: 'recorded days',
     left: 'center',
     top: 'center',
-    textStyle: { fontSize: 22, fontWeight: 700, color: chartTheme.value ? '#e2e8f0' : '#172033' },
-    subtextStyle: { fontSize: 11, color: chartTheme.value ? '#94a3b8' : '#667085' }
+    textStyle: { fontSize: 22, fontWeight: 700, color: chartTheme.value ? '#f7f0e9' : '#292335' },
+    subtextStyle: { fontSize: 11, color: chartTheme.value ? '#beb2ce' : '#665e70' }
   },
   series: [{
     name: 'Attendance status',
@@ -165,6 +175,7 @@ function openCorrection(record: AttendanceRecord) {
 }
 
 async function submitCorrection() {
+  if (correctionLoading.value) return
   if (!correctionRecord.value || correction.reason.trim().length < 5) return
   correctionLoading.value = true
   try {
@@ -194,15 +205,17 @@ function hasPendingCorrection(recordId: number) {
 </script>
 
 <template>
-  <div>
+  <div class="people-page">
+    <DataFeedback
+      :pending="pending"
+      :error="error"
+      :has-data="Boolean(attendanceData)"
+    />
     <div class="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
       <div>
-        <p class="text-sm font-medium text-primary">
-          {{ personalView ? 'My Workspace' : workspace.current.value === 'TEAM' ? 'Team Workspace' : 'HR Workspace' }}
-        </p>
-        <h2 class="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">
+        <h1 class="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">
           Attendance
-        </h2>
+        </h1>
         <p class="mt-2 max-w-2xl text-sm leading-6 text-muted">
           {{ personalView ? 'Review your ERP-synced attendance and flag anything that needs correction.' : 'Review attendance records within your authorized scope.' }}
         </p>
@@ -225,16 +238,26 @@ function hasPendingCorrection(recordId: number) {
         />
       </div>
     </div>
+    <UButton
+      v-if="personalView && monthChanged"
+      class="mt-4"
+      variant="outline"
+      color="neutral"
+      icon="i-lucide-rotate-ccw"
+      @click="resetAttendanceFilters"
+    >
+      Reset filters
+    </UButton>
 
     <ListControls
       v-if="!personalView"
       v-model:search="list.search.value"
       v-model:sort-by="list.sortBy.value"
       v-model:sort-order="list.sortOrder.value"
-      :active="list.active.value"
+      :active="list.active.value || monthChanged"
       :sorts="[{ label: 'Date', value: 'attendance_date' }, { label: 'Status', value: 'status' }]"
       search-placeholder="Search employee name or code"
-      @clear="list.clear"
+      @clear="resetAttendanceFilters"
     />
 
     <UAlert
@@ -260,8 +283,8 @@ function hasPendingCorrection(recordId: number) {
       class="mt-6"
       color="warning"
       variant="soft"
-      icon="i-lucide-coffee"
-      title="Your attendance is taking a short break"
+      icon="i-lucide-circle-alert"
+      title="Updates could not be loaded"
       description="We couldn’t refresh your attendance right now. Please try again in a moment."
       :actions="[{ label: 'Refresh attendance', onClick: () => refresh() }]"
     />
@@ -271,7 +294,7 @@ function hasPendingCorrection(recordId: number) {
       class="people-card mt-7 overflow-hidden"
     >
       <div
-        v-if="scopedPending"
+        v-if="scopedPending && !scopedRecords"
         class="space-y-3 p-5"
       >
         <USkeleton
@@ -293,50 +316,96 @@ function hasPendingCorrection(recordId: number) {
         v-else-if="scopedRecords?.items.length"
         class="overflow-x-auto"
       >
-        <table class="w-full min-w-[680px] text-left text-sm">
-          <thead class="bg-muted/5 text-xs uppercase tracking-wide text-muted">
-            <tr>
-              <th class="px-5 py-3">
-                Employee ID
-              </th><th class="px-4 py-3">
-                Date
-              </th><th class="px-4 py-3">
-                Status
-              </th><th class="px-4 py-3">
-                Worked
-              </th><th class="px-4 py-3">
-                Overtime
-              </th><th class="px-5 py-3">
-                Exceptions
-              </th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-[var(--people-border)]">
-            <tr
-              v-for="record in scopedRecords?.items"
-              :key="record.id"
-            >
-              <td class="px-5 py-4 font-semibold">
-                #{{ record.employee_id }}
-              </td>
-              <td class="px-4 py-4">
-                {{ record.attendance_date }}
-              </td>
-              <td class="px-4 py-4">
-                <AttendanceStatusBadge :status="record.status" />
-              </td>
-              <td class="px-4 py-4">
-                {{ formatDuration(record.worked_minutes) }}
-              </td>
-              <td class="px-4 py-4">
-                {{ formatDuration(record.overtime_minutes) }}
-              </td>
-              <td class="px-5 py-4 text-muted">
-                {{ [record.late_minutes ? `${record.late_minutes}m late` : '', record.early_exit_minutes ? `${record.early_exit_minutes}m early` : ''].filter(Boolean).join(' · ') || '—' }}
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        <div
+          class="hidden overflow-x-auto md:block"
+          tabindex="0"
+          aria-label="Attendance records table"
+        >
+          <table class="w-full min-w-[680px] text-left text-sm">
+            <thead class="bg-muted/5 text-xs uppercase tracking-wide text-muted">
+              <tr>
+                <th class="px-5 py-3">
+                  Employee ID
+                </th><th class="px-4 py-3">
+                  Date
+                </th><th class="px-4 py-3">
+                  Status
+                </th><th class="px-4 py-3">
+                  Worked
+                </th><th class="px-4 py-3">
+                  Overtime
+                </th><th class="px-5 py-3">
+                  Exceptions
+                </th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-[var(--people-border)]">
+              <tr
+                v-for="record in scopedRecords?.items"
+                :key="record.id"
+              >
+                <td class="px-5 py-4 font-semibold">
+                  #{{ record.employee_id }}
+                </td>
+                <td class="px-4 py-4">
+                  {{ record.attendance_date }}
+                </td>
+                <td class="px-4 py-4">
+                  <AttendanceStatusBadge :status="record.status" />
+                </td>
+                <td class="px-4 py-4">
+                  {{ formatDuration(record.worked_minutes) }}
+                </td>
+                <td class="px-4 py-4">
+                  {{ formatDuration(record.overtime_minutes) }}
+                </td>
+                <td class="px-5 py-4 text-muted">
+                  {{ [record.late_minutes ? `${record.late_minutes}m late` : '', record.early_exit_minutes ? `${record.early_exit_minutes}m early` : ''].filter(Boolean).join(' · ') || '—' }}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="divide-y divide-[var(--people-border)] md:hidden">
+          <article
+            v-for="record in scopedRecords?.items"
+            :key="record.id"
+            class="p-5"
+          >
+            <div class="flex items-start justify-between gap-3">
+              <h3 class="font-semibold">
+                Employee #{{ record.employee_id }}
+              </h3><AttendanceStatusBadge :status="record.status" />
+            </div>
+            <dl class="mt-4 grid grid-cols-2 gap-4 text-sm">
+              <div>
+                <dt class="text-xs text-muted">
+                  Date
+                </dt><dd class="mt-1">
+                  {{ record.attendance_date }}
+                </dd>
+              </div><div>
+                <dt class="text-xs text-muted">
+                  Worked
+                </dt><dd class="mt-1 tabular-nums">
+                  {{ formatDuration(record.worked_minutes) }}
+                </dd>
+              </div><div>
+                <dt class="text-xs text-muted">
+                  Overtime
+                </dt><dd class="mt-1 tabular-nums">
+                  {{ formatDuration(record.overtime_minutes) }}
+                </dd>
+              </div><div>
+                <dt class="text-xs text-muted">
+                  Exceptions
+                </dt><dd class="mt-1">
+                  {{ [record.late_minutes ? `${record.late_minutes}m late` : '', record.early_exit_minutes ? `${record.early_exit_minutes}m early` : ''].filter(Boolean).join(' · ') || '—' }}
+                </dd>
+              </div>
+            </dl>
+          </article>
+        </div>
         <p class="border-t border-[var(--people-border)] px-5 py-3 text-xs text-muted">
           Showing up to 100 records for {{ monthLabel }}. Use Reports for aggregated attendance analysis.
         </p>
@@ -350,41 +419,8 @@ function hasPendingCorrection(recordId: number) {
     </section>
 
     <template v-if="personalView && employeeId">
-      <div class="mt-7 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <div
-          v-for="card in summaryCards"
-          :key="card.label"
-          class="people-card p-5"
-        >
-          <div class="flex items-start justify-between gap-3">
-            <div>
-              <p class="text-sm font-medium text-muted">
-                {{ card.label }}
-              </p><USkeleton
-                v-if="pending"
-                class="mt-3 h-8 w-20"
-              /><p
-                v-else
-                class="mt-2 text-2xl font-semibold tabular-nums"
-              >
-                {{ card.value }}
-              </p><p class="mt-1 text-xs text-muted">
-                {{ card.note }}
-              </p>
-            </div>
-            <span
-              class="grid size-10 place-items-center rounded-xl"
-              :style="{ background: card.tone }"
-            ><UIcon
-              :name="card.icon"
-              class="size-5"
-            /></span>
-          </div>
-        </div>
-      </div>
-
       <div class="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        <UCard>
+        <UCard class="order-2 lg:order-1">
           <template #header>
             <div>
               <h3 class="font-semibold">
@@ -395,7 +431,7 @@ function hasPendingCorrection(recordId: number) {
               </p>
             </div>
           </template>
-          <div class="flex flex-col items-center gap-6 sm:flex-row sm:justify-center">
+          <div class="flex flex-col items-center gap-6 sm:flex-row sm:flex-wrap sm:justify-center">
             <div class="w-full shrink-0 sm:w-56">
               <ClientOnly>
                 <VChart
@@ -433,6 +469,15 @@ function hasPendingCorrection(recordId: number) {
             </div>
           </div>
         </UCard>
+
+        <DashboardSummary
+          label="Attendance summary"
+          class="order-1 lg:order-2"
+          variant="paired"
+          :items="summaryCards"
+          :pending="pending"
+          :unavailable="!attendanceData"
+        />
       </div>
 
       <section class="people-card mt-6 overflow-hidden">
@@ -548,27 +593,13 @@ function hasPendingCorrection(recordId: number) {
       </section>
     </template>
 
-    <div
-      v-if="correctionRecord"
-      class="fixed inset-0 z-[70] flex items-end justify-center bg-slate-950/40 p-0 backdrop-blur-[2px] sm:items-center sm:p-6"
-      @click.self="correctionRecord = null"
+    <UModal
+      :open="!!correctionRecord"
+      title="Request attendance correction"
+      description="Correct the punches and explain what happened."
+      @update:open="value => { if (!value) correctionRecord = null }"
     >
-      <section class="w-full max-w-lg rounded-t-3xl bg-[var(--people-surface)] p-6 shadow-2xl sm:rounded-2xl sm:p-7">
-        <div class="flex items-start justify-between gap-4">
-          <div>
-            <p class="text-sm font-semibold text-primary">
-              Attendance correction
-            </p><h3 class="mt-1 text-xl font-semibold">
-              Fix {{ new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'long' }).format(new Date(`${correctionRecord.attendance_date}T00:00:00`)) }}
-            </h3>
-          </div><UButton
-            icon="i-lucide-x"
-            color="neutral"
-            variant="ghost"
-            aria-label="Close"
-            @click="correctionRecord = null"
-          />
-        </div>
+      <template #body>
         <div class="mt-6 grid gap-4 sm:grid-cols-2">
           <UFormField label="Correct punch in">
             <UInput
@@ -616,14 +647,14 @@ function hasPendingCorrection(recordId: number) {
           </UButton><UButton
             icon="i-lucide-send"
             :loading="correctionLoading"
-            :disabled="correction.reason.trim().length < 5"
+            :disabled="correctionLoading || correction.reason.trim().length < 5"
             @click="submitCorrection"
           >
             Submit request
           </UButton>
         </div>
-      </section>
-    </div>
+      </template>
+    </UModal>
     <ListPagination
       v-if="!personalView && scopedRecords"
       v-model:page="list.page.value"

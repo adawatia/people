@@ -25,12 +25,13 @@ const typeConfig: Record<WorkArrangementType, { label: string, description: stri
   OFFICE: { label: 'Office', description: 'Temporary office-based arrangement', icon: 'i-lucide-briefcase-business', tone: 'var(--people-mint)' }
 }
 
-const { data: requests, pending, error, refresh } = await useAsyncData('my-work-arrangements', async (_app, { signal }) => {
+const { data: rawRequests, pending, error, refresh } = await useAsyncData('my-work-arrangements', async (_app, { signal }) => {
   if (selfService.value && !employeeId.value) return null
   return await api.request<PaginatedResponse<WorkArrangement>>('work-arrangements/', {
     signal, query: { ...list.query.value, status: filter.value === 'ALL' ? undefined : filter.value, employee_id: selfService.value ? employeeId.value : undefined }
   })
 }, { watch: [employeeId, selfService, list.query, filter] })
+const requests = useRetainedData(rawRequests)
 const filtered = computed(() => requests.value?.items || [])
 const requestDays = computed(() => {
   const from = new Date(`${form.from_date}T00:00:00`)
@@ -56,6 +57,7 @@ function openRequest() {
   requestOpen.value = true
 }
 async function submitRequest() {
+  if (submitting.value) return
   if (!employeeId.value || !formValid.value) return
   submitting.value = true
   try {
@@ -106,14 +108,17 @@ async function confirmCancellation() {
 </script>
 
 <template>
-  <div>
+  <div class="people-page">
+    <DataFeedback
+      :pending="pending"
+      :error="error"
+      :has-data="Boolean(requests)"
+    />
     <div class="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
       <div>
-        <p class="text-sm font-medium text-primary">
-          {{ selfService ? 'My Workspace' : workspace.current.value === 'TEAM' ? 'Team Workspace' : 'HR Workspace' }}
-        </p><h2 class="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">
+        <h1 class="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">
           Work arrangements
-        </h2><p class="mt-2 max-w-2xl text-sm leading-6 text-muted">
+        </h1><p class="mt-2 max-w-2xl text-sm leading-6 text-muted">
           {{ selfService ? 'Request to work from home and follow the status of your requests.' : 'Review work arrangement requests within your authorized scope.' }}
         </p>
       </div><UButton
@@ -127,15 +132,6 @@ async function confirmCancellation() {
       </UButton>
     </div>
 
-    <ListControls
-      v-model:search="list.search.value"
-      v-model:sort-by="list.sortBy.value"
-      v-model:sort-order="list.sortOrder.value"
-      :active="list.active.value"
-      :sorts="[{ label: 'Request date', value: 'created_at' }, { label: 'Status', value: 'status' }]"
-      search-placeholder="Search employee name or code"
-      @clear="list.clear"
-    />
     <UAlert
       v-if="selfService && !employeeId"
       class="mt-6"
@@ -146,12 +142,12 @@ async function confirmCancellation() {
       description="Ask your administrator to link this account before creating requests."
     />
     <UAlert
-      v-else-if="error"
+      v-if="error"
       class="mt-6"
       color="warning"
       variant="soft"
-      icon="i-lucide-coffee"
-      title="Your work plans are taking a short break"
+      icon="i-lucide-circle-alert"
+      title="Updates could not be loaded"
       description="We couldn’t refresh your work arrangement requests right now. Please try again in a moment."
       :actions="[{ label: 'Refresh requests', onClick: () => refresh() }]"
     />
@@ -167,18 +163,18 @@ async function confirmCancellation() {
 
     <template v-if="selfService && employeeId">
       <div class="mt-7 max-w-xl">
-        <article class="people-card p-5">
+        <article class="people-card flex items-start gap-4 p-5">
           <span
-            class="grid size-11 place-items-center rounded-2xl"
+            class="grid size-10 shrink-0 place-items-center rounded-lg text-primary"
             :style="{ background: typeConfig.WORK_FROM_HOME.tone }"
           ><UIcon
             :name="typeConfig.WORK_FROM_HOME.icon"
             class="size-5"
-          /></span><h3 class="mt-4 font-semibold">
+          /></span><div><h3 class="font-semibold">
             {{ typeConfig.WORK_FROM_HOME.label }}
           </h3><p class="mt-2 text-sm leading-6 text-muted">
             {{ typeConfig.WORK_FROM_HOME.description }}
-          </p>
+          </p></div>
         </article>
       </div>
       <section class="people-card mt-7 overflow-hidden">
@@ -196,6 +192,7 @@ async function confirmCancellation() {
               type="button"
               class="rounded-lg px-3 py-2 text-xs font-semibold"
               :class="filter === option ? 'bg-[var(--people-surface)] shadow-sm' : 'text-muted'"
+        :aria-pressed="filter === option"
               @click="filter = option"
             >
               {{ option === 'ALL' ? 'All' : option.charAt(0) + option.slice(1).toLowerCase() }}
@@ -203,7 +200,7 @@ async function confirmCancellation() {
           </div>
         </div>
         <div
-          v-if="pending"
+          v-if="pending && !requests"
           class="grid gap-4 p-5 sm:grid-cols-2"
         >
           <USkeleton
@@ -213,7 +210,7 @@ async function confirmCancellation() {
           />
         </div>
         <div
-          v-else-if="filtered.length"
+          v-if="filtered.length"
           class="grid gap-0 divide-y divide-[var(--people-border)] lg:grid-cols-2 lg:divide-x lg:divide-y-0"
         >
           <article
@@ -230,7 +227,7 @@ async function confirmCancellation() {
                   :name="typeConfig[item.arrangement_type].icon"
                   class="size-5"
                 /></span><div class="min-w-0">
-                  <h4 class="truncate font-semibold">
+                  <h4 class="break-words font-semibold">
                     {{ typeConfig[item.arrangement_type].label }}
                   </h4><p class="mt-1 text-xs text-muted">
                     {{ formatDate(item.from_date) }}<span v-if="item.to_date !== item.from_date"> – {{ formatDate(item.to_date) }}</span> · {{ Math.floor((new Date(`${item.to_date}T00:00:00`).getTime() - new Date(`${item.from_date}T00:00:00`).getTime()) / 86400000) + 1 }} day(s)
@@ -260,25 +257,21 @@ async function confirmCancellation() {
               color="neutral"
               variant="soft"
               :loading="cancellingId === item.id"
+              :disabled="cancellingId === item.id"
               @click="cancelRequest(item)"
             >
               Cancel request
             </UButton>
           </article>
         </div>
-        <div
-          v-else
-          class="px-6 py-14 text-center"
-        >
-          <UIcon
-            name="i-lucide-briefcase-business"
-            class="mx-auto size-8 text-muted"
-          /><p class="mt-3 text-sm font-semibold">
-            No work arrangement requests yet
-          </p><p class="mt-1 text-xs text-muted">
-            Your requests will appear here when you need to work from home.
-          </p>
-        </div>
+        <ListEmptyState
+          v-else-if="!pending && !error"
+          title="No work arrangement requests"
+          description="Your requests will appear here when you need to work from home."
+          :filtered="list.active.value"
+          icon="i-lucide-briefcase-business"
+          @reset="list.clear"
+        />
       </section>
     </template>
 
@@ -287,7 +280,7 @@ async function confirmCancellation() {
       class="people-card mt-7 overflow-hidden"
     >
       <div
-        v-if="pending"
+        v-if="pending && !requests"
         class="space-y-3 p-5"
       >
         <USkeleton
@@ -297,7 +290,7 @@ async function confirmCancellation() {
         />
       </div>
       <UAlert
-        v-else-if="error"
+        v-if="error"
         class="m-5"
         color="warning"
         variant="soft"
@@ -306,7 +299,7 @@ async function confirmCancellation() {
         :actions="[{ label: 'Refresh', onClick: () => refresh() }]"
       />
       <div
-        v-else-if="filtered.length"
+        v-if="filtered.length"
         class="divide-y divide-[var(--people-border)]"
       >
         <article
@@ -333,35 +326,22 @@ async function confirmCancellation() {
           />
         </article>
       </div>
-      <div
-        v-else
-        class="p-10 text-center text-sm text-muted"
-      >
-        No work arrangement requests are visible in this scope.
-      </div>
+      <ListEmptyState
+        v-else-if="!pending && !error"
+        title="No requests found"
+        description="Work arrangement requests are shown within your assigned scope."
+        :filtered="list.active.value"
+        @reset="list.clear"
+      />
     </section>
 
-    <div
-      v-if="requestOpen"
-      class="fixed inset-0 z-[70] flex items-end justify-center bg-slate-950/40 backdrop-blur-[2px] sm:items-center sm:p-6"
-      @click.self="requestOpen = false"
+    <UModal
+      v-model:open="requestOpen"
+      title="Request work from home"
+      description="Provide the dates and context for your approver."
     >
-      <section class="max-h-[94dvh] w-full overflow-y-auto rounded-t-3xl bg-[var(--people-surface)] p-5 shadow-2xl sm:max-w-2xl sm:rounded-2xl sm:p-7">
-        <div class="flex items-start justify-between">
-          <div>
-            <p class="text-sm font-semibold text-primary">
-              New request
-            </p><h3 class="mt-1 text-2xl font-semibold">
-              Request work from home
-            </h3>
-          </div><UButton
-            icon="i-lucide-x"
-            color="neutral"
-            variant="ghost"
-            aria-label="Close"
-            @click="requestOpen = false"
-          />
-        </div><div class="mt-6 grid gap-5 sm:grid-cols-2">
+      <template #body>
+        <div class="mt-6 grid gap-5 sm:grid-cols-2">
           <UFormField
             label="From"
             required
@@ -375,6 +355,7 @@ async function confirmCancellation() {
             />
           </UFormField><UFormField
             label="To"
+            :error="requestDays <= 0 ? 'Enter a valid date range with end on or after start.' : undefined"
             required
           >
             <UInput
@@ -399,6 +380,7 @@ async function confirmCancellation() {
           </UFormField><UFormField
             class="sm:col-span-2"
             label="Reason"
+            :error="form.reason && form.reason.trim().length < 5 ? 'Enter at least 5 characters.' : undefined"
             required
           >
             <UTextarea
@@ -420,14 +402,14 @@ async function confirmCancellation() {
           </UButton><UButton
             icon="i-lucide-send"
             :loading="submitting"
-            :disabled="!formValid"
+            :disabled="submitting || !formValid"
             @click="submitRequest"
           >
             Submit request
           </UButton>
         </div>
-      </section>
-    </div>
+      </template>
+    </UModal>
     <ListPagination
       v-if="requests"
       v-model:page="list.page.value"
@@ -460,6 +442,7 @@ async function confirmCancellation() {
         <UButton
           color="error"
           :loading="!!cancellingId"
+          :disabled="!!cancellingId"
           @click="confirmCancellation"
         >
           Confirm cancellation

@@ -12,22 +12,26 @@ const unitId = computed({ get: () => Number(list.field('unit_id').value), set: (
 const departmentId = computed({ get: () => Number(list.field('department_id').value), set: (value) => {
   void list.update({ department_id: value })
 } })
-const { data, pending, error, refresh } = useLazyAsyncData('employees', (_app, { signal }) => api.request<EmployeePage>('employees/', { signal, query: { ...list.query.value, unit_id: unitId.value || undefined, department_id: departmentId.value || undefined, status: status.value === 'ALL' ? undefined : status.value } }), { watch: [list.query, unitId, departmentId, status] })
+const { data: rawData, pending, error, refresh } = useLazyAsyncData('employees', (_app, { signal }) => api.request<EmployeePage>('employees/', { signal, query: { ...list.query.value, unit_id: unitId.value || undefined, department_id: departmentId.value || undefined, status: status.value === 'ALL' ? undefined : status.value } }), { watch: [list.query, unitId, departmentId, status] })
+const data = useRetainedData(rawData)
 
 const initials = (item: Employee) => `${item.first_name[0] || ''}${item.last_name?.[0] || ''}`.toUpperCase()
 // Employee records are provisioned and maintained in ERP; this page is read-only.
 </script>
 
 <template>
-  <div>
+  <div class="people-page">
+    <DataFeedback
+      :pending="pending"
+      :error="error"
+      :has-data="Boolean(data)"
+    />
     <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
       <div>
-        <p class="text-sm font-medium text-primary">
-          People directory
-        </p><h2 class="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">
+        <h1 class="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">
           Employees
-        </h2><p class="mt-2 text-sm text-muted">
-          Find people, understand reporting context, and manage employment records.
+        </h1><p class="mt-2 text-sm text-muted">
+          Find people and view their employment and reporting information.
         </p>
       </div><UAlert
         class="max-w-md"
@@ -52,6 +56,7 @@ const initials = (item: Employee) => `${item.first_name[0] || ''}${item.last_nam
           v-model="unitId"
           endpoint="org/units"
           label="All units"
+          clearable
         />
       </UFormField>
       <UFormField label="Department">
@@ -59,6 +64,7 @@ const initials = (item: Employee) => `${item.first_name[0] || ''}${item.last_nam
           v-model="departmentId"
           endpoint="org/departments"
           label="All departments"
+          clearable
           :filters="{ unit_id: unitId || undefined }"
         />
       </UFormField>
@@ -75,8 +81,8 @@ const initials = (item: Employee) => `${item.first_name[0] || ''}${item.last_nam
       class="mt-5"
       color="warning"
       variant="soft"
-      icon="i-lucide-coffee"
-      title="The people list is taking a short break"
+      icon="i-lucide-circle-alert"
+      title="Updates could not be loaded"
       description="We couldn’t refresh employee details right now. Please try again in a moment."
       :actions="[{ label: 'Refresh people', onClick: () => refresh() }]"
     />
@@ -89,7 +95,7 @@ const initials = (item: Employee) => `${item.first_name[0] || ''}${item.last_nam
         </p>
       </div>
       <div
-        v-if="pending"
+        v-if="pending && !data"
         class="space-y-3 p-5"
       >
         <USkeleton
@@ -98,33 +104,32 @@ const initials = (item: Employee) => `${item.first_name[0] || ''}${item.last_nam
           class="h-16 w-full"
         />
       </div>
-      <div
-        v-else-if="!data?.items.length"
-        class="p-12 text-center"
-      >
-        <UIcon
-          name="i-lucide-users-round"
-          class="mx-auto size-10 text-muted"
-        /><h3 class="mt-4 font-semibold">
-          No employees found
-        </h3><p class="mt-1 text-sm text-muted">
-          Change your filters or ask an administrator to provision the employee in ERP.
-        </p>
-      </div>
-      <div v-else>
+      <ListEmptyState
+        v-else-if="!error && !data?.items.length"
+        title="No employees found"
+        description="Employee records appear here after they are provisioned in ERP."
+        :filtered="list.active.value"
+        icon="i-lucide-users-round"
+        @reset="list.clear"
+      />
+      <div v-else-if="data?.items.length">
         <div class="divide-y divide-[var(--people-border)] md:hidden">
           <NuxtLink
             v-for="item in data.items"
             :key="item.id"
             :to="`/employees/${item.id}`"
             class="flex gap-3 p-4"
-          ><UAvatar :text="initials(item)" /><div class="min-w-0 flex-1"><div class="flex items-start justify-between gap-3"><p class="truncate font-semibold">{{ item.full_name || `${item.first_name} ${item.last_name || ''}` }}</p><UBadge
+          ><UAvatar :text="initials(item)" /><div class="min-w-0 flex-1"><div class="flex items-start justify-between gap-3"><p class="break-words font-semibold">{{ item.full_name || `${item.first_name} ${item.last_name || ''}` }}</p><UBadge
             :color="item.status === 'ACTIVE' ? 'success' : 'neutral'"
             variant="soft"
             size="sm"
-          >{{ item.status }}</UBadge></div><p class="mt-1 truncate text-sm text-muted">{{ item.designation_name || 'No designation' }} · {{ item.employee_code }}</p><p class="mt-1 truncate text-xs text-muted">{{ item.department_name || 'No department' }} · {{ item.unit_name || 'No unit' }}</p></div></NuxtLink>
+          >{{ item.status }}</UBadge></div><p class="mt-1 break-words text-sm text-muted">{{ item.designation_name || 'No designation' }} · {{ item.employee_code }}</p><p class="mt-1 break-words text-xs text-muted">{{ item.department_name || 'No department' }} · {{ item.unit_name || 'No unit' }}</p><p class="mt-2 text-xs text-muted">{{ item.official_email || 'No email' }} · {{ item.employment_type }}</p></div></NuxtLink>
         </div>
-        <div class="hidden overflow-x-auto md:block">
+        <div
+          class="hidden overflow-x-auto md:block"
+          tabindex="0"
+          aria-label="Scrollable comparison table"
+        >
           <table class="w-full min-w-[780px] text-left text-sm">
             <thead class="bg-muted/5 text-xs uppercase tracking-wide text-muted">
               <tr>

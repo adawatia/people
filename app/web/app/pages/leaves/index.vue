@@ -18,7 +18,7 @@ const filter = list.field('status')
 const today = new Date().toISOString().slice(0, 10)
 const form = reactive({ leave_type_id: 0, from_date: today, to_date: today, half_day: false, reason: '' })
 
-const { data, pending, error, refresh } = await useAsyncData('my-leave', async (_app, { signal }) => {
+const { data: rawData, pending, error, refresh } = await useAsyncData('my-leave', async (_app, { signal }) => {
   if (!managementMode.value && !employeeId.value) return null
   const balanceRequest = !managementMode.value && employeeId.value
     ? api.request<LeaveBalance[]>(`leaves/balance/employee/${employeeId.value}`)
@@ -30,6 +30,7 @@ const { data, pending, error, refresh } = await useAsyncData('my-leave', async (
   const [balances, applications, types] = await Promise.all([balanceRequest, applicationsRequest, typesRequest])
   return { balances, applications, types: types.items }
 }, { watch: [employeeId, managementMode, list.query, filter] })
+const data = useRetainedData(rawData)
 
 const filteredApplications = computed(() => data.value?.applications.items || [])
 function displayPending(balance: LeaveBalance) {
@@ -81,6 +82,7 @@ function formatDate(value: string) {
 }
 
 async function submitApplication() {
+  if (submitting.value) return
   if (!employeeId.value || !formValid.value) return
   submitting.value = true
   try {
@@ -143,14 +145,17 @@ async function confirmCancellation() {
 </script>
 
 <template>
-  <div>
+  <div class="people-page">
+    <DataFeedback
+      :pending="pending"
+      :error="error"
+      :has-data="Boolean(data)"
+    />
     <div class="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
       <div>
-        <p class="text-sm font-medium text-primary">
-          {{ managementMode ? (workspace.current.value === 'TEAM' ? 'Team Workspace' : 'HR Workspace') : 'My Workspace' }}
-        </p><h2 class="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">
+        <h1 class="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">
           {{ managementMode ? 'Leave requests' : 'Leave' }}
-        </h2><p class="mt-2 max-w-2xl text-sm leading-6 text-muted">
+        </h1><p class="mt-2 max-w-2xl text-sm leading-6 text-muted">
           {{ managementMode ? 'Review leave requests visible within your assigned scope.' : 'See your available balance, request time off, and follow every approval.' }}
         </p>
       </div>
@@ -165,16 +170,6 @@ async function confirmCancellation() {
       </UButton>
     </div>
 
-    <ListControls
-      v-model:search="list.search.value"
-      v-model:sort-by="list.sortBy.value"
-      v-model:sort-order="list.sortOrder.value"
-      :active="list.active.value"
-      :sorts="[{ label: 'Applied date', value: 'applied_at' }, { label: 'Status', value: 'status' }]"
-      search-placeholder="Search employee name or code"
-      @clear="list.clear"
-    />
-
     <UAlert
       v-if="!managementMode && !employeeId"
       class="mt-6"
@@ -185,12 +180,12 @@ async function confirmCancellation() {
       description="Ask your People administrator to link this account before requesting leave."
     />
     <UAlert
-      v-else-if="error"
+      v-if="error"
       class="mt-6"
       color="warning"
       variant="soft"
-      icon="i-lucide-coffee"
-      title="Your leave board is taking a short break"
+      icon="i-lucide-circle-alert"
+      title="Updates could not be loaded"
       description="We couldn’t refresh your leave details just now. Your requests are safe — please try again in a moment."
       :actions="[{ label: 'Refresh leave board', onClick: () => refresh() }]"
     />
@@ -206,8 +201,8 @@ async function confirmCancellation() {
             </p>
           </div>
         </div>
-        <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <template v-if="pending">
+        <div data-leave-balances class="grid sm:grid-cols-2 xl:grid-cols-4">
+          <template v-if="pending && !data">
             <div
               v-for="index in 4"
               :key="index"
@@ -217,7 +212,7 @@ async function confirmCancellation() {
             </div>
           </template>
           <article
-            v-for="(balance, index) in data?.balances"
+            v-for="balance in data?.balances"
             v-else
             :key="balance.leave_type_id"
             class="people-card p-5"
@@ -231,7 +226,7 @@ async function confirmCancellation() {
                 </p>
               </div><span
                 class="grid size-10 place-items-center rounded-xl"
-                :style="{ background: ['var(--people-lavender)', 'var(--people-mint)', 'var(--people-blue)', 'var(--people-peach)'][index % 4] }"
+                :style="{ background: 'var(--people-lavender)', color: 'var(--people-lavender-ink)' }"
               ><UIcon
                 name="i-lucide-calendar-heart"
                 class="size-5"
@@ -298,6 +293,7 @@ async function confirmCancellation() {
               type="button"
               class="rounded-lg px-3 py-2 text-xs font-semibold transition-colors"
               :class="filter === option ? 'bg-[var(--people-surface)] text-highlighted shadow-sm' : 'text-muted'"
+        :aria-pressed="filter === option"
               @click="filter = option"
             >
               {{ option === 'ALL' ? 'All' : option.charAt(0) + option.slice(1).toLowerCase() }}
@@ -305,7 +301,11 @@ async function confirmCancellation() {
           </div>
         </div>
 
-        <div class="hidden overflow-x-auto md:block">
+        <div
+          class="hidden overflow-x-auto md:block"
+          tabindex="0"
+          aria-label="Scrollable comparison table"
+        >
           <table class="w-full min-w-[760px] text-left text-sm">
             <thead class="bg-muted/5 text-xs uppercase tracking-wide text-muted">
               <tr>
@@ -341,7 +341,7 @@ async function confirmCancellation() {
                     variant="soft"
                     :icon="statusConfig(application.status).icon"
                   />
-                </td><td class="max-w-64 truncate px-4 py-4 text-muted">
+                </td><td class="max-w-64 break-words px-4 py-4 text-muted">
                   {{ application.reason || '—' }}
                 </td><td class="px-6 py-4 text-right">
                   <UButton
@@ -403,7 +403,7 @@ async function confirmCancellation() {
         </div>
 
         <div
-          v-if="!pending && !filteredApplications.length && !data?.applications.total"
+          v-if="!pending && !error && !list.active.value && !filteredApplications.length && !data?.applications.total"
           class="px-6 py-14 text-center"
         >
           <UIcon
@@ -422,19 +422,12 @@ async function confirmCancellation() {
             Request your first leave
           </UButton>
         </div>
-        <div
-          v-else-if="!pending && !filteredApplications.length"
-          class="px-6 py-14 text-center"
-        >
-          <UIcon
-            name="i-lucide-filter-x"
-            class="mx-auto size-9 text-muted"
-          /><p class="mt-3 text-sm font-semibold">
-            Nothing in this filter
-          </p><p class="mt-1 text-xs text-muted">
-            Try another status to see more of your leave history.
-          </p>
-        </div>
+        <ListEmptyState
+          v-else-if="!pending && !error && !filteredApplications.length"
+          title="No matching leave requests"
+          :filtered="list.active.value"
+          @reset="list.clear"
+        />
       </section>
     </template>
 
@@ -461,7 +454,7 @@ async function confirmCancellation() {
         </UButton>
       </div>
       <div
-        v-if="pending"
+        v-if="pending && !data"
         class="space-y-3 p-5"
       >
         <USkeleton
@@ -471,7 +464,7 @@ async function confirmCancellation() {
         />
       </div>
       <UAlert
-        v-else-if="error"
+        v-if="error"
         class="m-5"
         color="warning"
         variant="soft"
@@ -480,7 +473,7 @@ async function confirmCancellation() {
         :actions="[{ label: 'Refresh', onClick: () => refresh() }]"
       />
       <div
-        v-else-if="filteredApplications.length"
+        v-if="filteredApplications.length"
         class="divide-y divide-[var(--people-border)]"
       >
         <article
@@ -512,37 +505,21 @@ async function confirmCancellation() {
           </UButton>
         </article>
       </div>
-      <div
-        v-else
-        class="p-10 text-center text-sm text-muted"
-      >
-        No leave requests are visible in this scope.
-      </div>
+      <ListEmptyState
+        v-else-if="!pending && !error"
+        title="No requests found"
+        description="Leave requests are shown within your assigned scope."
+        :filtered="list.active.value"
+        @reset="list.clear"
+      />
     </section>
 
-    <div
-      v-if="applyOpen"
-      class="fixed inset-0 z-[70] flex items-end justify-center bg-slate-950/40 backdrop-blur-[2px] sm:items-center sm:p-6"
-      @click.self="applyOpen = false"
+    <UModal
+      v-model:open="applyOpen"
+      title="Request leave"
+      description="The final day count is calculated by the leave policy."
     >
-      <section class="max-h-[94dvh] w-full overflow-y-auto rounded-t-3xl bg-[var(--people-surface)] p-5 shadow-2xl sm:max-w-2xl sm:rounded-2xl sm:p-7">
-        <div class="flex items-start justify-between gap-4">
-          <div>
-            <p class="text-sm font-semibold text-primary">
-              New request
-            </p><h3 class="mt-1 text-2xl font-semibold">
-              Request leave
-            </h3><p class="mt-2 text-sm text-muted">
-              The final day count is calculated by the leave policy.
-            </p>
-          </div><UButton
-            icon="i-lucide-x"
-            color="neutral"
-            variant="ghost"
-            aria-label="Close"
-            @click="applyOpen = false"
-          />
-        </div>
+      <template #body>
         <div class="mt-6 grid gap-5 sm:grid-cols-2">
           <UFormField
             class="sm:col-span-2"
@@ -570,6 +547,7 @@ async function confirmCancellation() {
           </UFormField>
           <UFormField
             label="To"
+            :error="estimatedDays <= 0 ? 'Enter a valid date range with end on or after start.' : undefined"
             required
           >
             <UInput
@@ -585,6 +563,7 @@ async function confirmCancellation() {
           <UFormField
             class="sm:col-span-2"
             label="Reason"
+            :error="form.reason && form.reason.trim().length < 3 ? 'Enter at least 3 characters.' : undefined"
             required
           >
             <UTextarea
@@ -634,14 +613,14 @@ async function confirmCancellation() {
           </UButton><UButton
             icon="i-lucide-send"
             :loading="submitting"
-            :disabled="!formValid"
+            :disabled="submitting || !formValid"
             @click="submitApplication"
           >
             Submit request
           </UButton>
         </div>
-      </section>
-    </div>
+      </template>
+    </UModal>
     <ListPagination
       v-if="data?.applications"
       v-model:page="list.page.value"
@@ -685,7 +664,7 @@ async function confirmCancellation() {
         <UButton
           color="error"
           :loading="!!cancellingId"
-          :disabled="(cancelTarget?.status === 'APPROVED' && cancelTarget.from_date <= today && today <= cancelTarget.to_date) && cancelReason.trim().length < 3"
+          :disabled="!!cancellingId || (cancelTarget?.status === 'APPROVED' && cancelTarget.from_date <= today && today <= cancelTarget.to_date) && cancelReason.trim().length < 3"
           @click="confirmCancellation"
         >
           Confirm cancellation

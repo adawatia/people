@@ -2,9 +2,12 @@
 const props = defineProps<{ total: number, totalPages?: number, loading?: boolean, label?: string }>()
 const page = defineModel<number>('page', { required: true })
 const pageSize = defineModel<number>('pageSize', { required: true })
-const pages = computed(() => props.totalPages ?? Math.max(1, Math.ceil(props.total / pageSize.value)))
+const pages = computed(() => Math.max(1, props.totalPages ?? Math.ceil(props.total / pageSize.value)))
 const start = computed(() => props.total ? (page.value - 1) * pageSize.value + 1 : 0)
 const end = computed(() => Math.min(page.value * pageSize.value, props.total))
+watch(pageSize, () => {
+  page.value = 1
+})
 watch([() => props.total, () => props.loading], () => {
   if (!props.loading && page.value > pages.value) page.value = pages.value
 })
@@ -21,7 +24,8 @@ watch([() => props.total, () => props.loading], () => {
     >
       Showing {{ start }}–{{ end }} of {{ total }} {{ label || 'results' }}
     </p>
-    <div class="hidden sm:block">
+    <div class="hidden items-center gap-3 sm:flex">
+      <span class="text-sm text-muted">Page {{ page }} of {{ pages }}</span>
       <UPagination
         v-model:page="page"
         :total="total"

@@ -13,7 +13,7 @@ const year = computed({
   get: () => Number(list.field('year', String(new Date().getFullYear())).value),
   set: value => { void list.update({ year: value }) }
 })
-const { data, pending, error, refresh } = await useAsyncData('reports', async () => {
+const { data: rawData, pending, error, refresh } = await useAsyncData('reports', async () => {
   if (tab.value === 'attendance') {
     const [yearValue, monthValue] = month.value.split('-').map(Number)
     return {
@@ -30,11 +30,12 @@ const { data, pending, error, refresh } = await useAsyncData('reports', async ()
     })
   }
 }, { watch: [tab, month, year, list.query] })
+const data = useRetainedData(rawData)
 watch([tab, month, year], () => {
   list.page.value = 1
 })
 const days = computed(() => Array.from({ length: data.value?.attendance?.total_days_in_month || 0 }, (_, index) => index + 1))
-const statusClass = (value?: string) => ({ P: 'bg-emerald-100 text-emerald-800', A: 'bg-rose-100 text-rose-800', L: 'bg-violet-100 text-violet-800', HD: 'bg-amber-100 text-amber-800', WFH: 'bg-sky-100 text-sky-800', WO: 'bg-slate-100 text-slate-600', H: 'bg-orange-100 text-orange-800' }[value || ''] || 'text-muted')
+const statusClass = (value?: string) => ({ P: 'bg-[var(--people-mint)] text-[var(--people-mint-ink)]', A: 'bg-[var(--people-rose)] text-[var(--people-rose-ink)]', L: 'bg-[var(--people-lavender)] text-[var(--people-lavender-ink)]', HD: 'bg-[var(--people-yellow)] text-[var(--people-yellow-ink)]', WFH: 'bg-[var(--people-blue)] text-[var(--people-blue-ink)]', WO: 'bg-[var(--people-canvas)] text-muted', H: 'bg-[var(--people-peach)] text-[var(--people-peach-ink)]' }[value || ''] || 'text-muted')
 const leaveChartOption = computed<ECOption>(() => {
   const totals = new Map<string, { allocated: number, used: number, pending: number }>()
   for (const row of data.value?.leave?.breakdown || []) {
@@ -46,32 +47,35 @@ const leaveChartOption = computed<ECOption>(() => {
   }
   const types = [...totals.keys()]
   return {
-    tooltip: { trigger: 'axis' },
+    backgroundColor: 'transparent',
+    animation: false,
+    textStyle: { color: chartTheme.value ? '#beb2ce' : '#665e70' },
+    tooltip: { confine: true, trigger: 'axis' },
     legend: { bottom: 0 },
     grid: { top: 28, right: 20, bottom: 48, left: 42 },
     xAxis: { type: 'category', data: types, axisLabel: { interval: 0, rotate: types.length > 4 ? 25 : 0 } },
     yAxis: { type: 'value', name: 'Days' },
     series: [
-      { name: 'Allocated', type: 'bar', data: types.map(type => totals.get(type)?.allocated || 0), itemStyle: { color: '#2563eb' } },
-      { name: 'Used', type: 'bar', data: types.map(type => totals.get(type)?.used || 0), itemStyle: { color: '#10b981' } },
-      { name: 'Pending', type: 'bar', data: types.map(type => totals.get(type)?.pending || 0), itemStyle: { color: '#f59e0b' } }
+      { name: 'Allocated', type: 'bar', data: types.map(type => totals.get(type)?.allocated || 0), itemStyle: { color: chartTheme.value ? '#c9b2ff' : '#5637a5' } },
+      { name: 'Used', type: 'bar', data: types.map(type => totals.get(type)?.used || 0), itemStyle: { color: chartTheme.value ? '#94d8b4' : '#226747' } },
+      { name: 'Pending', type: 'bar', data: types.map(type => totals.get(type)?.pending || 0), itemStyle: { color: chartTheme.value ? '#efd184' : '#805900' } }
     ]
   }
 })
 </script>
 
 <template>
-  <div>
+  <div class="people-page">
+    <DataFeedback :pending="pending" :error="error" :has-data="Boolean(tab === 'attendance' ? data?.attendance : data?.leave)" />
     <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
       <div>
-        <p class="text-sm font-medium text-primary">
-          Analytics
-        </p><h2 class="mt-1 text-2xl font-semibold sm:text-3xl">
+        <h1 class="mt-1 text-2xl font-semibold sm:text-3xl">
           Reports
-        </h2><p class="mt-2 text-sm text-muted">
+        </h1><p class="mt-2 text-sm text-muted">
           Inspect monthly attendance and annual leave balances.
         </p>
-      </div><UInput
+      </div><UFormField :label="tab === 'attendance' ? 'Month' : 'Year'">
+      <UInput
         v-if="tab === 'attendance'"
         v-model="month"
         type="month"
@@ -84,11 +88,13 @@ const leaveChartOption = computed<ECOption>(() => {
         :max="2100"
         icon="i-lucide-calendar"
       />
-    </div><div class="mt-7 flex gap-2 border-b border-[var(--people-border)]">
+      </UFormField>
+    </div><div data-page-tabs class="mt-7 flex gap-2 border-b border-[var(--people-border)]">
       <button
         v-if="auth.hasPermission('reports.attendance')"
         class="min-h-11 border-b-2 px-3 text-sm font-semibold"
         :class="tab === 'attendance' ? 'border-primary text-primary' : 'border-transparent text-muted'"
+        :aria-pressed="tab === 'attendance'"
         @click="tab = 'attendance'"
       >
         Attendance matrix
@@ -96,6 +102,7 @@ const leaveChartOption = computed<ECOption>(() => {
         v-if="auth.hasPermission('reports.leave')"
         class="min-h-11 border-b-2 px-3 text-sm font-semibold"
         :class="tab === 'leave' ? 'border-primary text-primary' : 'border-transparent text-muted'"
+        :aria-pressed="tab === 'leave'"
         @click="tab = 'leave'"
       >
         Leave summary
@@ -118,15 +125,15 @@ const leaveChartOption = computed<ECOption>(() => {
       title="Report is unavailable"
       :actions="[{ label: 'Try again', onClick: () => refresh() }]"
     /><div
-      v-else-if="pending"
+      v-if="pending && !(tab === 'attendance' ? data?.attendance : data?.leave)"
       class="people-card mt-5 p-5"
     >
       <USkeleton class="h-96" />
     </div><section
-      v-else-if="tab === 'attendance'"
+      v-else-if="tab === 'attendance' && data?.attendance"
       class="people-card mt-5 overflow-hidden"
     >
-      <div class="overflow-x-auto">
+      <div class="overflow-x-auto" role="region" aria-label="Attendance comparison table, scroll horizontally for all days" tabindex="0">
         <table class="min-w-max text-center text-xs">
           <thead class="sticky top-0 bg-[var(--people-surface)]">
             <tr>
@@ -178,7 +185,7 @@ const leaveChartOption = computed<ECOption>(() => {
         </table>
       </div>
     </section><section
-      v-else
+      v-else-if="tab === 'leave' && data?.leave"
       class="people-card mt-5 overflow-hidden"
     >
       <div class="border-b border-[var(--people-border)] p-5 sm:px-6">
@@ -200,7 +207,7 @@ const leaveChartOption = computed<ECOption>(() => {
           </template>
         </ClientOnly>
       </div>
-      <div class="hidden overflow-x-auto sm:block">
+      <div class="hidden overflow-x-auto md:block">
         <table class="w-full min-w-[720px] text-left text-sm">
           <thead class="bg-muted/5 text-xs uppercase text-muted">
             <tr>
@@ -243,7 +250,7 @@ const leaveChartOption = computed<ECOption>(() => {
             </tr>
           </tbody>
         </table>
-      </div><div class="divide-y divide-[var(--people-border)] sm:hidden">
+      </div><div class="divide-y divide-[var(--people-border)] md:hidden">
         <article
           v-for="row in data?.leave?.items"
           :key="`${row.employee_id}-${row.leave_type_code}`"
@@ -265,6 +272,6 @@ const leaveChartOption = computed<ECOption>(() => {
         </article>
       </div>
     </section>
-    <ListPagination v-if="(data?.attendance || data?.leave)" v-model:page="list.page.value" v-model:page-size="list.pageSize.value" :total="(data?.attendance || data?.leave)?.total || 0" :total-pages="(data?.attendance || data?.leave)?.total_pages" :loading="pending" label="employees" />
+    <ListPagination v-if="tab === 'attendance' ? data?.attendance : data?.leave" v-model:page="list.page.value" v-model:page-size="list.pageSize.value" :total="(data?.attendance || data?.leave)?.total || 0" :total-pages="(data?.attendance || data?.leave)?.total_pages" :loading="pending" label="employees" />
   </div>
 </template>

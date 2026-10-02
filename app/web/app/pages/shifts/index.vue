@@ -10,12 +10,13 @@ const workspace = useWorkspace()
 const list = useListState({ sort_order: 'desc' })
 const tab = ref<'definitions' | 'assignments'>('definitions')
 // Shift definitions and employee assignments are authored in ERP and mirrored here.
-const { data, pending, error, refresh } = await useAsyncData('shift-workspace', async () => {
+const { data: rawData, pending, error, refresh } = await useAsyncData('shift-workspace', async () => {
   const employee_id = workspace.current.value === 'MY' ? auth.user.value?.employee_id : undefined
   const query = { ...list.query.value, employee_id }
   const [shifts, assignments] = await Promise.all([api.request<PaginatedResponse<Shift>>('shifts/', { query: { ...query, is_active: true } }), api.request<PaginatedResponse<ShiftAssignment>>('shifts/assignments', { query })])
   return { shifts: shifts.items, shiftPage: shifts, assignments: assignments.items, assignmentPage: assignments }
 }, { watch: [list.query, workspace.current] })
+const data = useRetainedData(rawData)
 const time = (value: string) => value?.slice(0, 5) || '—'
 const scopeDescription = computed(() => workspace.current.value === 'MY'
   ? 'Review only your assigned shift and schedule history synchronized from ERP.'
@@ -25,23 +26,27 @@ const scopeDescription = computed(() => workspace.current.value === 'MY'
 </script>
 
 <template>
-  <div>
+  <div class="people-page">
+    <DataFeedback
+      :pending="pending"
+      :error="error"
+      :has-data="Boolean(data)"
+    />
     <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
       <div>
-        <p class="text-sm font-medium text-primary">
-          Workforce planning
-        </p><h2 class="mt-1 text-2xl font-semibold sm:text-3xl">
+        <h1 class="mt-1 text-2xl font-semibold sm:text-3xl">
           Shifts
-        </h2><p class="mt-2 text-sm text-muted">
+        </h1><p class="mt-2 text-sm text-muted">
           {{ scopeDescription }}
         </p>
       </div>
-    </div><div class="mt-7 flex gap-2 border-b border-[var(--people-border)]">
+    </div><div data-page-tabs class="mt-7 flex gap-2 border-b border-[var(--people-border)]">
       <button
         v-for="item in [{ key: 'definitions', label: 'Shift definitions', icon: 'i-lucide-clock-3' }, { key: 'assignments', label: 'Assignments', icon: 'i-lucide-calendar-range' }]"
         :key="item.key"
         class="flex min-h-11 items-center gap-2 border-b-2 px-3 text-sm font-semibold"
         :class="tab === item.key ? 'border-primary text-primary' : 'border-transparent text-muted'"
+        :aria-pressed="tab === item.key"
         @click="tab = item.key as typeof tab"
       >
         <UIcon :name="item.icon" />{{ item.label }}
@@ -59,12 +64,12 @@ const scopeDescription = computed(() => workspace.current.value === 'MY'
       class="mt-5"
       color="warning"
       variant="soft"
-      icon="i-lucide-coffee"
-      title="Your shifts are taking a short break"
+      icon="i-lucide-circle-alert"
+      title="Updates could not be loaded"
       description="We couldn’t refresh shift details right now. Please try again in a moment."
       :actions="[{ label: 'Refresh shifts', onClick: () => refresh() }]"
     /><div
-      v-else-if="pending"
+      v-if="pending && !data"
       class="mt-5 grid gap-4 md:grid-cols-2"
     >
       <USkeleton
@@ -119,13 +124,14 @@ const scopeDescription = computed(() => workspace.current.value === 'MY'
       v-else
       class="people-card mt-5 overflow-hidden"
     >
-      <div
-        v-if="!data?.assignments.length"
-        class="p-12 text-center text-muted"
-      >
-        No shift assignments found.
-      </div><div
-        v-else
+      <ListEmptyState
+        v-if="!pending && !error && !data?.assignments.length"
+        title="No shift assignments found"
+        description="Assigned schedules appear here after they are synchronized from ERP."
+        :filtered="list.active.value"
+        @reset="list.clear"
+      /><div
+        v-if="data?.assignments.length"
         class="divide-y divide-[var(--people-border)]"
       >
         <article
@@ -154,6 +160,11 @@ const scopeDescription = computed(() => workspace.current.value === 'MY'
         </article>
       </div>
     </section>
+    <ListEmptyState
+      v-if="tab === 'definitions' && !pending && !error && !data?.shifts.length"
+      title="No shift definitions available"
+      description="Active shift definitions appear here after they are synchronized from ERP."
+    />
     <ListPagination
       v-if="data"
       v-model:page="list.page.value"

@@ -4,17 +4,8 @@ import type { CurrentUser } from '#shared/types/auth'
 useSeoMeta({ title: 'Profile' })
 const auth = useAuth()
 const api = useHrmsApi()
-const employee = ref<Record<string, unknown> | null>(null)
-const pending = ref(false)
-
-if (auth.user.value?.employee_id) {
-  pending.value = true
-  try {
-    employee.value = await api.request<Record<string, unknown>>(`employees/${auth.user.value.employee_id}`)
-  } finally {
-    pending.value = false
-  }
-}
+const { data: rawEmployee, pending, error, refresh } = useLazyAsyncData('profile-employee', () => auth.user.value?.employee_id ? api.request<Record<string, unknown>>(`employees/${auth.user.value.employee_id}`) : Promise.resolve(null), { watch: [() => auth.user.value?.employee_id] })
+const employee = useRetainedData(rawEmployee)
 
 const user = computed(() => auth.user.value as CurrentUser | null)
 // Label from the business role + scope, so unit HR and organization HR are
@@ -40,15 +31,13 @@ const details = computed(() => [
 </script>
 
 <template>
-  <div class="mx-auto max-w-4xl">
+  <div class="people-page mx-auto max-w-4xl">
+    <DataFeedback :pending="pending" :error="error" :has-data="Boolean(employee)" />
     <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
       <div>
-        <p class="text-sm font-medium text-primary">
-          Account
-        </p>
-        <h2 class="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">
+        <h1 class="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">
           My profile
-        </h2>
+        </h1>
         <p class="mt-2 text-sm text-muted">
           View your personal and employment information.
         </p>
@@ -62,19 +51,18 @@ const details = computed(() => [
         Security settings
       </UButton>
     </div>
+    <DataFeedback
+      :pending="pending"
+      :error="error"
+      :has-data="Boolean(employee)"
+    />
+    <UAlert
+      v-if="error"
+      title="Employment details could not be loaded"
+      color="error"
+      :actions="[{ label: 'Retry profile', onClick: () => refresh() }]"
+    />
     <UCard class="relative mt-7 overflow-hidden">
-      <img
-        src="/branding/dat-labs-symbol-dark.svg"
-        alt=""
-        aria-hidden="true"
-        class="pointer-events-none absolute -right-5 -top-8 size-36 opacity-[0.035] dark:hidden"
-      >
-      <img
-        src="/branding/dat-labs-symbol-light.svg"
-        alt=""
-        aria-hidden="true"
-        class="pointer-events-none absolute -right-5 -top-8 hidden size-36 opacity-[0.06] dark:block"
-      >
       <div class="relative flex flex-col gap-5 sm:flex-row sm:items-center">
         <UAvatar
           :text="auth.initials.value"
@@ -107,7 +95,7 @@ const details = computed(() => [
         </h3>
       </template>
       <div
-        v-if="pending"
+        v-if="pending && !employee"
         class="grid gap-4 p-5 sm:grid-cols-2"
       >
         <USkeleton

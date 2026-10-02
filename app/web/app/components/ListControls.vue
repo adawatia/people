@@ -7,8 +7,7 @@ const props = withDefaults(defineProps<{
 }>(), {
   active: false,
   sorts: () => [],
-  searchPlaceholder: 'Search records',
-  label: 'Filter results'
+  searchPlaceholder: 'Search records'
 })
 const search = defineModel<string>('search', { default: '' })
 const sortBy = defineModel<string>('sortBy', { default: '' })
@@ -16,15 +15,19 @@ const sortOrder = defineModel<string>('sortOrder', { default: 'desc' })
 const emit = defineEmits<{ clear: [] }>()
 const slots = useSlots()
 const expanded = ref(false)
+const searchField = useTemplateRef('searchField')
+const panelId = `list-filters-${useId()}`
 const hasAdvanced = computed(() => Boolean(props.sorts.length || slots.default))
 
 watch(() => props.active, (active) => {
   if (active && hasAdvanced.value) expanded.value = true
 })
 
-function clear() {
+async function clear() {
   emit('clear')
   expanded.value = false
+  await nextTick()
+  searchField.value?.focus()
 }
 </script>
 
@@ -33,22 +36,23 @@ function clear() {
     class="people-card my-5 overflow-hidden"
     aria-label="List filters"
   >
-    <div class="flex items-center justify-between gap-3 border-b border-[var(--people-border)] px-4 py-3 sm:px-5">
+    <div
+      v-if="label || active"
+      class="flex items-center justify-between gap-3 border-b border-[var(--people-border)] px-4 py-3 sm:px-5"
+    >
       <div class="flex min-w-0 items-center gap-2">
-        <span class="grid size-8 shrink-0 place-items-center rounded-lg bg-[var(--people-blue)] text-primary">
+        <span class="grid size-8 shrink-0 place-items-center rounded-lg bg-[var(--people-lavender)] text-primary">
           <UIcon
             name="i-lucide-list-filter"
             class="size-4"
           />
         </span>
-        <div class="min-w-0">
-          <p class="truncate text-sm font-semibold">
-            {{ label }}
-          </p>
-          <p class="hidden text-xs text-muted sm:block">
-            Search, narrow, and order this list
-          </p>
-        </div>
+        <p
+          v-if="label"
+          class="min-w-0 truncate text-sm font-semibold"
+        >
+          {{ label }}
+        </p>
         <UBadge
           v-if="active"
           color="primary"
@@ -66,7 +70,7 @@ function clear() {
         size="sm"
         @click="clear"
       >
-        Reset
+        Reset filters
       </UButton>
     </div>
 
@@ -76,9 +80,9 @@ function clear() {
           label="Search"
           class="min-w-0 flex-1"
         >
-          <UInput
+          <SearchInput
+            ref="searchField"
             v-model="search"
-            icon="i-lucide-search"
             :placeholder="searchPlaceholder"
             autocomplete="off"
             class="w-full"
@@ -86,12 +90,12 @@ function clear() {
         </UFormField>
         <UButton
           v-if="hasAdvanced"
-          class="mt-6 min-h-10 md:hidden"
+          class="mt-6 min-h-11 md:hidden"
           color="neutral"
           variant="outline"
           :icon="expanded ? 'i-lucide-chevron-up' : 'i-lucide-sliders-horizontal'"
           :aria-expanded="expanded"
-          aria-controls="mobile-list-filters"
+          :aria-controls="panelId"
           @click="expanded = !expanded"
         >
           {{ expanded ? 'Hide' : 'Filters' }}
@@ -100,7 +104,7 @@ function clear() {
 
       <div
         v-if="hasAdvanced"
-        id="mobile-list-filters"
+        :id="panelId"
         class="mt-4 gap-3 border-t border-[var(--people-border)] pt-4 md:mt-3 md:grid md:grid-cols-[repeat(auto-fit,minmax(10rem,1fr))] md:border-0 md:pt-0"
         :class="expanded ? 'grid' : 'hidden'"
       >

@@ -8,11 +8,12 @@ useSeoMeta({ title: 'Organization' })
 const api = useHrmsApi()
 const list = useListState({ tab: 'units', sort_order: 'asc' })
 const activeTab = list.field('tab')
-const { data, pending, error, refresh } = await useAsyncData('organization-workspace', async (_app, { signal }) => {
+const { data: rawData, pending, error, refresh } = await useAsyncData('organization-workspace', async (_app, { signal }) => {
   const endpoint = activeTab.value === 'units' ? 'org/units' : activeTab.value === 'departments' ? 'org/departments' : 'designations/'
   const result = await api.request<PaginatedResponse<Unit | Department | Designation>>(endpoint, { signal, query: list.query.value })
   return { ...result, units: activeTab.value === 'units' ? result.items as Unit[] : [], departments: activeTab.value === 'departments' ? result.items as Department[] : [], designations: activeTab.value === 'designations' ? result.items as Designation[] : [] }
 }, { watch: [activeTab, list.query] })
+const data = useRetainedData(rawData)
 function unitName(id: number) {
   return `Unit #${id}`
 }
@@ -20,11 +21,13 @@ function unitName(id: number) {
 </script>
 
 <template>
-  <div>
+  <div class="people-page">
+    <DataFeedback
+      :pending="pending"
+      :error="error"
+      :has-data="Boolean(data)"
+    />
     <header class="my-6">
-      <p class="text-sm text-primary">
-        Organization
-      </p>
       <h1 class="text-2xl font-semibold">
         Company structure
       </h1>
@@ -32,12 +35,13 @@ function unitName(id: number) {
         Organization records are maintained in ERP.
       </p>
     </header>
-    <div class="mt-7 flex gap-2 overflow-x-auto border-b border-[var(--people-border)]">
+    <div data-page-tabs class="mt-7 flex gap-2 overflow-x-auto border-b border-[var(--people-border)]">
       <button
         v-for="tab in [{ key: 'units', label: 'Units', icon: 'i-lucide-building-2' }, { key: 'departments', label: 'Departments', icon: 'i-lucide-network' }, { key: 'designations', label: 'Designations', icon: 'i-lucide-badge' }]"
         :key="tab.key"
         class="flex min-h-11 shrink-0 items-center gap-2 border-b-2 px-3 text-sm font-semibold"
         :class="activeTab === tab.key ? 'border-primary text-primary' : 'border-transparent text-muted'"
+        :aria-pressed="activeTab === tab.key"
         @click="activeTab = tab.key as Tab"
       >
         <UIcon :name="tab.icon" />{{ tab.label }}
@@ -54,13 +58,13 @@ function unitName(id: number) {
       class="mt-5"
       color="warning"
       variant="soft"
-      icon="i-lucide-coffee"
-      title="Organization details are taking a short break"
+      icon="i-lucide-circle-alert"
+      title="Updates could not be loaded"
       description="We couldn’t refresh these details right now. Please try again in a moment."
       :actions="[{ label: 'Refresh details', onClick: () => refresh() }]"
     />
     <div
-      v-else-if="pending"
+      v-if="pending && !data"
       class="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3"
     >
       <USkeleton
@@ -108,7 +112,7 @@ function unitName(id: number) {
           class="flex items-center gap-4 p-5 sm:px-6"
         >
           <span class="grid size-10 shrink-0 place-items-center rounded-xl bg-[var(--people-mint)]"><UIcon name="i-lucide-network" /></span><div class="min-w-0 flex-1">
-            <h3 class="truncate font-semibold">
+            <h3 class="break-words font-semibold">
               {{ item.name }}
             </h3><p class="mt-1 text-sm text-muted">
               {{ unitName(item.unit_id) }} · {{ item.code || 'No code' }}
@@ -142,16 +146,19 @@ function unitName(id: number) {
           {{ item.name }}
         </h3><p class="mt-1 text-xs font-semibold uppercase tracking-wide text-muted">
           {{ item.code || 'No code' }}
-        </p><p class="mt-3 line-clamp-2 text-sm text-muted">
+        </p><p class="mt-3 text-sm text-muted">
           {{ item.description || 'No description provided.' }}
         </p><p class="mt-4 flex items-center justify-end gap-2 text-xs text-muted">
           <UIcon name="i-lucide-refresh-cw" />Managed by ERP
         </p>
       </article>
     </section>
-    <UEmpty
+    <ListEmptyState
       v-if="!pending && !error && !data?.total"
-      title="No matching organization records"
+      title="No organization records found"
+      description="Organization structure is synchronized from ERP."
+      :filtered="list.active.value"
+      @reset="list.clear"
     />
     <ListPagination
       v-if="data"

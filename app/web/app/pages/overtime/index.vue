@@ -14,7 +14,7 @@ const selectedMonth = list.field('month')
 const statusFilter = list.field('status')
 const page = list.page
 const search = list.search
-const { data, pending, error, refresh } = useLazyAsyncData('my-overtime', async (_app, { signal }) => {
+const { data: rawData, pending, error, refresh } = useLazyAsyncData('my-overtime', async (_app, { signal }) => {
   if (selfService.value && !employeeId.value) return null
   const parts = selectedMonth.value.split('-').map(Number)
   const hasMonth = /^\d{4}-(0[1-9]|1[0-2])$/.test(selectedMonth.value)
@@ -33,11 +33,15 @@ const { data, pending, error, refresh } = useLazyAsyncData('my-overtime', async 
   const [summary, records] = await Promise.all([summaryRequest, recordsRequest])
   return { summary, records }
 }, { watch: [employeeId, selectedMonth, selfService, statusFilter, list.query] })
+const data = useRetainedData(rawData)
 const filtered = computed(() => data.value?.records.items || [])
 const hours = (minutes: number) => `${Math.floor(minutes / 60)}h ${minutes % 60}m`
 const statusColor = (value: string) => ({ PENDING: 'warning', APPROVED: 'success', REJECTED: 'error' }[value] || 'neutral') as 'warning' | 'success' | 'error' | 'neutral'
 const overtimeChartOption = computed<ECOption>(() => ({
-  tooltip: { trigger: 'axis', valueFormatter: value => `${value} hours` },
+  backgroundColor: 'transparent',
+  animation: false,
+  textStyle: { color: chartTheme.value ? '#beb2ce' : '#665e70' },
+  tooltip: { confine: true, trigger: 'axis', valueFormatter: value => `${value} hours` },
   grid: { top: 20, right: 16, bottom: 28, left: 42 },
   xAxis: { type: 'category', data: ['Calculated', 'Approved'] },
   yAxis: { type: 'value', name: 'Hours' },
@@ -46,34 +50,50 @@ const overtimeChartOption = computed<ECOption>(() => ({
     type: 'bar',
     barMaxWidth: 64,
     data: [
-      { value: Number(((data.value?.summary?.total_calculated_minutes || 0) / 60).toFixed(1)), itemStyle: { color: '#2563eb' } },
-      { value: Number(((data.value?.summary?.total_approved_minutes || 0) / 60).toFixed(1)), itemStyle: { color: '#10b981' } }
+      { value: Number(((data.value?.summary?.total_calculated_minutes || 0) / 60).toFixed(1)), itemStyle: { color: chartTheme.value ? '#c9b2ff' : '#5637a5' } },
+      { value: Number(((data.value?.summary?.total_approved_minutes || 0) / 60).toFixed(1)), itemStyle: { color: chartTheme.value ? '#94d8b4' : '#226747' } }
     ]
   }]
 }))
 </script>
 
 <template>
-  <div>
+  <div class="people-page">
+    <DataFeedback
+      :pending="pending"
+      :error="error"
+      :has-data="Boolean(data)"
+    />
     <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
       <div>
-        <p class="text-sm font-medium text-primary">
-          {{ selfService ? 'My Workspace' : workspace.current.value === 'TEAM' ? 'Team Workspace' : 'HR Workspace' }}
-        </p><h2 class="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">
+        <h1 class="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">
           {{ selfService ? 'My overtime' : 'Overtime records' }}
-        </h2><p class="mt-2 text-sm text-muted">
+        </h1><p class="mt-2 text-sm text-muted">
           {{ selfService ? 'Review your calculated hours and approval status.' : 'Review overtime records within your authorized scope.' }}
         </p>
       </div>
-      <UInput
-        v-model="selectedMonth"
-        type="month"
-        min="2000-01"
-        max="2100-12"
-        aria-label="Overtime month"
-        icon="i-lucide-calendar-range"
-        class="w-full sm:w-48"
-      />
+      <div class="flex flex-wrap items-end gap-2">
+        <UFormField label="Month">
+          <UInput
+            v-model="selectedMonth"
+            type="month"
+            min="2000-01"
+            max="2100-12"
+            aria-label="Overtime month"
+            icon="i-lucide-calendar-range"
+            class="w-full sm:w-48"
+          />
+        </UFormField>
+        <UButton
+          v-if="list.active.value"
+          variant="outline"
+          color="neutral"
+          icon="i-lucide-rotate-ccw"
+          @click="list.clear"
+        >
+          Reset filters
+        </UButton>
+      </div>
     </div>
     <UAlert
       v-if="selfService && !employeeId"
@@ -88,36 +108,25 @@ const overtimeChartOption = computed<ECOption>(() => ({
       class="mt-6"
       color="warning"
       variant="soft"
-      icon="i-lucide-coffee"
-      title="Your overtime details are taking a short break"
+      icon="i-lucide-circle-alert"
+      title="Updates could not be loaded"
       description="We couldn’t refresh your overtime details right now. Please try again in a moment."
       :actions="[{ label: 'Refresh overtime', onClick: () => refresh() }]"
     />
-    <template v-else-if="selfService ? employeeId : true">
-      <section
+    <template v-if="(selfService ? employeeId : true) && (data || pending)">
+      <DashboardSummary
+        label="Overtime summary"
         v-if="selfService"
-        class="mt-7 grid gap-4 sm:grid-cols-3"
-      >
-        <article
-          v-for="metric in [{ label: 'Calculated', value: hours(data?.summary?.total_calculated_minutes || 0), icon: 'i-lucide-timer', bg: 'var(--people-blue)' }, { label: 'Approved', value: hours(data?.summary?.total_approved_minutes || 0), icon: 'i-lucide-circle-check', bg: 'var(--people-mint)' }, { label: 'Pending reviews', value: String(data?.summary?.pending_count || 0), icon: 'i-lucide-hourglass', bg: 'var(--people-peach)' }]"
-          :key="metric.label"
-          class="people-card p-5"
-        >
-          <div class="flex items-center justify-between">
-            <p class="text-sm text-muted">
-              {{ metric.label }}
-            </p><span
-              class="grid size-10 place-items-center rounded-xl"
-              :style="{ background: metric.bg }"
-            ><UIcon
-              :name="metric.icon"
-              class="size-5"
-            /></span>
-          </div><p class="mt-5 text-3xl font-semibold tabular-nums">
-            {{ pending ? '—' : metric.value }}
-          </p>
-        </article>
-      </section>
+        class="mt-6"
+        variant="compact"
+        :pending="pending"
+        :unavailable="!data?.summary"
+        :items="[
+          { label: 'Calculated', value: hours(data?.summary?.total_calculated_minutes || 0), icon: 'i-lucide-timer' },
+          { label: 'Approved', value: hours(data?.summary?.total_approved_minutes || 0), icon: 'i-lucide-circle-check' },
+          { label: 'Pending reviews', value: data?.summary?.pending_count || 0, icon: 'i-lucide-hourglass' }
+        ]"
+      />
       <section
         v-if="selfService"
         class="people-card mt-7 p-5 sm:px-6"
@@ -146,13 +155,13 @@ const overtimeChartOption = computed<ECOption>(() => ({
           v-if="!selfService"
           class="px-5 pt-5"
         >
-          <UInput
-            v-model="search"
-            icon="i-lucide-search"
-            placeholder="Search employee name or code"
-            aria-label="Search overtime by employee"
-            class="w-full sm:w-80"
-          />
+          <UFormField label="Search employees" name="overtime-search" class="w-full sm:w-80">
+            <SearchInput
+              v-model="search"
+              placeholder="Search employee name or code"
+              aria-label="Search overtime by employee"
+            />
+          </UFormField>
         </div>
         <div class="flex flex-col gap-4 border-b border-[var(--people-border)] p-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
           <div>
@@ -167,6 +176,7 @@ const overtimeChartOption = computed<ECOption>(() => ({
               :key="option"
               class="rounded-lg px-3 py-2 text-xs font-semibold"
               :class="statusFilter === option ? 'bg-[var(--people-surface)] shadow-sm' : 'text-muted'"
+        :aria-pressed="statusFilter === option"
               @click="statusFilter = option"
             >
               {{ option }}
@@ -174,7 +184,7 @@ const overtimeChartOption = computed<ECOption>(() => ({
           </div>
         </div>
         <div
-          v-if="pending"
+          v-if="pending && !data"
           class="space-y-3 p-5"
         >
           <USkeleton
@@ -183,21 +193,16 @@ const overtimeChartOption = computed<ECOption>(() => ({
             class="h-16 w-full"
           />
         </div>
+        <ListEmptyState
+          v-else-if="!error && !filtered.length"
+          title="No overtime records"
+          description="Processed overtime records appear here when they are available."
+          :filtered="list.active.value"
+          icon="i-lucide-timer-off"
+          @reset="list.clear"
+        />
         <div
-          v-else-if="!filtered.length"
-          class="p-10 text-center"
-        >
-          <UIcon
-            name="i-lucide-timer-off"
-            class="mx-auto size-9 text-muted"
-          /><p class="mt-3 font-medium">
-            No overtime records
-          </p><p class="mt-1 text-sm text-muted">
-            Processed overtime for this filter will appear here.
-          </p>
-        </div>
-        <div
-          v-else
+          v-else-if="filtered.length"
           class="divide-y divide-[var(--people-border)]"
         >
           <article

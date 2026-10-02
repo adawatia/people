@@ -11,26 +11,46 @@ const scopeType = computed(() => auth.scopeType.value)
 const hasTeamScope = computed(() => workspace.current.value === 'TEAM' || workspace.current.value === 'HR')
 const canReviewApprovals = computed(() => ['leave.approve', 'work_arrangement.approve'].some(auth.hasPermission))
 const teamLabel = computed(() => scopeType.value === 'ORGANIZATION' ? 'Organization members' : scopeType.value === 'UNIT' ? 'Unit members' : scopeType.value === 'DEPARTMENT' ? 'Department members' : 'Employees')
-const dashboardTitle = computed(() => workspace.current.value === 'EXECUTIVE' ? 'Organization performance at a glance.' : workspace.current.value === 'HR' ? 'People operations at a glance.' : workspace.current.value === 'TEAM' ? 'Your team at a glance.' : 'Here’s your workday at a glance.')
-const dashboardSubtitle = computed(() => workspace.current.value === 'EXECUTIVE' ? 'Monitor company-wide attendance, workforce exceptions, leave and overtime.' : workspace.current.value === 'HR' ? `Manage people operations across your ${scopeType.value === 'ORGANIZATION' ? 'organization' : 'unit'} scope.` : workspace.current.value === 'TEAM' ? 'Review your department attendance, leave and approval workload.' : 'Review your attendance, leave balance and work schedule.')
+const dashboardTitle = computed(() => isTechnicalAdmin.value ? 'Technical administration' : workspace.current.value === 'EXECUTIVE' ? 'Organization performance at a glance.' : workspace.current.value === 'HR' ? 'People operations at a glance.' : workspace.current.value === 'TEAM' ? 'Your team at a glance.' : 'Here’s your workday at a glance.')
+const dashboardSubtitle = computed(() => isTechnicalAdmin.value ? 'System access, ERP structure and technical account settings.' : workspace.current.value === 'EXECUTIVE' ? 'Monitor company-wide attendance, workforce exceptions, leave and overtime.' : workspace.current.value === 'HR' ? `Manage people operations across your ${scopeType.value === 'ORGANIZATION' ? 'organization' : 'unit'} scope.` : workspace.current.value === 'TEAM' ? 'Review your department attendance, leave and approval workload.' : 'Review your attendance, leave balance and work schedule.')
 const greeting = computed(() => {
   const hour = new Date().getHours()
   return hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
 })
-const { data, pending, error, refresh } = await useAsyncData('dashboard-metrics', () => api.request<DashboardMetrics>('dashboard/metrics'))
-const { data: technicalMetrics } = await useAsyncData('technical-admin-metrics', () => api.request<{ users: number, employees: number, units: number, departments: number, designations: number }>('dashboard/technical-metrics'), { immediate: isTechnicalAdmin.value })
+const { data: response, pending, error, refresh } = useLazyAsyncData('dashboard-metrics', () => api.request<DashboardMetrics>('dashboard/metrics'), { immediate: !isTechnicalAdmin.value && !isExecutiveWorkspace.value })
+watch(() => workspace.current.value, () => {
+  if (!isTechnicalAdmin.value && !isExecutiveWorkspace.value) void refresh()
+})
+const lastData = shallowRef<DashboardMetrics>()
+watch(response, (value) => {
+  if (value) lastData.value = value
+}, { immediate: true })
+const data = computed(() => response.value || lastData.value)
+const { data: technicalResponse, pending: technicalPending, error: technicalError, refresh: refreshTechnical } = useLazyAsyncData('technical-admin-metrics', () => api.request<{ users: number, employees: number, units: number, departments: number, designations: number }>('dashboard/technical-metrics'), { immediate: isTechnicalAdmin.value })
+const lastTechnical = shallowRef<typeof technicalResponse.value>()
+watch(technicalResponse, (value) => {
+  if (value) lastTechnical.value = value
+}, { immediate: true })
+const technicalMetrics = computed(() => technicalResponse.value || lastTechnical.value)
+const technicalStats = computed(() => [
+  { label: 'Users', value: technicalMetrics.value?.users ?? 0, icon: 'i-lucide-users-round' },
+  { label: 'Employees', value: technicalMetrics.value?.employees ?? 0, icon: 'i-lucide-user-round' },
+  { label: 'Units', value: technicalMetrics.value?.units ?? 0, icon: 'i-lucide-building-2' },
+  { label: 'Departments', value: technicalMetrics.value?.departments ?? 0, icon: 'i-lucide-network' },
+  { label: 'Designations', value: technicalMetrics.value?.designations ?? 0, icon: 'i-lucide-badge' }
+])
 const stats = computed(() => hasTeamScope.value
   ? [
-      { label: teamLabel.value, value: data.value?.unitMetrics.totalHeadcount ?? 0, icon: 'i-lucide-users-round', tone: 'var(--people-blue)', ink: 'var(--people-blue-ink)' },
-      { label: 'Present today', value: data.value?.unitMetrics.presentCount ?? 0, icon: 'i-lucide-circle-check-big', tone: 'var(--people-mint)', ink: 'var(--people-mint-ink)' },
-      { label: 'On leave', value: data.value?.unitMetrics.leaveCount ?? 0, icon: 'i-lucide-calendar-heart', tone: 'var(--people-lavender)', ink: 'var(--people-lavender-ink)' },
-      { label: 'Needs attention', value: (data.value?.unitMetrics.pendingLeaves ?? 0) + (data.value?.unitMetrics.pendingCorrections ?? 0), icon: 'i-lucide-inbox', tone: 'var(--people-peach)', ink: 'var(--people-peach-ink)' }
+      { label: teamLabel.value, value: data.value?.unitMetrics.totalHeadcount ?? 0, icon: 'i-lucide-users-round' },
+      { label: 'Present today', value: data.value?.unitMetrics.presentCount ?? 0, icon: 'i-lucide-circle-check-big' },
+      { label: 'On leave', value: data.value?.unitMetrics.leaveCount ?? 0, icon: 'i-lucide-calendar-heart' },
+      { label: 'Needs attention', value: (data.value?.unitMetrics.pendingLeaves ?? 0) + (data.value?.unitMetrics.pendingCorrections ?? 0), icon: 'i-lucide-inbox' }
     ]
   : [
-      { label: 'Present this month', value: data.value?.employeeMetrics.monthlyPresent ?? 0, icon: 'i-lucide-circle-check-big', tone: 'var(--people-mint)', ink: 'var(--people-mint-ink)' },
-      { label: 'Absent this month', value: data.value?.employeeMetrics.monthlyAbsent ?? 0, icon: 'i-lucide-calendar-x-2', tone: 'var(--people-peach)', ink: 'var(--people-peach-ink)' },
-      { label: 'Leave days', value: data.value?.employeeMetrics.monthlyLeave ?? 0, icon: 'i-lucide-calendar-heart', tone: 'var(--people-lavender)', ink: 'var(--people-lavender-ink)' },
-      { label: 'Overtime', value: `${data.value?.employeeMetrics.overtimeHours ?? 0}h`, icon: 'i-lucide-timer', tone: 'var(--people-blue)', ink: 'var(--people-blue-ink)' }
+      { label: 'Present this month', value: data.value?.employeeMetrics.monthlyPresent ?? 0, icon: 'i-lucide-circle-check-big' },
+      { label: 'Absent this month', value: data.value?.employeeMetrics.monthlyAbsent ?? 0, icon: 'i-lucide-calendar-x-2' },
+      { label: 'Leave days', value: data.value?.employeeMetrics.monthlyLeave ?? 0, icon: 'i-lucide-calendar-heart' },
+      { label: 'Overtime', value: `${data.value?.employeeMetrics.overtimeHours ?? 0}h`, icon: 'i-lucide-timer' }
     ])
 
 const formatShiftTime = (value?: string) => value
@@ -48,254 +68,185 @@ const shiftTimeRange = (shift?: EmployeeDashboardShift | null) => shift
 </script>
 
 <template>
-  <div>
-    <UAlert
-      v-if="auth.user.value?.is_superuser"
-      color="info"
-      variant="soft"
-      icon="i-lucide-shield-check"
-      title="Technical administration workspace"
-      description="Manage system access, ERP integrations, synchronization health and technical account settings. This account is not an employee and does not have attendance, leave or approval records."
-      :actions="[{ label: 'Open system administration', to: '/settings' }]"
-    />
-    <!-- eslint-disable better-tailwindcss/no-unknown-classes -->
-    <div class="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+  <div class="people-page dashboard-page">
+    <header class="dashboard-heading">
       <div>
-        <p class="text-sm font-medium text-muted">
-          {{ greeting }}, {{ auth.user.value?.first_name || auth.user.value?.username }}
-        </p>
-        <h2 class="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">
-          {{ dashboardTitle }}
-        </h2>
-        <p class="mt-2 max-w-2xl text-sm text-muted">
-          {{ dashboardSubtitle }}
-        </p>
+        <h1>{{ dashboardTitle }}</h1>
+        <p>{{ dashboardSubtitle }}</p>
       </div>
-      <p class="text-sm text-muted">
-        {{ new Intl.DateTimeFormat('en-IN', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date()) }}
-      </p>
-    </div>
+      <div class="dashboard-meta">
+        <span>{{ greeting }}, {{ auth.user.value?.first_name || auth.user.value?.username }}</span>
+        <time>{{ new Intl.DateTimeFormat('en-IN', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date()) }}</time>
+      </div>
+    </header>
 
     <template v-if="isTechnicalAdmin">
-      <div class="mt-7 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-        <div
-          v-for="item in [
-            { label: 'Users', value: technicalMetrics?.users ?? 0, icon: 'i-lucide-users-round', tone: 'var(--people-blue)', ink: 'var(--people-blue-ink)' },
-            { label: 'Employees', value: technicalMetrics?.employees ?? 0, icon: 'i-lucide-user-round', tone: 'var(--people-mint)', ink: 'var(--people-mint-ink)' },
-            { label: 'Units', value: technicalMetrics?.units ?? 0, icon: 'i-lucide-building-2', tone: 'var(--people-lavender)', ink: 'var(--people-lavender-ink)' },
-            { label: 'Departments', value: technicalMetrics?.departments ?? 0, icon: 'i-lucide-network', tone: 'var(--people-peach)', ink: 'var(--people-peach-ink)' },
-            { label: 'Designations', value: technicalMetrics?.designations ?? 0, icon: 'i-lucide-badge', tone: 'var(--people-yellow)', ink: 'var(--people-yellow-ink)' }
-          ]"
-          :key="item.label"
-          class="people-card p-5"
-        >
-          <div class="flex items-start justify-between">
-            <p class="text-sm font-medium text-muted">
-              {{ item.label }}
-            </p><span
-              class="grid size-10 place-items-center rounded-xl"
-              :style="{ background: item.tone, color: item.ink }"
-            ><UIcon
-              :name="item.icon"
-              class="size-5"
-            /></span>
-          </div>
-          <p class="mt-4 text-3xl font-semibold tabular-nums">
-            {{ item.value }}
+      <UAlert
+        color="info"
+        variant="soft"
+        icon="i-lucide-shield-check"
+        title="Technical administration workspace"
+        description="Manage system access, ERP integrations, synchronization health and technical account settings. This account is not an employee and does not have attendance, leave or approval records."
+        :actions="[{ label: 'Open system administration', to: '/settings' }]"
+      />
+      <UAlert
+        v-if="technicalError"
+        color="error"
+        title="Technical metrics could not be loaded"
+        :actions="[{ label: 'Retry', onClick: () => refreshTechnical() }]"
+      />
+      <p
+        v-if="technicalPending"
+        class="dashboard-sync"
+        role="status"
+      >
+        {{ technicalMetrics ? 'Updating technical metrics…' : 'Loading technical metrics…' }}
+      </p>
+      <DashboardSummary
+        :items="technicalStats"
+        variant="technical"
+        :pending="technicalPending"
+        :unavailable="!technicalMetrics"
+      />
+      <div class="dashboard-columns">
+        <section class="dashboard-panel">
+          <h2>Technical administration</h2>
+          <p class="dashboard-description">
+            Monitor the structure managed by ERP and maintain this technical account.
           </p>
-        </div>
-      </div>
-      <div class="mt-6 grid gap-6 lg:grid-cols-2">
-        <section class="people-card p-5 sm:p-6">
-          <div class="flex items-start gap-3">
-            <span class="grid size-10 place-items-center rounded-xl bg-[var(--people-lavender)]"><UIcon
-              name="i-lucide-settings-2"
-              class="size-5"
-            /></span><div>
-              <h3 class="font-semibold">
-                Technical administration
-              </h3><p class="mt-1 text-sm text-muted">
-                Monitor the structure managed by ERP and maintain this technical account.
-              </p>
-            </div>
-          </div><UButton
-            class="mt-5"
-            to="/settings"
-            icon="i-lucide-shield-check"
-          >
-            Account settings
-          </UButton>
+          <div class="dashboard-panel-actions">
+            <UButton
+              to="/settings"
+              icon="i-lucide-shield-check"
+            >
+              Account settings
+            </UButton>
+          </div>
         </section>
-        <section class="people-card p-5 sm:p-6">
-          <div class="flex items-start gap-3">
-            <span class="grid size-10 place-items-center rounded-xl bg-[var(--people-blue)]"><UIcon
-              name="i-lucide-refresh-cw"
-              class="size-5"
-            /></span><div>
-              <h3 class="font-semibold">
-                ERP ownership
-              </h3><p class="mt-1 text-sm text-muted">
-                Employees, users, units, departments and designations are synchronized from ERP.
-              </p>
-            </div>
-          </div><UButton
-            class="mt-5"
-            to="/organization"
-            color="neutral"
-            variant="soft"
-            icon="i-lucide-eye"
-          >
-            View organization
-          </UButton>
+        <section class="dashboard-panel">
+          <h2>ERP ownership</h2>
+          <p class="dashboard-description">
+            Employees, users, units, departments and designations are synchronized from ERP.
+          </p>
+          <div class="dashboard-panel-actions">
+            <UButton
+              to="/organization"
+              color="neutral"
+              variant="outline"
+              icon="i-lucide-eye"
+            >
+              View organization
+            </UButton>
+          </div>
         </section>
       </div>
     </template>
 
-    <template v-else-if="isExecutiveWorkspace">
-      <DashboardOwnerDashboard />
-    </template>
+    <DashboardOwnerDashboard v-else-if="isExecutiveWorkspace" />
 
     <template v-else>
       <UAlert
         v-if="error"
-        class="mt-6"
-        color="warning"
-        variant="soft"
-        icon="i-lucide-coffee"
-        title="Your dashboard is taking a short break"
-        description="We couldn’t refresh your latest People updates right now. Please try again in a moment."
+        color="error"
+        title="Your dashboard could not be refreshed"
+        description="Please try again. Any displayed results are from the last successful update."
         :actions="[{ label: 'Refresh dashboard', onClick: () => refresh() }]"
       />
-
-      <div class="mt-7 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <div
-          v-for="stat in stats"
-          :key="stat.label"
-          class="people-card p-5"
+      <p
+        v-if="pending"
+        class="dashboard-sync"
+        role="status"
+      >
+        {{ data ? 'Updating dashboard…' : 'Loading dashboard…' }}
+      </p>
+      <DashboardSummary
+        :items="stats"
+        :pending="pending"
+        :unavailable="!data"
+      />
+      <div class="dashboard-columns">
+        <section
+          v-if="!hasTeamScope"
+          class="dashboard-panel"
+          :aria-busy="pending"
         >
-          <div class="flex items-start justify-between">
-            <p class="text-sm font-medium text-muted">
-              {{ stat.label }}
-            </p><span
-              class="grid size-10 place-items-center rounded-xl"
-              :style="{ background: stat.tone, color: stat.ink }"
-            ><UIcon
-              :name="stat.icon"
-              class="size-5"
-            /></span>
-          </div>
+          <h2>Your shifts</h2>
+          <p class="dashboard-description">
+            Your assigned shift and next scheduled workday
+          </p>
           <USkeleton
-            v-if="pending"
-            class="mt-5 h-9 w-20"
+            v-if="pending && !data"
+            class="mt-6 h-24 w-full"
           />
+          <dl
+            v-else-if="data"
+            class="dashboard-details"
+          >
+            <div><dt>Assigned shift</dt><dd>{{ data.employeeMetrics.currentShift?.name || 'Not assigned' }}</dd><small>{{ shiftTimeRange(data.employeeMetrics.currentShift) }}</small></div>
+            <div><dt>Upcoming shift</dt><dd>{{ data.employeeMetrics.upcomingShift?.name || 'No upcoming shift' }}</dd><small>{{ data.employeeMetrics.upcomingShift ? `${formatShiftDate(data.employeeMetrics.upcomingShift)} · ${shiftTimeRange(data.employeeMetrics.upcomingShift)}` : 'No upcoming assignment' }}</small></div>
+          </dl>
           <p
             v-else
-            class="mt-4 text-3xl font-semibold tabular-nums"
+            class="dashboard-description"
           >
-            {{ stat.value }}
+            Shift information is unavailable.
           </p>
-        </div>
-      </div>
-
-      <div
-        class="mt-6 grid gap-6"
-        :class="hasTeamScope ? 'xl:grid-cols-[1.15fr_0.85fr]' : 'xl:grid-cols-2'"
-      >
-        <UCard v-if="!hasTeamScope">
-          <div class="flex items-start gap-3">
-            <span class="people-icon people-icon--blue size-10 shrink-0"><UIcon
-              name="i-lucide-clock-3"
-              class="size-5"
-            /></span>
+        </section>
+        <section
+          v-if="!hasTeamScope"
+          class="dashboard-panel"
+          :aria-busy="pending"
+        >
+          <div class="dashboard-section-heading">
             <div>
-              <h3 class="font-semibold">
-                Your shifts
-              </h3><p class="mt-1 text-sm text-muted">
-                Your assigned shift and next scheduled workday
+              <h2>Today</h2><p class="dashboard-description">
+                Your ERP-synced attendance
               </p>
-            </div>
-          </div>
-          <div class="mt-6 grid gap-3 sm:grid-cols-2">
-            <div class="rounded-xl bg-muted/5 p-4">
-              <p class="text-xs font-medium text-muted">
-                Assigned shift
-              </p><p class="mt-2 font-semibold">
-                {{ data?.employeeMetrics.currentShift?.name || 'Not assigned' }}
-              </p><p class="mt-1 text-xs text-muted tabular-nums">
-                {{ shiftTimeRange(data?.employeeMetrics.currentShift) }}
-              </p>
-            </div>
-            <div class="rounded-xl bg-muted/5 p-4">
-              <p class="text-xs font-medium text-muted">
-                Upcoming shift
-              </p><p class="mt-2 font-semibold">
-                {{ data?.employeeMetrics.upcomingShift?.name || 'No upcoming shift' }}
-              </p><p class="mt-1 text-xs text-muted tabular-nums">
-                {{ data?.employeeMetrics.upcomingShift ? `${formatShiftDate(data?.employeeMetrics.upcomingShift)} · ${shiftTimeRange(data?.employeeMetrics.upcomingShift)}` : 'No upcoming assignment' }}
-              </p>
-            </div>
-          </div>
-        </UCard>
-
-        <UCard v-if="!hasTeamScope">
-          <div class="flex items-center justify-between">
-            <div class="flex items-start gap-3">
-              <span class="people-icon people-icon--mint size-10 shrink-0"><UIcon
-                name="i-lucide-calendar-check-2"
-                class="size-5"
-              /></span>
-              <div>
-                <h3 class="font-semibold">
-                  Today
-                </h3><p class="mt-1 text-sm text-muted">
-                  Your ERP-synced attendance
-                </p>
-              </div>
-            </div>
-            <UBadge
-              :label="data?.employeeMetrics.todayStatus || 'Not marked'"
+            </div><UBadge
+              v-if="data"
+              :label="data.employeeMetrics.todayStatus || 'Not marked'"
               color="neutral"
               variant="soft"
             />
           </div>
-          <div class="mt-6 grid gap-3 sm:grid-cols-2">
-            <div class="rounded-xl bg-muted/5 p-4">
-              <p class="text-xs font-medium text-muted">
-                Punch in
-              </p><p class="mt-2 font-semibold tabular-nums">
-                {{ data?.employeeMetrics.punchIn || '—' }}
-              </p>
-            </div>
-            <div class="rounded-xl bg-muted/5 p-4">
-              <p class="text-xs font-medium text-muted">
-                Punch out
-              </p><p class="mt-2 font-semibold tabular-nums">
-                {{ data?.employeeMetrics.punchOut || '—' }}
-              </p>
-            </div>
-          </div>
-          <div class="mt-6 flex flex-wrap gap-3">
+          <USkeleton
+            v-if="pending && !data"
+            class="mt-6 h-24 w-full"
+          />
+          <dl
+            v-else-if="data"
+            class="dashboard-details"
+          >
+            <div><dt>Punch in</dt><dd>{{ data.employeeMetrics.punchIn || '—' }}</dd></div><div><dt>Punch out</dt><dd>{{ data.employeeMetrics.punchOut || '—' }}</dd></div>
+          </dl>
+          <p
+            v-else
+            class="dashboard-description"
+          >
+            Attendance information is unavailable.
+          </p>
+          <div class="dashboard-panel-actions">
             <UButton
               to="/attendance"
               color="neutral"
-              variant="soft"
+              variant="outline"
               icon="i-lucide-calendar-days"
             >
               View attendance
             </UButton>
           </div>
-        </UCard>
-
-        <UCard v-if="hasTeamScope && canReviewApprovals">
-          <div class="flex items-center justify-between">
+        </section>
+        <section
+          v-if="hasTeamScope && canReviewApprovals"
+          class="dashboard-panel"
+          :aria-busy="pending"
+        >
+          <div class="dashboard-section-heading">
             <div>
-              <h3 class="font-semibold">
-                Pending approvals
-              </h3><p class="mt-1 text-sm text-muted">
+              <h2>Pending approvals</h2><p class="dashboard-description">
                 Requests waiting for review
               </p>
-            </div>
-            <UButton
+            </div><UButton
               to="/approvals"
               color="neutral"
               variant="ghost"
@@ -304,44 +255,35 @@ const shiftTimeRange = (shift?: EmployeeDashboardShift | null) => shift
               View all
             </UButton>
           </div>
+          <USkeleton
+            v-if="pending && !data"
+            class="mt-6 h-36 w-full"
+          />
           <div
-            v-if="data?.pendingApprovals.length"
-            class="mt-5 space-y-3"
+            v-else-if="data?.pendingApprovals.length"
+            class="dashboard-approval-list"
           >
             <div
               v-for="item in data.pendingApprovals.slice(0, 4)"
               :key="item.id"
-              class="flex items-center gap-3 rounded-xl border border-[var(--people-border)] p-3"
+              class="dashboard-approval-row"
             >
-              <span class="grid size-10 shrink-0 place-items-center rounded-xl bg-[var(--people-lavender)]"><UIcon
-                name="i-lucide-clipboard-check"
-                class="size-5"
-              /></span>
-              <div class="min-w-0 flex-1">
-                <p class="truncate text-sm font-semibold">
-                  {{ item.employeeName || 'Employee request' }}
-                </p><p class="truncate text-xs text-muted">
-                  {{ item.detail || item.type }}
-                </p>
-              </div>
-              <span class="text-xs text-muted">{{ item.timeAgo }}</span>
+              <div><p>{{ item.employeeName || 'Employee request' }}</p><small>{{ item.detail || item.type }}</small></div><time>{{ item.timeAgo }}</time>
             </div>
           </div>
           <div
-            v-else
-            class="mt-8 flex flex-col items-center py-6 text-center"
+            v-else-if="data"
+            class="dashboard-empty"
           >
-            <span class="grid size-12 place-items-center rounded-2xl bg-[var(--people-mint)]"><UIcon
-              name="i-lucide-circle-check-big"
-              class="size-6"
-            /></span>
-            <p class="mt-4 text-sm font-semibold">
-              All caught up
-            </p><p class="mt-1 text-xs text-muted">
-              There are no requests waiting for you.
-            </p>
+            <p>All caught up</p><small>There are no requests waiting for you.</small>
           </div>
-        </UCard>
+          <p
+            v-else
+            class="dashboard-description"
+          >
+            Approval information is unavailable.
+          </p>
+        </section>
       </div>
     </template>
   </div>

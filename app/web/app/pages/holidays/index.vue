@@ -8,10 +8,11 @@ const api = useHrmsApi()
 const list = useListState({ sort_order: 'asc' })
 const selectedId = ref<number>()
 // Holiday calendars are ERP-owned; the UI is display-only.
-const { data, pending, error, refresh } = await useAsyncData('holiday-workspace', async () => {
+const { data: rawData, pending, error, refresh } = await useAsyncData('holiday-workspace', async () => {
   const lists = await api.request<PaginatedResponse<HolidayList>>('holidays/lists', { query: list.query.value })
   return { lists: lists.items, ...lists }
 }, { watch: [list.query] })
+const data = useRetainedData(rawData)
 watchEffect(() => {
   if (!data.value?.lists.some(item => item.id === selectedId.value) && data.value?.lists[0]) selectedId.value = data.value.lists[0].id
 })
@@ -20,14 +21,17 @@ const formatDate = (value: string) => new Intl.DateTimeFormat('en-IN', { weekday
 </script>
 
 <template>
-  <div>
+  <div class="people-page">
+    <DataFeedback
+      :pending="pending"
+      :error="error"
+      :has-data="Boolean(data)"
+    />
     <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
       <div>
-        <p class="text-sm font-medium text-primary">
-          Work calendar
-        </p><h2 class="mt-1 text-2xl font-semibold sm:text-3xl">
+        <h1 class="mt-1 text-2xl font-semibold sm:text-3xl">
           Holidays
-        </h2><p class="mt-2 text-sm text-muted">
+        </h1><p class="mt-2 text-sm text-muted">
           View the organization holiday calendar synchronized from ERP.
         </p>
       </div>
@@ -44,11 +48,19 @@ const formatDate = (value: string) => new Intl.DateTimeFormat('en-IN', { weekday
       color="warning"
       variant="soft"
       icon="i-lucide-sun-medium"
-      title="Your holiday calendar is taking a short break"
+      title="Updates could not be loaded"
       description="We couldn’t refresh the holiday list right now. Please try again in a moment."
       :actions="[{ label: 'Refresh calendar', onClick: () => refresh() }]"
-    /><div
-      v-else
+    />
+    <ListEmptyState
+      v-if="!pending && !error && !data?.lists.length"
+      title="No holiday calendars found"
+      description="Holiday calendars are synchronized from ERP."
+      :filtered="list.active.value"
+      @reset="list.clear"
+    />
+    <div
+      v-if="pending || data?.lists.length"
       class="mt-7 grid gap-5 lg:grid-cols-[20rem_1fr]"
     >
       <aside class="people-card h-fit overflow-hidden">
@@ -57,7 +69,7 @@ const formatDate = (value: string) => new Intl.DateTimeFormat('en-IN', { weekday
             Calendars
           </h3>
         </div><div
-          v-if="pending"
+          v-if="pending && !data"
           class="space-y-3 p-4"
         >
           <USkeleton
@@ -70,10 +82,11 @@ const formatDate = (value: string) => new Intl.DateTimeFormat('en-IN', { weekday
           v-else
           :key="item.id"
           class="flex w-full items-center gap-3 border-b border-[var(--people-border)] p-4 text-left last:border-0"
-          :class="selectedId === item.id ? 'bg-primary-50 dark:bg-primary-950/20' : 'hover:bg-muted/5'"
+          :class="selectedId === item.id ? 'bg-[var(--people-lavender)]' : 'hover:bg-muted/5'"
+          :aria-pressed="selectedId === item.id"
           @click="selectedId = item.id"
         >
-          <span class="grid size-10 place-items-center rounded-xl bg-[var(--people-lavender)]"><UIcon name="i-lucide-calendar-days" /></span><span class="min-w-0 flex-1"><span class="block truncate font-medium">{{ item.name }}</span><span class="mt-1 block text-xs text-muted">{{ item.weekly_off_day }} weekly off</span></span><UBadge
+          <span class="grid size-10 place-items-center rounded-xl bg-[var(--people-lavender)]"><UIcon name="i-lucide-calendar-days" /></span><span class="min-w-0 flex-1"><span class="block break-words font-medium">{{ item.name }}</span><span class="mt-1 block text-xs text-muted">{{ item.weekly_off_day }} weekly off</span></span><UBadge
             v-if="item.is_default"
             color="primary"
             variant="soft"
@@ -116,7 +129,7 @@ const formatDate = (value: string) => new Intl.DateTimeFormat('en-IN', { weekday
             ><UIcon :name="item.is_weekly_off ? 'i-lucide-calendar-off' : 'i-lucide-party-popper'" /></span><div class="min-w-0 flex-1">
               <p class="font-medium">
                 {{ item.name }}
-              </p><p class="mt-1 truncate text-xs text-muted">
+              </p><p class="mt-1 break-words text-xs text-muted">
                 {{ item.description || (item.is_weekly_off ? 'Weekly off' : 'Organization holiday') }}
               </p>
             </div>

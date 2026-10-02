@@ -2,6 +2,8 @@
 @import "@nuxt/ui";
 @import "./auth.css" layer(components);
 @import "./platform.css" layer(components);
+@import "./dashboard.css" layer(components);
+@import "./pages.css";
 
 @theme static {
   --color-brand-50: #f5f3ff;
@@ -105,3 +107,7 @@ button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
 ::selection { background: var(--people-lavender); color: var(--people-lavender-ink); }
 input, textarea { caret-color: var(--ui-primary); }
 html { scrollbar-color: var(--people-muted) var(--people-canvas); }
+
+@utility people-page { min-width: 0; }
+@utility people-remote-select { display: flex; align-items: center; gap: 4px; width: 100%; min-width: 0; }
+@utility people-data-feedback { margin-block: 12px; color: var(--people-muted); font-size: 13px; line-height: 1.6; }

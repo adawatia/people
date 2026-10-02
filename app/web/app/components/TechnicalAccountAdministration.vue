@@ -16,6 +16,8 @@ const action = ref<SupportAction | null>(null)
 const currentPassword = ref('')
 const temporaryPassword = ref('')
 const busy = ref(false)
+const actionError = ref('')
+const sortPanelId = `account-sort-${useId()}`
 const showSort = ref(false)
 const searchInput = ref(list.search.value)
 
@@ -25,7 +27,7 @@ watch(() => list.search.value, (value) => {
   if (value !== searchInput.value) searchInput.value = value
 })
 
-const { data, pending, error, refresh } = await useAsyncData(
+const { data: rawData, pending, error, refresh } = await useAsyncData(
   'technical-account-directory',
   (_app, { signal }) => api.request<PaginatedResponse<TechnicalAccount>>('users/admin/accounts', {
     signal,
@@ -33,6 +35,10 @@ const { data, pending, error, refresh } = await useAsyncData(
   }),
   { watch: [list.query] }
 )
+const data = useRetainedData(rawData)
+watch(searchInput, value => {
+  if (!value && submittedSearch.value) void list.update({ search: '' })
+})
 const directoryError = computed(() => {
   const requestError = error.value as { data?: { detail?: string, statusMessage?: string }, message?: string } | null
   return requestError?.data?.detail || requestError?.data?.statusMessage || requestError?.message || 'The login-account list could not be loaded.'
@@ -60,6 +66,7 @@ function start(account: TechnicalAccount, nextAction: SupportAction) {
   action.value = nextAction
   currentPassword.value = ''
   temporaryPassword.value = ''
+  actionError.value = ''
 }
 
 function close() {
@@ -67,10 +74,12 @@ function close() {
   action.value = null
   currentPassword.value = ''
   temporaryPassword.value = ''
+  actionError.value = ''
 }
 
 async function submit() {
-  if (!selected.value || !action.value || !currentPassword.value) return
+  if (busy.value || !selected.value || !action.value || !currentPassword.value) return
+  actionError.value = ''
   busy.value = true
   const account = selected.value
   try {
@@ -105,6 +114,7 @@ async function submit() {
     const description = (requestError as { data?: { detail?: string, statusMessage?: string } }).data?.detail
       || (requestError as { data?: { statusMessage?: string } }).data?.statusMessage
       || 'The account action could not be completed.'
+    actionError.value = description
     toast.add({ title: 'Action failed', description, color: 'error' })
   } finally {
     busy.value = false
@@ -126,6 +136,7 @@ async function copyTemporaryPassword() {
 }
 
 function runAccountSearch() {
+  if (pending.value) return
   const search = searchInput.value.trim()
   searchInput.value = search
   void list.update({ search })
@@ -147,9 +158,6 @@ function clearAccountFilters() {
         />
       </span>
       <div class="min-w-0">
-        <p class="text-sm font-semibold text-primary">
-          Workforce account support
-        </p>
         <h3 class="mt-0.5 text-lg font-semibold">
           Login accounts
         </h3>
@@ -171,9 +179,8 @@ function clearAccountFilters() {
             description="Search by name, username, email, mobile, or employee code"
             class="min-w-0 flex-1"
           >
-            <UInput
+            <SearchInput
               v-model="searchInput"
-              icon="i-lucide-search"
               placeholder="Enter an employee identifier"
               autocomplete="off"
               class="w-full"
@@ -184,6 +191,7 @@ function clearAccountFilters() {
               type="submit"
               icon="i-lucide-search"
               :loading="pending"
+              :disabled="pending"
             >
               Search
             </UButton>
@@ -193,6 +201,7 @@ function clearAccountFilters() {
               variant="outline"
               :icon="showSort ? 'i-lucide-chevron-up' : 'i-lucide-arrow-up-down'"
               :aria-expanded="showSort"
+              :aria-controls="sortPanelId"
               @click="showSort = !showSort"
             >
               {{ showSort ? 'Hide sort' : 'Sort' }}
@@ -205,13 +214,14 @@ function clearAccountFilters() {
               icon="i-lucide-x"
               @click="clearAccountFilters"
             >
-              Clear
+              Reset filters
             </UButton>
           </div>
         </div>
 
         <div
           v-if="showSort"
+          :id="sortPanelId"
           class="grid gap-3 border-t border-[var(--people-border)] pt-3 sm:grid-cols-2"
         >
           <UFormField label="Sort by">
@@ -247,14 +257,15 @@ function clearAccountFilters() {
       </p>
     </form>
 
+    <DataFeedback :pending="pending" :error="error" :has-data="Boolean(data)" />
     <AppSkeleton
       v-if="pending && !data"
       variant="list"
       :rows="4"
     />
     <div
-      v-else-if="error"
-      class="rounded-xl border border-red-300 bg-red-50 p-5 dark:border-red-900 dark:bg-red-950/30"
+      v-if="error"
+      class="rounded-xl border border-[var(--people-border)] bg-[var(--people-rose)] p-5"
       role="alert"
     >
       <div class="flex items-start gap-3">
@@ -283,7 +294,7 @@ function clearAccountFilters() {
       </div>
     </div>
     <div
-      v-else-if="!data?.items.length"
+      v-if="!pending && !error && !data?.items.length"
       class="rounded-xl border border-dashed border-[var(--people-border)] px-5 py-10 text-center"
       role="status"
     >
@@ -311,7 +322,7 @@ function clearAccountFilters() {
       </UButton>
     </div>
 
-    <template v-else>
+    <template v-if="data?.items.length">
       <div class="flex flex-wrap items-center justify-between gap-2">
         <p class="text-sm font-semibold">
           {{ data.total }} {{ data.total === 1 ? 'account' : 'accounts' }}
@@ -503,19 +514,14 @@ function clearAccountFilters() {
       :open="Boolean(selected && action)"
       :title="dialogTitle"
       :description="dialogDescription"
+      :dismissible="!busy"
       @update:open="value => { if (!value) close() }"
     >
       <template #body>
-        <section class="w-full max-w-lg space-y-5 rounded-t-3xl bg-[var(--people-surface)] p-6 shadow-2xl sm:rounded-2xl">
+        <section class="w-full space-y-5">
           <div>
-            <p class="text-sm font-semibold text-primary">
-              Technical support action
-            </p><h3 class="mt-1 text-xl font-semibold">
-              {{ dialogTitle }}
-            </h3><p class="mt-2 text-sm leading-6 text-muted">
+            <p class="mt-2 text-sm leading-6 text-muted">
               {{ selected ? displayName(selected) : '' }} · {{ selected?.username }}
-            </p><p class="mt-2 text-sm leading-6 text-muted">
-              {{ dialogDescription }}
             </p>
           </div>
           <div
@@ -538,18 +544,25 @@ function clearAccountFilters() {
             label="Your current Super Admin password"
             required
           >
-            <UInput
+            <AuthPasswordInput
               v-model="currentPassword"
-              type="password"
               autocomplete="current-password"
               class="w-full"
               autofocus
             />
           </UFormField>
+          <UAlert
+            v-if="actionError"
+            color="error"
+            title="Action could not be completed"
+            :description="actionError"
+            role="alert"
+          />
           <div class="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
             <UButton
               color="neutral"
               variant="soft"
+              :disabled="busy"
               @click="close"
             >
               {{ temporaryPassword ? 'Done' : 'Cancel' }}
@@ -557,7 +570,7 @@ function clearAccountFilters() {
               v-if="!temporaryPassword"
               :color="action === 'status' && selected?.is_active ? 'error' : 'primary'"
               :loading="busy"
-              :disabled="!currentPassword"
+              :disabled="busy || !currentPassword"
               @click="submit"
             >
               Confirm action

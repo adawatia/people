@@ -14,14 +14,19 @@ const usernamePassword = ref('')
 const currentPassword = ref('')
 const newPassword = ref('')
 const savingUsername = ref(false)
+const usernameError = ref('')
 const savingPassword = ref(false)
+const passwordError = ref('')
 /** Set when HR/ERP issued a temporary password, or login redirected here. */
 const passwordChangeRequired = computed(() => auth.mustChangePassword.value || route.query['change-password'] === '1')
 
 const message = (error: unknown) => (error as { data?: { detail?: string, statusMessage?: string } }).data?.detail || (error as { data?: { statusMessage?: string } }).data?.statusMessage || 'Could not save the change.'
 
 async function saveUsername() {
+  if (savingUsername.value) return
+  usernameError.value = ''
   if (!usernamePassword.value) {
+    usernameError.value = 'Enter your current password to change your username.'
     toast.add({ title: 'Enter your current password', description: 'Changing the technical username is a credential change and requires re-verification.', color: 'error' })
     return
   }
@@ -35,6 +40,7 @@ async function saveUsername() {
     usernamePassword.value = ''
     toast.add({ title: 'Username updated', color: 'success' })
   } catch (error) {
+    usernameError.value = message(error)
     toast.add({ title: 'Username not updated', description: message(error), color: 'error' })
   } finally {
     savingUsername.value = false
@@ -47,6 +53,8 @@ async function saveUsername() {
  * the remediation.)
  */
 async function savePassword() {
+  if (savingPassword.value) return
+  passwordError.value = ''
   savingPassword.value = true
   try {
     await api.request('auth/change-password', { method: 'POST', body: { current_password: currentPassword.value, new_password: newPassword.value } })
@@ -55,6 +63,7 @@ async function savePassword() {
     auth.clear()
     await navigateTo('/login?notice=password-changed')
   } catch (error) {
+    passwordError.value = message(error)
     toast.add({ title: 'Password not updated', description: message(error), color: 'error' })
   } finally {
     savingPassword.value = false
@@ -63,6 +72,9 @@ async function savePassword() {
 
 // ── MFA ──────────────────────────────────────────────────────────────────────
 const mfaStatus = ref<MfaStatus | null>(null)
+const loadingMfa = ref(true)
+const mfaStatusError = ref('')
+const mfaActionError = ref('')
 const mfaPassword = ref('')
 const mfaCode = ref('')
 const pendingEnrollment = ref<MfaEnrollment | null>(null)
@@ -73,13 +85,21 @@ const regeneratedCodes = ref<string[]>([])
 const busyCodes = ref(false)
 
 async function loadMfaStatus() {
+  loadingMfa.value = true
+  mfaStatusError.value = ''
   try {
     mfaStatus.value = await api.request<MfaStatus>('auth/mfa/status')
-  } catch { /* status is advisory only */ }
+  } catch (error) {
+    mfaStatusError.value = message(error)
+  } finally {
+    loadingMfa.value = false
+  }
 }
 
 /** Step 1 of enrolment: issue a secret (password re-verified server-side). */
 async function startEnrollment() {
+  if (busyMfa.value || busyCodes.value) return
+  mfaActionError.value = ''
   busyMfa.value = true
   try {
     pendingEnrollment.value = await api.request<MfaEnrollment>('auth/mfa/reset', {
@@ -88,6 +108,7 @@ async function startEnrollment() {
     })
     mfaCode.value = ''
   } catch (error) {
+    mfaActionError.value = message(error)
     toast.add({ title: 'Could not start setup', description: message(error), color: 'error' })
   } finally {
     busyMfa.value = false
@@ -95,6 +116,8 @@ async function startEnrollment() {
 }
 
 async function regenerateRecoveryCodes() {
+  if (busyCodes.value || busyMfa.value) return
+  mfaActionError.value = ''
   busyCodes.value = true
   try {
     const result = await api.request<MfaRecoveryCodes>('auth/mfa/recovery/regenerate', {
@@ -106,6 +129,7 @@ async function regenerateRecoveryCodes() {
     await loadMfaStatus()
     toast.add({ title: 'New recovery codes issued', description: 'Every previous code no longer works.', color: 'success' })
   } catch (error) {
+    mfaActionError.value = message(error)
     toast.add({ title: 'Could not issue new codes', description: message(error), color: 'error' })
   } finally {
     busyCodes.value = false
@@ -114,6 +138,8 @@ async function regenerateRecoveryCodes() {
 
 /** Step 2: prove possession of the secret — only then is MFA enabled. */
 async function confirmEnrollment() {
+  if (busyMfa.value || busyCodes.value) return
+  mfaActionError.value = ''
   busyMfa.value = true
   try {
     mfaStatus.value = await api.request<MfaStatus>('auth/mfa/confirm', {
@@ -125,6 +151,7 @@ async function confirmEnrollment() {
     mfaCode.value = ''
     toast.add({ title: 'Two-step verification enabled', description: 'Store your recovery codes: they are shown only while setting up.', color: 'success' })
   } catch (error) {
+    mfaActionError.value = message(error)
     toast.add({ title: 'Code not accepted', description: message(error), color: 'error' })
   } finally {
     busyMfa.value = false
@@ -132,6 +159,8 @@ async function confirmEnrollment() {
 }
 
 async function disableMfa() {
+  if (busyMfa.value || busyCodes.value) return
+  mfaActionError.value = ''
   busyMfa.value = true
   try {
     await api.request('auth/mfa/disable', { method: 'POST', body: { current_password: mfaPassword.value } })
@@ -139,6 +168,7 @@ async function disableMfa() {
     await loadMfaStatus()
     toast.add({ title: 'Authenticator removed', color: 'success' })
   } catch (error) {
+    mfaActionError.value = message(error)
     toast.add({ title: 'Could not remove authenticator', description: message(error), color: 'error' })
   } finally {
     busyMfa.value = false
@@ -147,30 +177,47 @@ async function disableMfa() {
 
 // ── Signed-in devices ────────────────────────────────────────────────────────
 const sessions = ref<SessionSummary[]>([])
+const loadingSessions = ref(true)
+const sessionsError = ref('')
+const revokingSession = ref<number | 'all' | null>(null)
 
 async function loadSessions() {
+  loadingSessions.value = true
+  sessionsError.value = ''
   try {
     sessions.value = await api.request<SessionSummary[]>('auth/sessions')
-  } catch { /* the list is informational */ }
+  } catch (error) {
+    sessionsError.value = message(error)
+  } finally {
+    loadingSessions.value = false
+  }
 }
 
 async function revokeSession(id: number) {
+  if (revokingSession.value !== null) return
+  revokingSession.value = id
   try {
     await api.request(`auth/sessions/${id}`, { method: 'DELETE' })
     await loadSessions()
     toast.add({ title: 'Device signed out', color: 'success' })
   } catch (error) {
     toast.add({ title: 'Could not sign that device out', description: message(error), color: 'error' })
+  } finally {
+    revokingSession.value = null
   }
 }
 
 async function revokeAllSessions() {
+  if (revokingSession.value !== null) return
+  revokingSession.value = 'all'
   try {
     await api.request('auth/sessions', { method: 'DELETE' })
     auth.clear()
     await navigateTo('/login')
   } catch (error) {
     toast.add({ title: 'Could not sign out everywhere', description: message(error), color: 'error' })
+  } finally {
+    revokingSession.value = null
   }
 }
 
@@ -178,23 +225,19 @@ const deviceLabel = (session: SessionSummary) => session.user_agent?.split(')')[
 const shortTime = (value: string | null | undefined) => value ? new Date(value).toLocaleString() : '—'
 
 onMounted(async () => {
-  await loadSessions()
-  await loadMfaStatus()
+  await Promise.all([loadSessions(), loadMfaStatus()])
 })
 </script>
 
 <template>
   <div
-    class="space-y-6"
+    class="people-page space-y-6"
     :class="isTechnicalAdmin ? 'max-w-6xl' : 'max-w-3xl'"
   >
     <div>
-      <p class="text-sm font-medium text-primary">
-        {{ isTechnicalAdmin ? 'Technical access' : 'Account security' }}
-      </p>
-      <h2 class="mt-1 text-2xl font-semibold tracking-tight">
+      <h1 class="mt-1 text-2xl font-semibold tracking-tight">
         {{ pageTitle }}
-      </h2>
+      </h1>
       <p class="mt-2 text-sm text-muted">
         {{ isTechnicalAdmin ? 'Manage the technical login and the operational controls available to this installation.' : 'Keep your People account secure by updating your own password.' }}
       </p>
@@ -236,6 +279,8 @@ onMounted(async () => {
       >
         <UInput
           v-model="username"
+          :aria-invalid="Boolean(usernameError)"
+          aria-describedby="username-save-error"
           class="w-full max-w-md"
           icon="i-lucide-user-round-cog"
           placeholder="Enter username"
@@ -246,17 +291,23 @@ onMounted(async () => {
         label="Current password"
         name="username-password"
       >
-        <UInput
+        <AuthPasswordInput
           v-model="usernamePassword"
+          :aria-invalid="Boolean(usernameError)"
+          aria-describedby="username-save-error"
           class="w-full max-w-md"
-          type="password"
+
           icon="i-lucide-lock-keyhole"
           autocomplete="current-password"
           placeholder="Confirm with your password"
         />
       </UFormField>
+      <p v-if="usernameError" id="username-save-error" class="text-sm text-error" role="alert">
+        {{ usernameError }}
+      </p>
       <UButton
         :loading="savingUsername"
+        :disabled="savingUsername"
         icon="i-lucide-save"
         @click="saveUsername"
       >
@@ -278,11 +329,12 @@ onMounted(async () => {
             for="current-password"
             class="text-sm font-medium"
           >Current password</label>
-          <UInput
+          <AuthPasswordInput
             id="current-password"
             v-model="currentPassword"
+            aria-describedby="password-save-error"
             class="mt-2 w-full"
-            type="password"
+
             icon="i-lucide-lock-keyhole"
             autocomplete="current-password"
           />
@@ -292,14 +344,14 @@ onMounted(async () => {
             for="new-password"
             class="text-sm font-medium"
           >New password</label>
-          <UInput
+          <AuthPasswordInput
             id="new-password"
             v-model="newPassword"
             class="mt-2 w-full"
-            type="password"
+
             icon="i-lucide-key-round"
             autocomplete="new-password"
-            aria-describedby="new-password-help"
+            aria-describedby="new-password-help password-save-error"
           />
           <p
             id="new-password-help"
@@ -315,8 +367,17 @@ onMounted(async () => {
         icon="i-lucide-info"
         description="Changing your password signs out every device, including this one. You will sign in again with the new password."
       />
+      <p
+        v-if="passwordError"
+        id="password-save-error"
+        class="text-sm text-error"
+        role="alert"
+      >
+        {{ passwordError }}
+      </p>
       <UButton
         :loading="savingPassword"
+        :disabled="savingPassword"
         icon="i-lucide-key-round"
         @click="savePassword"
       >
@@ -333,7 +394,11 @@ onMounted(async () => {
           An authenticator app code is required in addition to the password. Privileged accounts should always have this enabled.
         </p>
       </div>
+      <p v-if="loadingMfa" role="status" class="text-sm text-muted">Loading verification status…</p>
+      <UAlert v-if="mfaStatusError" color="error" title="Verification status could not be loaded" :description="mfaStatusError" :actions="[{ label: 'Retry', onClick: loadMfaStatus }]" />
+      <UAlert v-if="mfaActionError" color="error" title="Verification change could not be completed" :description="mfaActionError" role="alert" />
       <UAlert
+        v-if="mfaStatus"
         :color="mfaStatus?.enabled ? 'success' : 'warning'"
         variant="soft"
         :icon="mfaStatus?.enabled ? 'i-lucide-shield-check' : 'i-lucide-triangle-alert'"
@@ -365,7 +430,7 @@ onMounted(async () => {
             <p class="text-xs font-medium uppercase tracking-wide text-muted">
               Recovery codes (shown once)
             </p>
-            <div class="mt-2 grid grid-cols-2 gap-1 font-mono text-xs">
+            <div class="mt-2 grid gap-2 font-mono text-sm sm:grid-cols-2">
               <span
                 v-for="recovery in pendingEnrollment.recovery_codes"
                 :key="recovery"
@@ -376,6 +441,7 @@ onMounted(async () => {
         <UFormField
           label="Code from the app"
           name="mfa-code"
+          required
         >
           <UInput
             v-model="mfaCode"
@@ -388,6 +454,7 @@ onMounted(async () => {
         <div class="flex gap-3">
           <UButton
             :loading="busyMfa"
+            :disabled="busyMfa || busyCodes || !mfaCode.trim()"
             icon="i-lucide-check"
             @click="confirmEnrollment"
           >
@@ -395,6 +462,7 @@ onMounted(async () => {
           </UButton>
           <UButton
             variant="ghost"
+            :disabled="busyMfa"
             @click="pendingEnrollment = null"
           >
             Cancel
@@ -402,15 +470,16 @@ onMounted(async () => {
         </div>
       </template>
 
-      <template v-else>
+      <template v-else-if="mfaStatus && !loadingMfa">
         <UFormField
           label="Current password"
           name="mfa-password"
+          required
         >
-          <UInput
+          <AuthPasswordInput
             v-model="mfaPassword"
             class="w-full max-w-md"
-            type="password"
+
             icon="i-lucide-lock-keyhole"
             autocomplete="current-password"
             placeholder="Confirm with your password"
@@ -419,6 +488,7 @@ onMounted(async () => {
         <div class="flex flex-wrap gap-3">
           <UButton
             :loading="busyMfa"
+            :disabled="busyMfa || busyCodes || !mfaPassword"
             icon="i-lucide-shield-plus"
             @click="startEnrollment"
           >
@@ -428,6 +498,7 @@ onMounted(async () => {
             v-if="mfaStatus?.enabled"
             variant="soft"
             :loading="busyCodes"
+            :disabled="busyCodes || busyMfa || !mfaPassword"
             icon="i-lucide-key-round"
             @click="regenerateRecoveryCodes"
           >
@@ -438,6 +509,7 @@ onMounted(async () => {
             color="error"
             variant="soft"
             :loading="busyMfa"
+            :disabled="busyMfa || busyCodes || !mfaPassword"
             icon="i-lucide-shield-off"
             @click="disableMfa"
           >
@@ -452,7 +524,7 @@ onMounted(async () => {
           <p class="text-xs font-medium uppercase tracking-wide text-muted">
             New recovery codes (shown once)
           </p>
-          <div class="grid grid-cols-2 gap-1 font-mono text-xs">
+          <div class="grid gap-2 font-mono text-sm sm:grid-cols-2">
             <span
               v-for="code in regeneratedCodes"
               :key="code"
@@ -488,11 +560,15 @@ onMounted(async () => {
           variant="soft"
           size="sm"
           icon="i-lucide-log-out"
+          :loading="revokingSession === 'all'"
+          :disabled="revokingSession !== null || loadingSessions"
           @click="revokeAllSessions"
         >
           Sign out everywhere
         </UButton>
       </div>
+      <p v-if="loadingSessions" role="status" class="text-sm text-muted">Loading signed-in devices…</p>
+      <UAlert v-if="sessionsError" color="error" title="Devices could not be loaded" :description="sessionsError" :actions="[{ label: 'Retry', onClick: loadSessions }]" />
       <ul class="divide-y divide-[var(--people-border)]">
         <li
           v-for="device in sessions"
@@ -500,7 +576,7 @@ onMounted(async () => {
           class="flex flex-wrap items-center justify-between gap-3 py-3"
         >
           <div class="min-w-0">
-            <p class="truncate text-sm font-medium">
+            <p class="break-words text-sm font-medium">
               {{ deviceLabel(device) }}
               <UBadge
                 v-if="device.is_current"
@@ -520,13 +596,15 @@ onMounted(async () => {
             size="sm"
             variant="ghost"
             color="error"
+            :loading="revokingSession === device.id"
+            :disabled="revokingSession !== null || loadingSessions"
             @click="revokeSession(device.id)"
           >
             Revoke
           </UButton>
         </li>
         <li
-          v-if="!sessions.length"
+          v-if="!loadingSessions && !sessionsError && !sessions.length"
           class="py-3 text-sm text-muted"
         >
           No active sessions found.

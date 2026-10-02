@@ -8,14 +8,18 @@ const api = useHrmsApi()
 const toast = useToast()
 const list = useListState({ filter: 'all' })
 const filter = list.field('filter')
+const markingAll = ref(false)
 const workingId = ref<number | null>(null)
-const { data: notifications, pending, error, refresh } = await useAsyncData('notifications', (_app, { signal }) => api.request<PaginatedResponse<HrmsNotification>>('notifications', { signal, query: { ...list.query.value, unread: filter.value === 'unread' ? true : undefined } }), { watch: [list.query, filter] })
-const { data: counts, refresh: refreshCounts } = await useAsyncData('notification-count', () => api.request<{ unread_count: number }>('notifications/unread-count'))
+const { data: rawNotifications, pending, error, refresh } = await useAsyncData('notifications', (_app, { signal }) => api.request<PaginatedResponse<HrmsNotification>>('notifications', { signal, query: { ...list.query.value, unread: filter.value === 'unread' ? true : undefined } }), { watch: [list.query, filter] })
+const notifications = useRetainedData(rawNotifications)
+const { data: rawCounts, refresh: refreshCounts } = await useAsyncData('notification-count', () => api.request<{ unread_count: number }>('notifications/unread-count'))
+const counts = useRetainedData(rawCounts)
 const visible = computed(() => notifications.value?.items || [])
 const unread = computed(() => counts.value?.unread_count || 0)
 const iconFor = (type: string) => type.includes('leave') ? 'i-lucide-calendar-days' : type.includes('attendance') ? 'i-lucide-calendar-check-2' : type.includes('overtime') ? 'i-lucide-timer' : 'i-lucide-bell'
 const timeAgo = (value: string) => new Intl.RelativeTimeFormat('en', { numeric: 'auto' }).format(-Math.max(1, Math.round((Date.now() - new Date(value).getTime()) / 3600000)), 'hour')
 async function openNotification(item: HrmsNotification) {
+  if (markingAll.value || workingId.value !== null) return
   workingId.value = item.notification_id
   try {
     if (!item.is_read) {
@@ -31,25 +35,32 @@ async function openNotification(item: HrmsNotification) {
   }
 }
 async function markAll() {
+  if (markingAll.value || workingId.value !== null) return
+  markingAll.value = true
   try {
     await api.request('notifications/mark-all-read', { method: 'POST' })
     await Promise.all([refresh(), refreshCounts()])
     toast.add({ title: 'All caught up', color: 'success', icon: 'i-lucide-check-check' })
   } catch {
     toast.add({ title: 'Could not mark notifications read', description: 'Please try again.', color: 'error' })
+  } finally {
+    markingAll.value = false
   }
 }
 </script>
 
 <template>
-  <div class="mx-auto max-w-4xl">
+  <div class="people-page mx-auto max-w-4xl">
+    <DataFeedback
+      :pending="pending"
+      :error="error"
+      :has-data="Boolean(notifications)"
+    />
     <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
       <div>
-        <p class="text-sm font-medium text-primary">
-          Updates
-        </p><h2 class="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">
+        <h1 class="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">
           Notifications
-        </h2><p class="mt-2 text-sm text-muted">
+        </h1><p class="mt-2 text-sm text-muted">
           Approvals, attendance alerts, and account updates in one place.
         </p>
       </div><UButton
@@ -57,6 +68,8 @@ async function markAll() {
         color="neutral"
         variant="soft"
         icon="i-lucide-check-check"
+        :loading="markingAll"
+        :disabled="markingAll || workingId !== null"
         @click="markAll"
       >
         Mark all read
@@ -74,6 +87,7 @@ async function markAll() {
         :key="option.key"
         class="rounded-lg px-4 py-2 text-sm font-medium"
         :class="filter === option.key ? 'bg-[var(--people-surface)] shadow-sm' : 'text-muted'"
+        :aria-pressed="filter === option.key"
         @click="filter = option.key as 'all' | 'unread'"
       >
         {{ option.label }}
@@ -85,7 +99,7 @@ async function markAll() {
       color="warning"
       variant="soft"
       icon="i-lucide-bell-off"
-      title="Your notifications are taking a short break"
+      title="Updates could not be loaded"
       description="We couldn’t check for new updates right now. Please try again in a moment."
       :actions="[{ label: 'Refresh notifications', onClick: () => refresh() }]"
     />
@@ -94,7 +108,7 @@ async function markAll() {
       class="people-card mt-5 overflow-hidden"
     >
       <div
-        v-if="pending"
+        v-if="pending && !notifications"
         class="space-y-3 p-5"
       >
         <USkeleton
@@ -103,21 +117,16 @@ async function markAll() {
           class="h-20 w-full"
         />
       </div>
+      <ListEmptyState
+        v-else-if="!error && !visible.length"
+        :title="list.active.value ? 'No matching notifications' : 'You’re all caught up'"
+        description="New notifications will appear here when they are available."
+        :filtered="list.active.value"
+        icon="i-lucide-bell"
+        @reset="list.clear"
+      />
       <div
-        v-else-if="!visible.length"
-        class="p-12 text-center"
-      >
-        <span class="mx-auto grid size-14 place-items-center rounded-2xl bg-[var(--people-lavender)]"><UIcon
-          name="i-lucide-bell-ring"
-          class="size-6"
-        /></span><h3 class="mt-4 font-semibold">
-          You're all caught up
-        </h3><p class="mt-1 text-sm text-muted">
-          New updates will appear here.
-        </p>
-      </div>
-      <div
-        v-else
+        v-else-if="visible.length"
         class="divide-y divide-[var(--people-border)]"
       >
         <button
@@ -125,8 +134,8 @@ async function markAll() {
           :key="item.notification_id"
           type="button"
           class="flex w-full gap-4 p-5 text-left transition-colors hover:bg-muted/5 sm:px-6"
-          :class="!item.is_read && 'bg-primary-50/40 dark:bg-primary-950/10'"
-          :disabled="workingId === item.notification_id"
+          :class="!item.is_read && 'bg-[var(--people-lavender)]'"
+          :disabled="markingAll || workingId !== null"
           @click="openNotification(item)"
         >
           <span class="grid size-11 shrink-0 place-items-center rounded-xl bg-[var(--people-lavender)]"><UIcon

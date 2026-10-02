@@ -7,17 +7,23 @@ const route = useRoute()
 const api = useHrmsApi()
 const list = useListState()
 const employeeId = computed(() => Number(route.params.id))
-const { data, pending, error, refresh } = await useAsyncData(`employee-${employeeId.value}`, async () => {
+const { data: rawData, pending, error, refresh } = await useAsyncData(`employee-${employeeId.value}`, async () => {
   const [employee, history] = await Promise.all([api.request<Employee>(`employees/${employeeId.value}`), api.request<PaginatedResponse<EmployeeWorkHistory>>(`employees/${employeeId.value}/work-history`, { query: list.query.value })])
   return { employee, history }
 }, { watch: [list.query, employeeId] })
+const data = useRetainedData(rawData)
 useSeoMeta({ title: () => data.value?.employee.full_name || 'Employee profile' })
 const initials = computed(() => `${data.value?.employee.first_name?.[0] || ''}${data.value?.employee.last_name?.[0] || ''}`.toUpperCase())
 const formatDate = (value?: string | null) => value ? new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(`${value}T00:00:00`)) : '—'
 </script>
 
 <template>
-  <div>
+  <div class="people-page">
+    <DataFeedback
+      :pending="pending"
+      :error="error"
+      :has-data="Boolean(data)"
+    />
     <UButton
       to="/employees"
       color="neutral"
@@ -31,30 +37,30 @@ const formatDate = (value?: string | null) => value ? new Intl.DateTimeFormat('e
       class="mt-5"
       color="warning"
       variant="soft"
-      icon="i-lucide-coffee"
-      title="This profile is taking a short break"
+      icon="i-lucide-circle-alert"
+      title="Updates could not be loaded"
       description="We couldn’t refresh the profile right now. Please try again in a moment."
       :actions="[{ label: 'Refresh profile', onClick: () => refresh() }]"
     />
     <div
-      v-else-if="pending"
+      v-if="pending && !data"
       class="mt-5 space-y-5"
     >
       <USkeleton class="h-48 rounded-2xl" /><USkeleton class="h-64 rounded-2xl" />
     </div>
     <template v-else-if="data">
       <section class="people-card mt-5 overflow-hidden">
-        <div class="h-24 bg-gradient-to-r from-primary-100 via-[var(--people-lavender)] to-[var(--people-blue)] dark:from-primary-950" /><div class="px-5 pb-6 sm:px-7">
-          <div class="-mt-10 flex flex-col gap-4 sm:flex-row sm:items-end">
+        <div class="px-5 pb-6 sm:px-7">
+          <div class="py-5 flex flex-col gap-4 sm:flex-row sm:items-end">
             <UAvatar
               :text="initials"
               size="3xl"
               class="ring-4 ring-[var(--people-surface)]"
             /><div class="min-w-0 flex-1">
               <div class="flex flex-wrap items-center gap-3">
-                <h2 class="text-2xl font-semibold">
+                <h1 class="text-2xl font-semibold">
                   {{ data.employee.full_name || `${data.employee.first_name} ${data.employee.last_name || ''}` }}
-                </h2><UBadge
+                </h1><UBadge
                   :color="data.employee.status === 'ACTIVE' ? 'success' : 'neutral'"
                   variant="soft"
                 >

@@ -36,7 +36,10 @@ const overtimeQueue = useAsyncData('overtime-approval-queue', async (_app, { sig
   if (!canOvertime.value) return null
   return api.request<OvertimePage>('overtime/', { signal, query: { ...overtimeList.query.value, status: 'PENDING' } })
 }, { watch: [overtimeList.query] })
-const totalWaiting = computed(() => (leaveQueue.data.value?.total || 0) + (workQueue.data.value?.total || 0) + (overtimeQueue.data.value?.total || 0))
+const leaveQueueData = useRetainedData(leaveQueue.data)
+const workQueueData = useRetainedData(workQueue.data)
+const overtimeQueueData = useRetainedData(overtimeQueue.data)
+const totalWaiting = computed(() => (leaveQueueData.value?.total || 0) + (workQueueData.value?.total || 0) + (overtimeQueueData.value?.total || 0))
 const activePending = computed(() => activeTab.value === 'leave' ? leaveQueue.pending.value : activeTab.value === 'work' ? workQueue.pending.value : overtimeQueue.pending.value)
 const activeError = computed(() => activeTab.value === 'leave' ? leaveQueue.error.value : activeTab.value === 'work' ? workQueue.error.value : overtimeQueue.error.value)
 
@@ -114,6 +117,7 @@ function closeReject() {
 }
 
 async function rejectRequest() {
+  if (actionKey.value) return
   if (rejectionReason.value.trim().length < 3) return
   const type: ApprovalTab = leaveReject.value ? 'leave' : workReject.value ? 'work' : 'overtime'
   const item = leaveReject.value || workReject.value || overtimeReject.value
@@ -139,14 +143,17 @@ async function rejectRequest() {
 </script>
 
 <template>
-  <div>
+  <div class="people-page">
+    <DataFeedback
+      :pending="activePending"
+      :error="activeError"
+      :has-data="Boolean(activeTab === 'leave' ? leaveQueueData : activeTab === 'work' ? workQueueData : overtimeQueueData)"
+    />
     <div class="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
       <div>
-        <p class="text-sm font-medium text-primary">
-          Manager workspace
-        </p><h2 class="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">
+        <h1 class="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">
           Approvals
-        </h2><p class="mt-2 max-w-2xl text-sm leading-6 text-muted">
+        </h1><p class="mt-2 max-w-2xl text-sm leading-6 text-muted">
           Review team requests with the context needed to make a confident decision.
         </p>
       </div>
@@ -158,33 +165,36 @@ async function rejectRequest() {
       />
     </div>
 
-    <div class="mt-7 flex gap-2 overflow-x-auto border-b border-[var(--people-border)]">
+    <div data-page-tabs class="mt-7 flex gap-2 overflow-x-auto border-b border-[var(--people-border)]">
       <button
         v-if="canLeave"
         type="button"
         class="flex min-h-11 shrink-0 items-center gap-2 border-b-2 px-3 text-sm font-semibold"
         :class="activeTab === 'leave' ? 'border-primary text-primary' : 'border-transparent text-muted'"
+        :aria-pressed="activeTab === 'leave'"
         @click="activeTab = 'leave'"
       >
-        <UIcon name="i-lucide-calendar-days" />Leave<span class="rounded-full bg-primary/10 px-2 py-0.5 text-xs">{{ leaveQueue.data.value?.total || 0 }}</span>
+        <UIcon name="i-lucide-calendar-days" />Leave<span class="rounded-full bg-primary/10 px-2 py-0.5 text-xs">{{ leaveQueueData?.total || 0 }}</span>
       </button>
       <button
         v-if="canWork"
         type="button"
         class="flex min-h-11 shrink-0 items-center gap-2 border-b-2 px-3 text-sm font-semibold"
         :class="activeTab === 'work' ? 'border-primary text-primary' : 'border-transparent text-muted'"
+        :aria-pressed="activeTab === 'work'"
         @click="activeTab = 'work'"
       >
-        <UIcon name="i-lucide-briefcase-business" />Work arrangements<span class="rounded-full bg-primary/10 px-2 py-0.5 text-xs">{{ workQueue.data.value?.total || 0 }}</span>
+        <UIcon name="i-lucide-briefcase-business" />Work arrangements<span class="rounded-full bg-primary/10 px-2 py-0.5 text-xs">{{ workQueueData?.total || 0 }}</span>
       </button>
       <button
         v-if="canOvertime"
         type="button"
         class="flex min-h-11 shrink-0 items-center gap-2 border-b-2 px-3 text-sm font-semibold"
         :class="activeTab === 'overtime' ? 'border-primary text-primary' : 'border-transparent text-muted'"
+        :aria-pressed="activeTab === 'overtime'"
         @click="activeTab = 'overtime'"
       >
-        <UIcon name="i-lucide-timer" />Overtime<span class="rounded-full bg-primary/10 px-2 py-0.5 text-xs">{{ overtimeQueue.data.value?.total || 0 }}</span>
+        <UIcon name="i-lucide-timer" />Overtime<span class="rounded-full bg-primary/10 px-2 py-0.5 text-xs">{{ overtimeQueueData?.total || 0 }}</span>
       </button>
     </div>
 
@@ -227,14 +237,14 @@ async function rejectRequest() {
       class="mt-6"
       color="warning"
       variant="soft"
-      icon="i-lucide-coffee"
-      title="Your approval queue is taking a short break"
+      icon="i-lucide-circle-alert"
+      title="Updates could not be loaded"
       description="We couldn’t refresh pending requests right now. Please try again in a moment."
       :actions="[{ label: 'Refresh approvals', onClick: () => activeTab === 'leave' ? leaveQueue.refresh() : activeTab === 'work' ? workQueue.refresh() : overtimeQueue.refresh() }]"
     />
 
     <div
-      v-if="activePending"
+      v-if="activePending && !(activeTab === 'leave' ? leaveQueueData : activeTab === 'work' ? workQueueData : overtimeQueueData)"
       class="mt-6 grid gap-4 xl:grid-cols-2"
     >
       <div
@@ -247,11 +257,11 @@ async function rejectRequest() {
     </div>
 
     <div
-      v-else-if="activeTab === 'leave' && leaveQueue.data.value?.total"
+      v-else-if="activeTab === 'leave' && leaveQueueData?.total"
       class="mt-6 grid gap-4 xl:grid-cols-2"
     >
       <article
-        v-for="item in leaveQueue.data.value?.items"
+        v-for="item in leaveQueueData?.items"
         :key="item.id"
         class="people-card overflow-hidden"
       >
@@ -260,7 +270,7 @@ async function rejectRequest() {
             :text="(item.employee_name || `E${item.employee_id}`).split(/\s+/).map(part => part[0]).join('').slice(0, 2)"
             size="lg"
           /><div class="min-w-0 flex-1">
-            <h3 class="truncate font-semibold">
+            <h3 class="break-words font-semibold">
               {{ item.employee_name || `Employee #${item.employee_id}` }}
             </h3><p class="mt-1 text-sm text-muted">
               {{ item.employee_code || `Employee ID ${item.employee_id}` }}
@@ -316,6 +326,7 @@ async function rejectRequest() {
             </UButton><UButton
               icon="i-lucide-check"
               :loading="actionKey === `leave-${item.id}`"
+              :disabled="actionKey === `leave-${item.id}`"
               @click="approveLeave(item)"
             >
               {{ item.status === 'CANCELLATION_PENDING' ? 'Approve early return' : 'Approve leave' }}
@@ -326,11 +337,11 @@ async function rejectRequest() {
     </div>
 
     <div
-      v-else-if="activeTab === 'work' && workQueue.data.value?.total"
+      v-else-if="activeTab === 'work' && workQueueData?.total"
       class="mt-6 grid gap-4 xl:grid-cols-2"
     >
       <article
-        v-for="item in workQueue.data.value?.items"
+        v-for="item in workQueueData?.items"
         :key="item.id"
         class="people-card overflow-hidden"
       >
@@ -386,6 +397,7 @@ async function rejectRequest() {
             </UButton><UButton
               icon="i-lucide-check"
               :loading="actionKey === `work-${item.id}`"
+              :disabled="actionKey === `work-${item.id}`"
               @click="approveWork(item)"
             >
               Approve arrangement
@@ -396,11 +408,11 @@ async function rejectRequest() {
     </div>
 
     <section
-      v-else-if="activeTab === 'overtime' && overtimeQueue.data.value?.items.length"
+      v-else-if="activeTab === 'overtime' && overtimeQueueData?.items.length"
       class="mt-6 grid gap-4 xl:grid-cols-2"
     >
       <article
-        v-for="item in overtimeQueue.data.value.items"
+        v-for="item in overtimeQueueData.items"
         :key="item.id"
         class="people-card overflow-hidden"
       >
@@ -485,7 +497,7 @@ async function rejectRequest() {
       @update:open="value => { if (!value) closeReject() }"
     >
       <template #body>
-        <section class="w-full max-w-lg rounded-t-3xl bg-[var(--people-surface)] p-6 shadow-2xl sm:rounded-2xl sm:p-7">
+        <section class="w-full space-y-4">
           <div class="flex items-start justify-between gap-4">
             <div>
               <p class="text-sm font-semibold text-rose-600">
@@ -505,6 +517,7 @@ async function rejectRequest() {
           </p><UFormField
             class="mt-5"
             label="Rejection reason"
+            :error="rejectionReason && rejectionReason.trim().length < 3 ? 'Enter at least 3 characters.' : undefined"
             required
           >
             <UTextarea
@@ -525,7 +538,7 @@ async function rejectRequest() {
               color="error"
               icon="i-lucide-circle-x"
               :loading="Boolean(actionKey)"
-              :disabled="rejectionReason.trim().length < 3"
+              :disabled="Boolean(actionKey) || rejectionReason.trim().length < 3"
               @click="rejectRequest"
             >
               Reject request
@@ -535,27 +548,27 @@ async function rejectRequest() {
       </template>
     </UModal>
     <ListPagination
-      v-if="activeTab === 'leave' && leaveQueue.data.value"
+      v-if="activeTab === 'leave' && leaveQueueData"
       v-model:page="leaveList.page.value"
       v-model:page-size="leaveList.pageSize.value"
-      :total="leaveQueue.data.value?.total || 0"
-      :total-pages="leaveQueue.data.value?.total_pages"
+      :total="leaveQueueData?.total || 0"
+      :total-pages="leaveQueueData?.total_pages"
       :loading="leaveQueue.pending.value"
     />
     <ListPagination
-      v-if="activeTab === 'work' && workQueue.data.value"
+      v-if="activeTab === 'work' && workQueueData"
       v-model:page="workList.page.value"
       v-model:page-size="workList.pageSize.value"
-      :total="workQueue.data.value?.total || 0"
-      :total-pages="workQueue.data.value?.total_pages"
+      :total="workQueueData?.total || 0"
+      :total-pages="workQueueData?.total_pages"
       :loading="workQueue.pending.value"
     />
     <ListPagination
-      v-if="activeTab === 'overtime' && overtimeQueue.data.value"
+      v-if="activeTab === 'overtime' && overtimeQueueData"
       v-model:page="overtimeList.page.value"
       v-model:page-size="overtimeList.pageSize.value"
-      :total="overtimeQueue.data.value?.total || 0"
-      :total-pages="overtimeQueue.data.value?.total_pages"
+      :total="overtimeQueueData?.total || 0"
+      :total-pages="overtimeQueueData?.total_pages"
       :loading="overtimeQueue.pending.value"
     />
   </div>
