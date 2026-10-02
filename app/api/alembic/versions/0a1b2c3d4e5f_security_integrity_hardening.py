@@ -22,19 +22,26 @@ def upgrade() -> None:
         op.add_column(table, sa.Column("erp_id", sa.String(length=120), nullable=True))
         op.create_index(f"ix_{table}_erp_id", table, ["erp_id"], unique=True)
 
-    op.create_table(
-        "notification_receipts",
-        sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
-        sa.Column("notification_id", sa.Integer(), nullable=False),
-        sa.Column("user_id", sa.Integer(), nullable=False),
-        sa.Column("read_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
-        sa.ForeignKeyConstraint(["notification_id"], ["notifications.notification_id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["user_id"], ["users.user_id"], ondelete="CASCADE"),
-        sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("notification_id", "user_id", name="uq_notification_receipt_user"),
-    )
-    op.create_index("ix_notification_receipts_notification_id", "notification_receipts", ["notification_id"])
-    op.create_index("ix_notification_receipts_user_id", "notification_receipts", ["user_id"])
+    # Development startup may already have created this table through create_all.
+    # Existing rows must survive the migration; backfill below remains safe to rerun.
+    connection = op.get_bind()
+    if not sa.inspect(connection).has_table("notification_receipts"):
+        op.create_table(
+            "notification_receipts",
+            sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
+            sa.Column("notification_id", sa.Integer(), nullable=False),
+            sa.Column("user_id", sa.Integer(), nullable=False),
+            sa.Column("read_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+            sa.ForeignKeyConstraint(["notification_id"], ["notifications.notification_id"], ondelete="CASCADE"),
+            sa.ForeignKeyConstraint(["user_id"], ["users.user_id"], ondelete="CASCADE"),
+            sa.PrimaryKeyConstraint("id"),
+            sa.UniqueConstraint("notification_id", "user_id", name="uq_notification_receipt_user"),
+        )
+    receipt_indexes = {index["name"] for index in sa.inspect(connection).get_indexes("notification_receipts")}
+    if "ix_notification_receipts_notification_id" not in receipt_indexes:
+        op.create_index("ix_notification_receipts_notification_id", "notification_receipts", ["notification_id"])
+    if "ix_notification_receipts_user_id" not in receipt_indexes:
+        op.create_index("ix_notification_receipts_user_id", "notification_receipts", ["user_id"])
 
     # Preserve read state for direct notifications. Shared rows cannot be
     # backfilled safely because the old schema did not record which viewer read.
