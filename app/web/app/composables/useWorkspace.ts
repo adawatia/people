@@ -60,6 +60,24 @@ const WORKSPACE_ROUTES: Record<Workspace, WorkspaceRouteRule[]> = {
   TECHNICAL: [{ path: '/' }, { path: '/settings' }, { path: '/profile' }, { path: '/notifications' }]
 }
 
+// Destinations promoted to the mobile bottom bar, in order. Everything else
+// stays in the More drawer, and each path must exist in WORKSPACE_ROUTES above
+// so the bar can never promote a page its workspace does not allow.
+export const MOBILE_TABS: Record<Workspace, string[]> = {
+  MY: ['/attendance', '/leaves'],
+  TEAM: ['/approvals', '/attendance'],
+  HR: ['/employees', '/approvals', '/attendance'],
+  EXECUTIVE: ['/reports', '/organization'],
+  TECHNICAL: ['/settings']
+}
+
+// Home, Workspace and More occupy three of the five bar slots, so a switcher
+// leaves room for two role destinations and a single-workspace account for
+// three. Keeping the cap here keeps the bar at five slots either way.
+export function mobileTabPaths(workspace: Workspace, withSwitcher: boolean): string[] {
+  return MOBILE_TABS[workspace].slice(0, withSwitcher ? 2 : 3)
+}
+
 export function workspacesForUser(user: CurrentUser | null): Workspace[] {
   if (!user) return []
   if (user.is_superuser) return ['TECHNICAL']

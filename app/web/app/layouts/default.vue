@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { WORKSPACES, type Workspace } from '~/composables/useWorkspace'
+import { mobileTabPaths, WORKSPACES, type Workspace } from '~/composables/useWorkspace'
 /**
  * Application shell: sidebar navigation, top bar and content slot.
  *
@@ -118,12 +118,26 @@ const globalSearchResults = computed(() => {
   if (!query) return globalSearchItems.value
   return globalSearchItems.value.filter(item => item.label.toLocaleLowerCase().includes(query))
 })
-const mobilePrimary = computed(() => {
-  const targets: Record<Workspace, string> = { MY: '/leaves', TEAM: '/approvals', HR: '/employees', EXECUTIVE: '/reports', TECHNICAL: '/settings' }
-  const path = targets[currentWorkspace.value]
-  return [...visibleItems.value, ...accountItems].find(item => item.to === path && workspace.canVisit(path)) || accountItems[0]!
+const mobileDestinations = computed(() => [...visibleItems.value, ...accountItems].map(item => item.to === '/settings' && isTechnicalAdmin.value
+  ? { ...item, label: 'System administration', icon: 'i-lucide-shield-check' }
+  : item))
+// Home, Workspace and More occupy three of the five bar slots; the promoted role
+// destinations take the rest. Everything else stays in the More drawer, so a
+// page is never listed in both places.
+const mobileTabs = computed(() => mobileTabPaths(currentWorkspace.value, availableWorkspaces.value.length > 1)
+  .map(path => mobileDestinations.value.find(item => item.to === path))
+  .filter((item): item is NavItem => Boolean(item && workspace.canVisit(item.to))))
+const mobileTabSet = computed(() => new Set(mobileTabs.value.map(item => item.to)))
+const mobileSheetItems = computed(() => {
+  const seen = new Set<string>()
+  return [...visibleItems.value, ...accountItems]
+    .filter(item => item.to !== '/' && !mobileTabSet.value.has(item.to))
+    .filter((item) => {
+      if (seen.has(item.to)) return false
+      seen.add(item.to)
+      return true
+    })
 })
-const mobileSheetItems = computed(() => [...visibleItems.value.filter(item => item.to !== '/' && item.to !== mobilePrimary.value.to), ...accountItems.filter(item => item.to !== mobilePrimary.value.to)])
 function openMobileGroup(label: string) {
   mobileGroup.value = label
   mobileOpen.value = true
@@ -449,6 +463,7 @@ onMounted(() => {
           Home
         </UButton>
         <UButton
+          v-if="availableWorkspaces.length > 1"
           icon="i-lucide-layout-grid"
           variant="ghost"
           color="neutral"
@@ -462,14 +477,16 @@ onMounted(() => {
           Workspace
         </UButton>
         <UButton
-          :to="workspace.link(mobilePrimary.to)"
-          :icon="mobilePrimary.icon"
-          :aria-current="route.path === mobilePrimary.to || route.path.startsWith(`${mobilePrimary.to}/`) ? 'page' : undefined"
+          v-for="item in mobileTabs"
+          :key="item.to"
+          :to="workspace.link(item.to)"
+          :icon="item.icon"
+          :aria-current="route.path === item.to || route.path.startsWith(`${item.to}/`) ? 'page' : undefined"
           variant="ghost"
           color="neutral"
-          class="min-h-12 flex-1 flex-col text-xs"
+          class="min-h-12 flex-1 flex-col text-xs leading-tight"
         >
-          {{ mobilePrimary.label }}
+          {{ item.label }}
         </UButton>
         <UButton
           icon="i-lucide-menu"
