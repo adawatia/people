@@ -2,27 +2,43 @@
 @import "@nuxt/ui";
 
 @theme static {
+  --color-brand-50: #f5f3ff;
+  --color-brand-100: #ede9fe;
+  --color-brand-200: #ddd6fe;
+  --color-brand-300: #c4b5fd;
+  --color-brand-400: #a78bfa;
+  --color-brand-500: #6c4df6;
+  --color-brand-600: #6040dc;
+  --color-brand-700: #5032bd;
+  --color-brand-800: #422b98;
+  --color-brand-900: #352473;
+  --color-brand-950: #231a46;
   --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
 :root {
-  --people-canvas: #f6f7f6;
+  --ui-primary: var(--color-brand-700);
+  --ui-success: #226747;
+  --ui-warning: #805900;
+  --ui-error: #a52b46;
+  --ui-info: #345a96;
+  --people-canvas: #f7f8fa;
   --people-surface: #ffffff;
-  --people-border: #d5dce0;
-  --people-text: #202332;
-  --people-muted: #697083;
-  --people-lavender: #e5f1f3;
-  --people-mint: #e5f5eb;
-  --people-peach: #fbebdd;
-  --people-blue: #e5eeff;
-  --people-yellow: #fff4cf;
-  --people-rose: #fde8ee;
-  --people-blue-ink: #3156a8;
-  --people-mint-ink: #17734c;
-  --people-lavender-ink: #176475;
-  --people-peach-ink: #a85528;
-  --people-yellow-ink: #9a6700;
-  --people-rose-ink: #be3455;
+  --people-border: #d8dee7;
+  --people-text: #202939;
+  --people-muted: #596579;
+  --people-lavender: #ede9fe;
+  --people-mint: #e7f4ed;
+  --people-peach: #f9eee4;
+  --people-blue: #e8eff9;
+  --people-yellow: #fff3d6;
+  --people-rose: #fce9ed;
+  --people-blue-ink: #345a96;
+  --people-mint-ink: #226747;
+  --people-lavender-ink: #5032bd;
+  --people-peach-ink: #925025;
+  --people-yellow-ink: #805900;
+  --people-rose-ink: #a52b46;
 }
 
 html, body { background: var(--people-canvas); }
@@ -50,23 +66,32 @@ button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
 @utility people-icon--rose { background: var(--people-rose); color: var(--people-rose-ink); }
 
 .dark {
-  --people-canvas: #12131a;
-  --people-surface: #191b24;
-  --people-border: #292c38;
-  --people-text: #f0f1f6;
-  --people-muted: #a4a9b8;
-  --people-lavender: #193239;
-  --people-mint: #183228;
-  --people-peach: #36291f;
-  --people-blue: #202d48;
-  --people-yellow: #3b3118;
-  --people-rose: #3a202a;
-  --people-blue-ink: #a9c3ff;
-  --people-mint-ink: #8ee6ba;
-  --people-lavender-ink: #91d4df;
-  --people-peach-ink: #ffc19d;
-  --people-yellow-ink: #f8d57a;
-  --people-rose-ink: #ffb0c1;
+  --ui-primary: var(--color-brand-300);
+  --ui-success: #94d8b4;
+  --ui-warning: #efd184;
+  --ui-error: #f2acbd;
+  --ui-info: #abc9f5;
+  --people-canvas: #111722;
+  --people-surface: #192231;
+  --people-border: #344155;
+  --people-text: #edf1f7;
+  --people-muted: #acb8ca;
+  --people-lavender: #30264b;
+  --people-mint: #19362c;
+  --people-peach: #382b22;
+  --people-blue: #22334e;
+  --people-yellow: #3b321c;
+  --people-rose: #3e2631;
+  --people-blue-ink: #abc9f5;
+  --people-mint-ink: #94d8b4;
+  --people-lavender-ink: #c4b5fd;
+  --people-peach-ink: #ebbb94;
+  --people-yellow-ink: #efd184;
+  --people-rose-ink: #f2acbd;
 }
 
 :focus-visible { outline: 2px solid var(--ui-primary); outline-offset: 3px; }
+
+::selection { background: var(--people-lavender); color: var(--people-lavender-ink); }
+input, textarea { caret-color: var(--ui-primary); }
+html { scrollbar-color: var(--people-muted) var(--people-canvas); }

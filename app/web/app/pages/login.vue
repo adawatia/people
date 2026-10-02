@@ -50,22 +50,22 @@ async function afterMfa() {
 
 <template>
   <div class="grid min-h-dvh bg-[var(--people-canvas)] lg:grid-cols-[1.05fr_0.95fr]">
-    <section class="relative hidden overflow-hidden bg-[#27213f] p-12 text-white lg:flex lg:flex-col lg:justify-between">
-      <div class="absolute -left-20 top-32 size-80 rounded-full bg-violet-400/20 blur-3xl" />
+    <section class="relative hidden overflow-hidden bg-brand-950 p-12 text-white lg:flex lg:flex-col lg:justify-between">
+      <div class="absolute -left-20 top-32 size-80 rounded-full bg-brand-400/20 blur-3xl" />
       <div class="absolute -bottom-24 right-0 size-96 rounded-full bg-sky-300/15 blur-3xl" />
-      <BrandMark class="relative z-10 [&_.text-muted]:text-violet-100/60" />
+      <BrandMark class="relative z-10 [&_.text-muted]:text-brand-200" />
       <div class="relative z-10 max-w-xl pb-10">
         <div class="mb-6 flex gap-2">
-          <span class="h-2 w-12 rounded-full bg-violet-300" /><span class="h-2 w-5 rounded-full bg-emerald-200" /><span class="h-2 w-5 rounded-full bg-amber-200" />
+          <span class="h-2 w-12 rounded-full bg-brand-300" /><span class="h-2 w-5 rounded-full bg-emerald-200" /><span class="h-2 w-5 rounded-full bg-amber-200" />
         </div>
         <h1 class="text-5xl font-semibold leading-[1.08] tracking-tight">
           Work feels simpler when everything is in one place.
         </h1>
-        <p class="mt-6 max-w-lg text-lg leading-8 text-violet-100/80">
+        <p class="mt-6 max-w-lg text-lg leading-8 text-brand-100">
           Attendance, leave, schedules and your team—calmly organized for every workday.
         </p>
       </div>
-      <p class="relative z-10 text-sm text-violet-100/60">
+      <p class="relative z-10 text-sm text-brand-200">
         A Datlabs product
       </p>
     </section>
