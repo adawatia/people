@@ -1,0 +1,7 @@
+# Authentication UI checks
+
+Run `pnpm test:auth` from `app/web`. The Playwright configuration starts Nuxt on port 3100, or reuses an existing local preview. Install Playwright Chromium first if it is not available (`pnpm exec playwright install chromium`). To use an installed Chrome binary instead, set `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` to its absolute path.
+
+The suite mocks session responses and uses synthetic credentials and authenticator data. It covers both account types, login/MFA redirects, forced password changes, recovery, duplicate submissions, errors, theme persistence, enlarged text, and five viewport widths in both themes. Screenshots and failure artifacts are generated in the ignored `test-results/auth` directory. Backend authentication and physical mobile keyboard behavior require separate integration/device checks.
+
+The platform-shell scenarios use a synthetic HR or technical account and mocked empty notifications. They verify five widths in both themes, workspace switching, keyboard page search, mobile navigation/sign-out, and technical navigation boundaries, persistent sidebar collapse, collapsed workspace access, and sign-out loading/failure/retry behavior. They also verify the controls-only header, profile placement/navigation and long-name truncation, conditional workspace controls, removed sidebar copy, and bordered sign-out with keyboard focus. Development tooling is hidden only in review screenshots.

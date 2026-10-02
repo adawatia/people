@@ -195,3 +195,9 @@ __pypackages__/
 .pypirc
 .pytype/
 cython_debug/
+# Frontend browser verification artifacts
+app/web/test-results/
+app/web/playwright-report/
+
+# Local design review captures
+.impeccable/review/

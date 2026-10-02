@@ -1,26 +1,20 @@
-<script setup lang="ts">
-defineProps<{ compact?: boolean }>()
-</script>
-
 <template>
   <div class="flex items-center gap-3">
-    <picture class="block size-9 shrink-0 overflow-hidden rounded-xl shadow-sm shadow-primary/20">
-      <source
-        media="(prefers-color-scheme: dark)"
-        srcset="/branding/people-app-icon-dark.svg"
-      >
+    <span class="platform-brand-symbol">
       <img
         src="/branding/people-app-icon-light.svg"
-        alt="People"
-        class="size-full object-cover"
+        alt=""
+        class="platform-brand-light"
+        width="40"
+        height="40"
       >
-    </picture>
-    <span
-      v-if="!compact"
-      class="leading-none"
-    >
-      <span class="block text-[17px] font-semibold tracking-tight">People</span>
-      <span class="mt-1 block text-[10px] font-semibold uppercase tracking-[0.18em] text-muted">by Datlabs</span>
+      <img
+        src="/branding/people-app-icon-dark.svg"
+        alt=""
+        class="platform-brand-dark"
+        width="40"
+        height="40"
+      >
     </span>
   </div>
 </template>

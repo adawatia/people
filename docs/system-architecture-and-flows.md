@@ -647,7 +647,8 @@ app/web
 ├─ app/
 │  ├─ app.vue, app.config.ts          # root + UI theme config
 │  ├─ assets/css/main.css             # People design tokens (--people-*)
-│  ├─ layouts/auth.vue                # split-screen unauthenticated shell (currently unused: login.vue sets layout:false)
+│  ├─ assets/css/platform.css         # responsive sidebar/header/mobile shell
+│  ├─ layouts/auth.vue                # shared branded shell: workforce/admin login, recovery, login-time MFA
 │  ├─ layouts/default.vue             # sidebar + topbar + bottom mobile nav + nav gating
 │  ├─ middleware/auth.global.ts       # route guard (session required, public paths incl. /admin/login)
 │  ├─ middleware/workspace.global.ts # route visibility guard for the active workspace
@@ -670,6 +671,8 @@ app/web
 │  └─ utils/origin.ts                 # pure Origin/Referer validation used by the CSRF middleware
 └─ shared/types/*.ts                  # type modules shared by app & server
 ```
+
+Authentication presentation uses scoped editorial-violet tokens in `assets/css/auth.css`, existing SVG marks, and a local licensed Newsreader display font. The shared shell supplies People™ by Datlabs branding, current-year copyright, and an adaptive color-mode toggle with a cookie-persisted appearance preference (separate from session cookies). Below 1024px the form leads; larger workforce/recovery screens add a native HRMS feature diagram with brief connecting-line and icon pulses that respect reduced motion. Technical administration uses a centered form without a story panel or animation; its header keeps the color-mode toggle clear of repeated labels. Copyright and maker attribution remain separate footer items. Employee login still covers all workforce roles, and `/admin/login` remains technical Super Admin only. Password recovery and login-time MFA retain the existing BFF contracts and security policies.
 
 ### 3.2 The BFF session proxy (why the browser never sees a token)
 
@@ -760,11 +763,11 @@ One account can move between contexts without another login:
 
 Action and dialog visibility follows the same rule: `pages/attendance/index.vue` gates the correction dialog on `hasPermission('attendance.correct')` rather than on the `HR_ADMIN` role, and `pages/profile.vue` derives its display label from `business_role` + `scope_type` (so unit HR and organization HR are distinguishable). Dashboard presentation now follows the active workspace (`MY`, `TEAM`, `HR`, `EXECUTIVE`, or `TECHNICAL`) rather than branching directly on a role.
 
-Navigation is grouped by purpose inside each workspace (for example Workforce, Requests & approvals, Time & compensation, Organization, and Insights in HR). Group headings are high-contrast and each group is visually bounded, so the active workspace's operational areas are distinguishable at a glance. Team/HR dashboards show scoped KPIs and approval work only; personal shift and attendance cards appear only in My Workspace. Approval shortcuts are rendered only when the user has a matching approval capability. Super Admin gets **only** Dashboard + System administration — the business nav is replaced, because master data lives in ERP.
+Navigation is grouped by purpose inside each workspace (for example Workforce, Requests & approvals, Time & compensation, Organization, and Insights in HR). Group headings use clear type and spacing without nested cards, so the active workspace's operational areas are distinguishable at a glance. Team/HR dashboards show scoped KPIs and approval work only; personal shift and attendance cards appear only in My Workspace. Approval shortcuts are rendered only when the user has a matching approval capability. Super Admin gets **only** Dashboard + System administration — the business nav is replaced, because master data lives in ERP.
 
 The shared Approvals page is available when the user can approve leave, work arrangements, **or overtime**; overtime approval must not depend on also granting one of the other approval permissions.
 
-Mobile has exactly four primary destinations: **Home**, **Workspace**, the permission-filtered contextual section (My: Leave; Team: Approvals; HR: Employees; Executive: Reports; Technical: Settings), and **More**. Workspace opens a Nuxt UI slideover that identifies the active workspace; More holds remaining pages and account actions. The desktop sidebar retains one workspace selector and grouped navigation.
+Mobile has exactly four primary destinations: **Home**, **Workspace**, the permission-filtered contextual section (My: Leave; Team: Approvals; HR: Employees; Executive: Reports; Technical: Settings), and **More**. Workspace opens a Nuxt UI slideover that identifies the active workspace; More holds remaining pages and account actions. The desktop sidebar is 256px expanded or a 76px icon rail, with a presentation-only collapse preference persisted in `people_sidebar_collapsed`. For multiple available workspaces, expanded mode uses one workspace selector and the collapsed rail a workspace dropdown; single-workspace accounts omit that section. Static workspace titles and descriptions are removed. Grouped navigation scrolls independently while settings and a dedicated violet-bordered sign-out control remain fixed. Collapse/expand moves to the left of the desktop top bar; profile moves to its right, showing avatar/name on desktop and avatar only on mobile. Sign-out blocks duplicate requests and reports failure without discarding client session state. The shared shell uses the existing People symbol alone in the sidebar, warm off-white/ink surfaces, violet active states, a controls-only solid header without breadcrumbs or page titles, and client-mounted theme controls. On mobile, the header retains the People symbol, while the More drawer presents compact navigation rows with a dedicated sign-out footer outside the scrolling list. A skip link targets the main content.
 
 The top-bar search opens a keyboard-accessible (`Ctrl`/`Cmd` + `K`) page finder built from the same permission-filtered navigation for the active workspace. It searches available destinations rather than business records and navigates with a clean workspace query so filters from the current page do not leak into the destination.
 

@@ -21,6 +21,10 @@ export default defineNuxtConfig({
 
   css: ['~/assets/css/main.css'],
 
+  colorMode: {
+    storage: 'cookie'
+  },
+
   runtimeConfig: {
     hrmsApiBase: import.meta.env.NUXT_HRMS_API_BASE || 'http://127.0.0.1:8000',
     // Extra origins allowed to send state-changing requests to the BFF (the

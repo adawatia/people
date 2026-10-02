@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import type { MfaChallenge } from '#shared/types/auth'
 
-definePageMeta({ layout: false })
-useSeoMeta({ title: 'Technical sign-in' })
+definePageMeta({ layout: 'auth' })
+useSeoMeta({ title: 'Technical sign-in · People by Datlabs' })
 
 /**
  * Super Admin sign-in. Deliberately a different route from /login: the technical
@@ -16,6 +16,7 @@ const errorMessage = ref('')
 const challenge = ref<MfaChallenge | null>(null)
 
 async function submit() {
+  if (auth.loading.value) return
   errorMessage.value = ''
   if (!form.identity.trim() || !form.password) {
     errorMessage.value = 'Enter the technical username and password.'
@@ -40,110 +41,81 @@ async function afterMfa() {
 </script>
 
 <template>
-  <div class="flex min-h-dvh items-center justify-center bg-[#14121f] px-5 py-12">
-    <div class="w-full max-w-md">
-      <div class="flex items-center gap-3">
-        <span class="grid size-10 place-items-center rounded-xl bg-white/10 text-white">
-          <UIcon
-            name="i-lucide-shield-half"
-            class="size-5"
-          />
-        </span>
-        <div>
-          <p class="text-sm font-semibold text-white">
-            Technical administration
-          </p>
-          <p class="text-xs text-white/60">
-            People HRMS
-          </p>
-        </div>
-      </div>
-
-      <div class="mt-8 rounded-2xl bg-white p-6 shadow-xl sm:p-8">
-        <template v-if="challenge">
-          <AuthMfaChallenge
-            :mfa-token="challenge.mfa_token"
-            :enrollment-required="challenge.enrollment_required"
-            account-type="super_admin"
-            @verified="afterMfa"
-            @cancelled="challenge = null"
-          />
-        </template>
-        <template v-else>
-          <h1 class="text-2xl font-semibold tracking-tight">
-            Technical sign-in
-          </h1>
-          <p class="mt-2 text-sm leading-6 text-muted">
-            Restricted to system administrators. Business users sign in from the employee page.
-          </p>
-          <UAlert
-            class="mt-5"
-            color="warning"
-            variant="soft"
-            icon="i-lucide-triangle-alert"
-            description="Sign-ins and session changes on this account are audited. Sessions expire quickly and require a second factor once enrolled."
-          />
-          <form
-            class="mt-6 space-y-5"
-            @submit.prevent="submit"
-          >
-            <UFormField
-              label="Username"
-              name="identity"
-              required
-            >
-              <UInput
-                v-model="form.identity"
-                class="w-full"
-                size="xl"
-                icon="i-lucide-user-round-cog"
-                autocomplete="username"
-                placeholder="Enter username"
-                autofocus
-              />
-            </UFormField>
-            <UFormField
-              label="Password"
-              name="password"
-              required
-            >
-              <UInput
-                v-model="form.password"
-                class="w-full"
-                size="xl"
-                icon="i-lucide-lock-keyhole"
-                type="password"
-                autocomplete="current-password"
-                placeholder="Enter your password"
-              />
-            </UFormField>
-            <UAlert
-              v-if="errorMessage"
-              color="error"
-              variant="soft"
-              icon="i-lucide-circle-alert"
-              :description="errorMessage"
-            />
-            <UButton
-              type="submit"
-              block
-              size="xl"
-              color="neutral"
-              icon="i-lucide-log-in"
-              :loading="auth.loading.value"
-            >
-              Sign in
-            </UButton>
-          </form>
-        </template>
-      </div>
-
-      <NuxtLink
-        to="/login"
-        class="mt-6 block text-center text-xs text-white/60 hover:text-white"
+  <div>
+    <AuthMfaChallenge
+      v-if="challenge"
+      :mfa-token="challenge.mfa_token"
+      :enrollment-required="challenge.enrollment_required"
+      account-type="super_admin"
+      @verified="afterMfa"
+      @cancelled="challenge = null"
+    />
+    <template v-else>
+      <h1>Technical administration</h1>
+      <p class="auth-description">
+        Restricted to system administrators. For workforce access, use employee sign-in.
+      </p>
+      <form
+        class="auth-form"
+        :aria-busy="auth.loading.value"
+        @submit.prevent="submit"
       >
-        Employee sign-in
-      </NuxtLink>
-    </div>
+        <UFormField
+          label="Technical username"
+          name="identity"
+          required
+        >
+          <UInput
+            v-model="form.identity"
+            class="w-full"
+            size="xl"
+            autocomplete="username"
+            placeholder="Enter technical username"
+            :autocapitalize="'none'"
+            :spellcheck="false"
+          />
+        </UFormField>
+        <UFormField
+          label="Password"
+          name="password"
+          required
+        >
+          <AuthPasswordInput v-model="form.password" />
+        </UFormField>
+        <div
+          v-if="errorMessage"
+          role="alert"
+        >
+          <UAlert
+            color="error"
+            variant="soft"
+            icon="i-lucide-circle-alert"
+            :description="errorMessage"
+          />
+        </div>
+        <UButton
+          type="submit"
+          block
+          size="xl"
+          :loading="auth.loading.value"
+          :disabled="auth.loading.value"
+          trailing-icon="i-lucide-arrow-right"
+        >
+          Sign in to administration
+        </UButton>
+      </form>
+      <p class="auth-security-note">
+        Technical sign-ins are audited. A second factor is required once enrolled.
+      </p>
+      <div class="auth-secondary-links">
+        <NuxtLink
+          to="/login"
+          class="auth-link"
+        ><UIcon
+          name="i-lucide-arrow-left"
+          class="mr-2 size-4"
+        />Employee sign-in</NuxtLink>
+      </div>
+    </template>
   </div>
 </template>

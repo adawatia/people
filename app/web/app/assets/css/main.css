@@ -1,5 +1,7 @@
 @import "tailwindcss";
 @import "@nuxt/ui";
+@import "./auth.css" layer(components);
+@import "./platform.css" layer(components);
 
 @theme static {
   --color-brand-50: #f5f3ff;
@@ -17,17 +19,25 @@
 }
 
 :root {
-  --ui-primary: var(--color-brand-700);
+  --ui-primary: #5637a5;
+  --ui-bg: var(--people-surface);
+  --ui-bg-muted: var(--people-canvas);
+  --ui-bg-elevated: var(--people-surface);
+  --ui-border: var(--people-border);
+  --ui-text: var(--people-text);
+  --ui-text-highlighted: var(--people-text);
+  --ui-text-muted: var(--people-muted);
+  --ui-text-dimmed: var(--people-muted);
   --ui-success: #226747;
   --ui-warning: #805900;
   --ui-error: #a52b46;
   --ui-info: #345a96;
-  --people-canvas: #f7f8fa;
-  --people-surface: #ffffff;
-  --people-border: #d8dee7;
-  --people-text: #202939;
-  --people-muted: #596579;
-  --people-lavender: #ede9fe;
+  --people-canvas: #faf8f4;
+  --people-surface: #fffdfa;
+  --people-border: #ded8e5;
+  --people-text: #292335;
+  --people-muted: #665e70;
+  --people-lavender: #eee7f7;
   --people-mint: #e7f4ed;
   --people-peach: #f9eee4;
   --people-blue: #e8eff9;
@@ -35,7 +45,7 @@
   --people-rose: #fce9ed;
   --people-blue-ink: #345a96;
   --people-mint-ink: #226747;
-  --people-lavender-ink: #5032bd;
+  --people-lavender-ink: #5637a5;
   --people-peach-ink: #925025;
   --people-yellow-ink: #805900;
   --people-rose-ink: #a52b46;
@@ -47,9 +57,9 @@ button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
 
 @utility people-card {
   border: 1px solid var(--people-border);
-  border-radius: 0.625rem;
+  border-radius: 0.75rem;
   background: color-mix(in srgb, var(--people-surface) 96%, transparent);
-  box-shadow: 2px 2px 0 color-mix(in srgb, var(--people-border) 70%, transparent);
+
 }
 
 @utility people-icon {
@@ -66,16 +76,16 @@ button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
 @utility people-icon--rose { background: var(--people-rose); color: var(--people-rose-ink); }
 
 .dark {
-  --ui-primary: var(--color-brand-300);
+  --ui-primary: #c9b2ff;
   --ui-success: #94d8b4;
   --ui-warning: #efd184;
   --ui-error: #f2acbd;
   --ui-info: #abc9f5;
-  --people-canvas: #111722;
-  --people-surface: #192231;
-  --people-border: #344155;
-  --people-text: #edf1f7;
-  --people-muted: #acb8ca;
+  --people-canvas: #1c1923;
+  --people-surface: #25202e;
+  --people-border: #51465e;
+  --people-text: #f7f0e9;
+  --people-muted: #beb2ce;
   --people-lavender: #30264b;
   --people-mint: #19362c;
   --people-peach: #382b22;

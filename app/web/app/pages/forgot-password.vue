@@ -1,6 +1,6 @@
 <script setup lang="ts">
-definePageMeta({ layout: false })
-useSeoMeta({ title: 'Recover password' })
+definePageMeta({ layout: 'auth' })
+useSeoMeta({ title: 'Recover password · People by Datlabs' })
 
 const identity = ref('')
 const code = ref('')
@@ -34,6 +34,7 @@ function handleRecoveryError(error: unknown) {
 }
 
 async function start() {
+  if (loading.value) return
   errorMessage.value = ''
   if (!identity.value.trim()) {
     errorMessage.value = 'Enter your mobile number or username.'
@@ -52,7 +53,12 @@ async function start() {
 }
 
 async function verify() {
+  if (loading.value) return
   errorMessage.value = ''
+  if (!code.value.trim()) {
+    errorMessage.value = 'Enter your authenticator code.'
+    return
+  }
   loading.value = true
   try {
     const result = await $fetch<{ recovery_token: string }>('/api/session/password-recovery/verify', { method: 'POST', body: { recovery_token: recoveryToken.value, code: code.value.trim() } })
@@ -66,6 +72,7 @@ async function verify() {
 }
 
 async function reset() {
+  if (loading.value) return
   errorMessage.value = ''
   if (password.value !== confirmation.value) {
     errorMessage.value = 'The passwords do not match.'
@@ -84,118 +91,131 @@ async function reset() {
 </script>
 
 <template>
-  <main class="grid min-h-dvh place-items-center bg-[var(--people-canvas)] px-5 py-10">
-    <section class="w-full max-w-md people-card space-y-6 p-6 sm:p-8">
-      <div>
-        <p class="text-sm font-semibold text-primary">
-          Account recovery
-        </p>
-        <h1 class="mt-2 text-3xl font-semibold tracking-tight">
-          Reset your password
-        </h1>
-        <p class="mt-3 text-sm leading-6 text-muted">
-          Use the authenticator app linked to your People account. Your sessions will be signed out after the reset.
-        </p>
-      </div>
+  <div>
+    <h1>{{ step === 'done' ? 'You’re ready to return.' : 'Reset your password' }}</h1>
+    <p class="auth-description">
+      Use the authenticator app linked to your People account. Resetting your password signs out your other sessions.
+    </p>
+    <ol
+      class="auth-steps"
+      aria-label="Password recovery progress"
+    >
+      <li :aria-current="step === 'identify' ? 'step' : undefined">
+        1. Account
+      </li>
+      <li :aria-current="step === 'verify' ? 'step' : undefined">
+        2. Verify
+      </li>
+      <li :aria-current="step === 'reset' ? 'step' : undefined">
+        3. Password
+      </li>
+      <li :aria-current="step === 'done' ? 'step' : undefined">
+        4. Complete
+      </li>
+    </ol>
+    <div
+      v-if="errorMessage"
+      role="alert"
+    >
       <UAlert
-        v-if="errorMessage"
         color="error"
         variant="soft"
         :description="errorMessage"
       />
-      <template v-if="step === 'identify'">
-        <UFormField
-          label="Mobile number or username"
-          name="identity"
-        >
-          <UInput
-            v-model="identity"
-            class="w-full"
-            autocomplete="username"
-            placeholder="9876543210"
-            autofocus
-          />
-        </UFormField>
-        <UButton
-          block
-          size="lg"
-          :loading="loading"
-          @click="start"
-        >
-          Continue
-        </UButton>
-      </template>
-      <template v-else-if="step === 'verify'">
-        <UFormField
-          label="Authenticator code"
-          name="code"
-        >
-          <UInput
-            v-model="code"
-            class="w-full"
-            inputmode="numeric"
-            autocomplete="one-time-code"
-            placeholder="123456"
-            autofocus
-          />
-        </UFormField>
-        <UButton
-          block
-          size="lg"
-          :loading="loading"
-          @click="verify"
-        >
-          Verify authenticator
-        </UButton>
-      </template>
-      <template v-else-if="step === 'reset'">
+    </div>
+    <form
+      v-if="step !== 'done'"
+      class="auth-form"
+      :aria-busy="loading"
+      @submit.prevent="step === 'identify' ? start() : step === 'verify' ? verify() : reset()"
+    >
+      <UFormField
+        v-if="step === 'identify'"
+        label="Mobile number or username"
+        name="identity"
+        required
+      >
+        <UInput
+          v-model="identity"
+          class="w-full"
+          size="xl"
+          autocomplete="username"
+          placeholder="Enter mobile number or username"
+          :autocapitalize="'none'"
+          :spellcheck="false"
+        />
+      </UFormField>
+      <UFormField
+        v-else-if="step === 'verify'"
+        label="Authenticator code"
+        name="code"
+        required
+      >
+        <UInput
+          v-model="code"
+          class="w-full"
+          size="xl"
+          inputmode="numeric"
+          autocomplete="one-time-code"
+          placeholder="Enter 6-digit code"
+          autofocus
+        />
+      </UFormField>
+      <template v-else>
         <UFormField
           label="New password"
           name="password"
+          required
         >
-          <UInput
+          <AuthPasswordInput
             v-model="password"
-            class="w-full"
-            type="password"
             autocomplete="new-password"
+            placeholder="Create your new password"
           />
         </UFormField>
         <UFormField
           label="Confirm new password"
           name="confirmation"
+          required
         >
-          <UInput
+          <AuthPasswordInput
             v-model="confirmation"
-            class="w-full"
-            type="password"
             autocomplete="new-password"
+            placeholder="Re-enter your new password"
           />
         </UFormField>
-        <UButton
-          block
-          size="lg"
-          :loading="loading"
-          @click="reset"
-        >
-          Set new password
-        </UButton>
       </template>
-      <template v-else>
-        <UAlert
-          color="success"
-          variant="soft"
-          title="Password changed"
-          description="All sessions were ended. Sign in with your new password."
-        />
-        <NuxtLink
-          to="/login"
-          class="block text-center font-medium text-primary hover:underline"
-        >Return to sign in</NuxtLink>
-      </template>
+      <UButton
+        type="submit"
+        block
+        size="xl"
+        :loading="loading"
+        :disabled="loading"
+        trailing-icon="i-lucide-arrow-right"
+      >
+        {{ step === 'identify' ? 'Continue' : step === 'verify' ? 'Verify authenticator' : 'Set new password' }}
+      </UButton>
+    </form>
+    <div
+      v-else
+      class="mt-6"
+      role="status"
+    >
+      <UAlert
+        color="success"
+        variant="soft"
+        title="Password changed"
+        description="All sessions were ended. Sign in with your new password."
+      />
+    </div>
+    <div class="auth-secondary-links">
       <NuxtLink
         to="/login"
-        class="block text-center text-sm text-muted hover:underline"
-      >Back to sign in</NuxtLink>
-    </section>
-  </main>
+        class="auth-link"
+      ><UIcon
+        name="i-lucide-arrow-left"
+        class="mr-2 size-4"
+      />{{ step === 'done' ? 'Return to sign in' : 'Back to sign in' }}</NuxtLink>
+    </div>
+  </div>
 </template>

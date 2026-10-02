@@ -29,6 +29,7 @@ async function loadEnrollment() {
 onMounted(loadEnrollment)
 
 async function submit() {
+  if (auth.loading.value || loadingEnrollment.value) return
   errorMessage.value = ''
   if (!code.value.trim()) {
     errorMessage.value = 'Enter the 6-digit code from your authenticator app.'
@@ -53,13 +54,10 @@ const recoveryCodes = computed(() => enrollment.value?.recovery_codes ?? [])
 <template>
   <div class="space-y-6">
     <div>
-      <p class="text-sm font-semibold text-primary">
-        {{ enrollmentRequired ? 'Set up your authenticator' : 'Two-step verification' }}
-      </p>
-      <h3 class="mt-2 text-2xl font-semibold tracking-tight">
+      <h1>
         {{ enrollmentRequired ? 'Add a second factor' : 'Enter your code' }}
-      </h3>
-      <p class="mt-2 text-sm leading-6 text-muted">
+      </h1>
+      <p class="auth-description">
         <template v-if="enrollmentRequired">
           This account requires two-step verification. Scan the QR code with your authenticator app, then confirm with the code it shows.
         </template>
@@ -88,7 +86,7 @@ const recoveryCodes = computed(() => enrollment.value?.recovery_codes ?? [])
           <p class="text-xs font-medium uppercase tracking-wide text-muted">
             Recovery codes (shown once)
           </p>
-          <div class="mt-2 grid grid-cols-2 gap-1 font-mono text-xs">
+          <div class="mt-2 grid grid-cols-1 gap-2 font-mono text-xs sm:grid-cols-2">
             <span
               v-for="recovery in recoveryCodes"
               :key="recovery"
@@ -102,11 +100,12 @@ const recoveryCodes = computed(() => enrollment.value?.recovery_codes ?? [])
     </div>
 
     <form
-      class="space-y-5"
+      class="auth-form"
+      :aria-busy="auth.loading.value"
       @submit.prevent="submit"
     >
       <UFormField
-        label="Authentication code"
+        label="Authenticator or recovery code"
         name="code"
         required
       >
@@ -115,25 +114,31 @@ const recoveryCodes = computed(() => enrollment.value?.recovery_codes ?? [])
           class="w-full"
           size="xl"
           icon="i-lucide-shield-check"
-          inputmode="numeric"
           autocomplete="one-time-code"
-          placeholder="123456"
+          placeholder="Enter your code"
+          :autocapitalize="'none'"
+          :spellcheck="false"
           autofocus
         />
       </UFormField>
-      <UAlert
+      <div
         v-if="errorMessage"
-        color="error"
-        variant="soft"
-        icon="i-lucide-circle-alert"
-        :description="errorMessage"
-      />
+        role="alert"
+      >
+        <UAlert
+          color="error"
+          variant="soft"
+          icon="i-lucide-circle-alert"
+          :description="errorMessage"
+        />
+      </div>
       <UButton
         type="submit"
         block
         size="xl"
         icon="i-lucide-log-in"
         :loading="auth.loading.value"
+        :disabled="auth.loading.value || loadingEnrollment || (enrollmentRequired && !enrollment)"
       >
         {{ enrollmentRequired ? 'Confirm and sign in' : 'Verify and sign in' }}
       </UButton>
@@ -141,7 +146,8 @@ const recoveryCodes = computed(() => enrollment.value?.recovery_codes ?? [])
         type="button"
         block
         variant="ghost"
-        size="sm"
+        size="lg"
+        :disabled="auth.loading.value"
         @click="emit('cancelled')"
       >
         Back to sign in

@@ -17,6 +17,26 @@ const workspace = useWorkspace()
 const availableWorkspaces = workspace.available
 const currentWorkspace = workspace.current
 const workspaceDefinition = computed(() => workspace.definition.value || WORKSPACES[0]!)
+const sidebarCollapsed = useCookie<boolean>('people_sidebar_collapsed', { default: () => false, maxAge: 60 * 60 * 24 * 365, sameSite: 'lax' })
+const signingOut = ref(false)
+const toast = useToast()
+const collapsedWorkspaceItems = computed(() => availableWorkspaces.value.map(key => ({
+  label: WORKSPACES.find(item => item.key === key)?.label || key,
+  icon: WORKSPACES.find(item => item.key === key)?.icon,
+  trailingIcon: key === currentWorkspace.value ? 'i-lucide-check' : undefined,
+  onSelect: () => workspace.select(key)
+})))
+async function signOut() {
+  if (signingOut.value) return
+  signingOut.value = true
+  try {
+    await auth.logout()
+  } catch {
+    toast.add({ title: 'Could not sign out', description: 'Please try again.', color: 'error' })
+  } finally {
+    signingOut.value = false
+  }
+}
 const mobileOpen = ref(false)
 const mobileGroup = ref('More')
 const globalSearchOpen = ref(false)
@@ -81,11 +101,6 @@ const navSections = computed(() => {
     groups.set(group, items)
   }
   return Array.from(groups, ([label, items]) => ({ label, items }))
-})
-const pageTitle = computed(() => {
-  if (route.path === '/settings') return isTechnicalAdmin.value ? 'System administration' : 'Security settings'
-  if (route.path === '/profile') return 'Profile'
-  return visibleItems.value.find(item => item.to === route.path)?.label || workspaceDefinition.value.label || 'People'
 })
 const accountItems: NavItem[] = [
   { label: 'Profile', icon: 'i-lucide-user-round', to: '/profile' },
@@ -152,142 +167,211 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="min-h-dvh bg-[var(--people-canvas)]">
+  <div
+    class="platform-shell"
+    :class="{ 'platform-shell--collapsed': sidebarCollapsed }"
+  >
+    <a
+      href="#platform-content"
+      class="platform-skip-link"
+    >Skip to content</a>
     <aside
-      class="fixed inset-y-0 left-0 z-50 hidden w-[17rem] flex-col border-r border-[var(--people-border)] bg-[var(--people-surface)] px-4 py-5 lg:flex"
+      class="platform-sidebar"
+      aria-label="Workspace sidebar"
     >
-      <div class="flex items-center justify-between px-2">
-        <BrandMark />
+      <div class="platform-sidebar-heading">
+        <NuxtLink
+          :to="workspace.link('/')"
+          class="platform-brand-link"
+          aria-label="People by Datlabs — dashboard"
+        >
+          <BrandMark />
+        </NuxtLink>
       </div>
       <div
         v-if="availableWorkspaces.length > 1"
-        class="mt-6 px-2"
+        class="platform-workspace"
       >
-        <label
-          for="workspace-switcher"
-          class="mb-2 block text-xs font-semibold uppercase tracking-wide text-muted"
-        >Workspace</label>
-        <div class="relative">
-          <select
-            id="workspace-switcher"
-            :value="currentWorkspace"
-            class="w-full appearance-none rounded-xl border border-[var(--people-border)] bg-[var(--people-surface)] px-3 py-2.5 pr-9 text-sm font-semibold text-highlighted outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20"
-            @change="changeWorkspace"
-          >
-            <option
-              v-for="item in availableWorkspaces"
-              :key="item"
-              :value="item"
-            >
-              {{ WORKSPACES.find(workspaceItem => workspaceItem.key === item)?.label || item }}
-            </option>
-          </select>
-          <UIcon
-            name="i-lucide-chevron-down"
-            class="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted"
+        <UDropdownMenu
+          v-if="sidebarCollapsed"
+          :items="collapsedWorkspaceItems"
+          :content="{ side: 'right', align: 'start' }"
+        >
+          <UButton
+            :icon="workspaceDefinition.icon"
+            color="neutral"
+            variant="ghost"
+            class="platform-icon-button"
+            :aria-label="`Switch workspace: ${workspaceDefinition.label}`"
+            :title="workspaceDefinition.label"
           />
-        </div>
-        <p class="mt-2 text-xs text-muted">
-          {{ workspaceDefinition.description }}
-        </p>
+        </UDropdownMenu>
+        <template v-else>
+          <label
+            for="workspace-switcher"
+            class="platform-workspace-label"
+          >Workspace</label>
+          <div class="platform-workspace-select">
+            <select
+              id="workspace-switcher"
+              :value="currentWorkspace"
+              @change="changeWorkspace"
+            >
+              <option
+                v-for="item in availableWorkspaces"
+                :key="item"
+                :value="item"
+              >
+                {{ WORKSPACES.find(workspaceItem => workspaceItem.key === item)?.label || item }}
+              </option>
+            </select>
+            <UIcon
+              name="i-lucide-chevron-down"
+              class="size-4"
+            />
+          </div>
+        </template>
       </div>
       <nav
-        class="mt-6 flex-1 space-y-5 overflow-y-auto"
+        id="platform-primary-nav"
+        class="platform-nav"
         aria-label="Primary navigation"
       >
         <section
           v-for="section in navSections"
           :key="section.label"
           :aria-label="`${section.label} navigation`"
-          class="rounded-xl border border-[var(--people-border)] bg-[var(--people-canvas)]/45 p-2"
+          class="platform-nav-group"
         >
-          <h2 class="mb-1.5 flex items-center gap-2 px-2 py-1 text-[11px] font-bold uppercase tracking-[0.12em] text-highlighted">
-            <span class="size-1.5 rounded-full bg-primary" />
-            {{ section.label }}
-          </h2>
+          <h2>{{ section.label }}</h2>
           <NuxtLink
             v-for="item in section.items"
             :key="item.to"
             :to="workspace.link(item.to)"
-            class="flex min-h-11 items-center gap-3 rounded-xl px-3 text-sm font-medium transition-colors"
-            :class="route.path === item.to || (item.to !== '/' && route.path.startsWith(`${item.to}/`)) ? 'bg-[var(--people-lavender)] text-primary-700 dark:text-primary-300' : 'text-muted hover:bg-muted/10 hover:text-highlighted'"
+            class="platform-nav-link"
+            :aria-label="item.label"
+            :title="sidebarCollapsed ? item.label : undefined"
+            :aria-current="route.path === item.to || (item.to !== '/' && route.path.startsWith(`${item.to}/`)) ? 'page' : undefined"
           >
-            <span
-              class="people-icon size-8 shrink-0"
-              :class="item.iconTone"
-            >
-              <UIcon
-                :name="item.icon"
-                class="size-4"
-              />
-            </span>{{ item.label }}
+            <UIcon
+              :name="item.icon"
+              class="size-5 shrink-0"
+            />
+            <span class="platform-nav-label">{{ item.label }}</span>
           </NuxtLink>
         </section>
         <NuxtLink
           v-if="isTechnicalAdmin"
           to="/settings"
-          class="flex min-h-11 items-center gap-3 rounded-xl px-3 text-sm font-medium transition-colors"
-          :class="route.path === '/settings' ? 'bg-[var(--people-lavender)] text-primary-700 dark:text-primary-300' : 'text-muted hover:bg-muted/10 hover:text-highlighted'"
+          class="platform-nav-link"
+          aria-label="System administration"
+          :title="sidebarCollapsed ? 'System administration' : undefined"
+          :aria-current="route.path === '/settings' ? 'page' : undefined"
         >
-          <span class="people-icon people-icon--lavender size-8 shrink-0">
-            <UIcon
-              name="i-lucide-shield-check"
-              class="size-4"
-            />
-          </span>System administration
+          <UIcon
+            name="i-lucide-shield-check"
+            class="size-5 shrink-0"
+          />
+          <span class="platform-nav-label">System administration</span>
         </NuxtLink>
       </nav>
-      <div class="border-t border-[var(--people-border)] pt-4">
-        <div class="flex items-center gap-1 rounded-xl px-1 py-1">
+      <div class="platform-account">
+        <div class="platform-account-actions">
+          <UButton
+            v-if="!isTechnicalAdmin"
+            to="/settings"
+            icon="i-lucide-settings"
+            color="neutral"
+            variant="ghost"
+            class="platform-icon-button"
+            aria-label="Security settings"
+          />
+          <UButton
+            icon="i-lucide-log-out"
+            color="neutral"
+            variant="ghost"
+            class="platform-sign-out text-[var(--people-lavender-ink)] bg-[var(--people-lavender)] hover:bg-[var(--people-surface)]"
+            aria-label="Sign out"
+            title="Sign out"
+            :loading="signingOut"
+            :disabled="signingOut"
+            @click="signOut"
+          >
+            <span v-if="!sidebarCollapsed">Sign out</span>
+          </UButton>
+        </div>
+      </div>
+    </aside>
+    <div class="platform-body">
+      <header class="platform-header">
+        <UButton
+          :icon="sidebarCollapsed ? 'i-lucide-panel-left-open' : 'i-lucide-panel-left-close'"
+          color="neutral"
+          variant="ghost"
+          class="platform-icon-button platform-sidebar-toggle"
+          :aria-label="sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'"
+          :title="sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'"
+          :aria-expanded="!sidebarCollapsed"
+          aria-controls="platform-primary-nav"
+          @click="sidebarCollapsed = !sidebarCollapsed"
+        />
+
+        <NuxtLink
+          :to="workspace.link('/')"
+          class="platform-mobile-brand"
+          aria-label="People by Datlabs — dashboard"
+        ><BrandMark /></NuxtLink>
+        <div class="platform-header-actions">
+          <UButton
+            icon="i-lucide-search"
+            color="neutral"
+            variant="ghost"
+            class="platform-search-trigger"
+            aria-label="Search pages"
+            title="Search pages (Ctrl+K)"
+            @click="openGlobalSearch"
+          >
+            <span class="platform-search-label">Search pages</span><kbd class="platform-search-shortcut">⌘ / Ctrl K</kbd>
+          </UButton>
+          <UButton
+            icon="i-lucide-bell"
+            color="neutral"
+            variant="ghost"
+            to="/notifications"
+            class="platform-icon-button"
+            aria-label="Notifications"
+            :aria-current="route.path === '/notifications' ? 'page' : undefined"
+          />
+          <ClientOnly>
+            <UColorModeButton class="platform-icon-button" />
+            <template #fallback>
+              <span
+                class="platform-icon-button"
+                aria-hidden="true"
+              />
+            </template>
+          </ClientOnly>
           <NuxtLink
             to="/profile"
-            class="flex min-w-0 flex-1 items-center gap-3 rounded-lg px-1 py-1 hover:bg-muted/10"
+            class="platform-profile platform-header-profile"
+            :aria-label="`Profile: ${auth.displayName.value}`"
+            :title="auth.displayName.value"
           >
             <UAvatar
               :text="auth.initials.value"
               size="md"
             />
-            <div class="min-w-0 flex-1">
-              <p class="truncate text-sm font-semibold">
-                {{ auth.displayName.value }}
-              </p><p class="truncate text-xs text-muted">
-                {{ auth.user.value?.employee_code || auth.user.value?.email }}
-              </p>
-            </div>
+            <span class="platform-profile-copy">
+              <span class="platform-profile-name">{{ auth.displayName.value }}</span>
+            </span>
           </NuxtLink>
-          <UButton
-            icon="i-lucide-log-out"
-            color="neutral"
-            variant="ghost"
-            aria-label="Sign out"
-            @click="auth.logout"
-          />
         </div>
-      </div>
-    </aside>
-    <div class="lg:pl-[17rem]">
-      <header class="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-[var(--people-border)] bg-[var(--people-surface)]/90 px-4 backdrop-blur-xl sm:px-6 lg:px-8">
-        <h1 class="min-w-0 flex-1 truncate text-base font-semibold">
-          {{ pageTitle }}
-        </h1>
-        <UButton
-          icon="i-lucide-search"
-          color="neutral"
-          variant="ghost"
-          aria-label="Search pages"
-          title="Search pages (Ctrl+K)"
-          @click="openGlobalSearch"
-        />
-        <UButton
-          icon="i-lucide-bell"
-          color="neutral"
-          variant="ghost"
-          to="/notifications"
-          aria-label="Notifications"
-        />
-        <UColorModeButton />
       </header>
-      <main class="mx-auto w-full max-w-[96rem] px-4 py-6 pb-24 sm:px-6 lg:px-8 lg:py-8 lg:pb-8">
+      <main
+        id="platform-content"
+        class="platform-content"
+        tabindex="-1"
+      >
         <slot />
       </main>
     </div>
@@ -297,7 +381,7 @@ onMounted(() => {
       description="Open a page available in your current workspace."
     >
       <template #body>
-        <section class="w-full max-w-xl rounded-t-3xl bg-[var(--people-surface)] p-5 shadow-2xl sm:rounded-2xl sm:p-6">
+        <section class="platform-search">
           <UInput
             v-model="globalSearchQuery"
             icon="i-lucide-search"
@@ -322,15 +406,10 @@ onMounted(() => {
               class="flex min-h-12 w-full items-center gap-3 rounded-xl px-3 text-left text-sm font-medium transition-colors hover:bg-muted/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
               @click="visitSearchResult(item)"
             >
-              <span
-                class="people-icon size-8 shrink-0"
-                :class="item.iconTone || 'people-icon--blue'"
-              >
-                <UIcon
-                  :name="item.icon"
-                  class="size-4"
-                />
-              </span>
+              <UIcon
+                :name="item.icon"
+                class="size-5 shrink-0 text-muted"
+              />
               <span class="min-w-0 flex-1 truncate">{{ item.label }}</span>
               <UIcon
                 name="i-lucide-arrow-right"
@@ -354,7 +433,7 @@ onMounted(() => {
       </template>
     </UModal>
     <nav
-      class="fixed inset-x-0 bottom-0 z-40 border-t border-[var(--people-border)] bg-[var(--people-surface)]/95 px-2 pb-[env(safe-area-inset-bottom)] pt-2 shadow-[0_-8px_24px_rgba(15,23,42,0.08)] backdrop-blur-xl lg:hidden"
+      class="platform-mobile-nav"
       aria-label="Mobile navigation"
     >
       <div class="mx-auto flex max-w-lg items-center justify-around gap-1">
@@ -365,6 +444,7 @@ onMounted(() => {
           color="neutral"
           class="min-h-12 flex-1 flex-col text-xs"
           aria-label="Home"
+          :aria-current="route.path === '/' ? 'page' : undefined"
         >
           Home
         </UButton>
@@ -376,13 +456,15 @@ onMounted(() => {
           :aria-label="`Workspace: ${workspaceDefinition.label}`"
           aria-haspopup="dialog"
           :aria-expanded="mobileOpen && mobileGroup === 'Workspace'"
+          :data-selected="mobileOpen && mobileGroup === 'Workspace'"
           @click="openMobileGroup('Workspace')"
         >
-          {{ workspaceDefinition.shortLabel }}
+          Workspace
         </UButton>
         <UButton
           :to="workspace.link(mobilePrimary.to)"
           :icon="mobilePrimary.icon"
+          :aria-current="route.path === mobilePrimary.to || route.path.startsWith(`${mobilePrimary.to}/`) ? 'page' : undefined"
           variant="ghost"
           color="neutral"
           class="min-h-12 flex-1 flex-col text-xs"
@@ -398,6 +480,7 @@ onMounted(() => {
           aria-label="More navigation"
           aria-haspopup="dialog"
           :aria-expanded="mobileOpen && mobileGroup === 'More'"
+          :data-selected="(mobileOpen && mobileGroup === 'More') || mobileSheetItems.some(item => route.path === item.to || route.path.startsWith(`${item.to}/`))"
           @click="openMobileGroup('More')"
         >
           More
@@ -410,7 +493,7 @@ onMounted(() => {
       :description="workspaceDefinition.label"
       direction="bottom"
       close
-      :ui="{ content: 'h-[55dvh]', container: 'h-full min-h-0', body: 'overflow-y-auto pb-[env(safe-area-inset-bottom)]' }"
+      :ui="{ content: 'max-h-[80dvh]', container: 'min-h-0', body: 'overflow-y-auto', footer: 'shrink-0 border-t border-[var(--people-border)] pb-[max(16px,env(safe-area-inset-bottom))]' }"
     >
       <template #body>
         <div
@@ -421,7 +504,7 @@ onMounted(() => {
             v-for="item in availableWorkspaces"
             :key="item"
             :icon="WORKSPACES.find(definition => definition.key === item)?.icon"
-            :variant="item === currentWorkspace ? 'soft' : 'outline'"
+            :variant="item === currentWorkspace ? 'soft' : 'ghost'"
             color="neutral"
             block
             class="min-h-12 justify-start"
@@ -437,19 +520,19 @@ onMounted(() => {
         </div>
         <div
           v-else
-          class="grid grid-cols-2 gap-3"
+          class="platform-mobile-links"
         >
           <NuxtLink
             v-for="item in mobileSheetItems"
             :key="item.to"
             :to="workspace.link(item.to)"
-            class="flex min-h-24 flex-col items-start justify-center gap-3 rounded-xl border border-[var(--people-border)] bg-[var(--people-surface)] p-4 text-sm font-semibold"
+            class="platform-nav-link"
             :aria-current="route.path === item.to ? 'page' : undefined"
             @click="mobileOpen = false"
           >
             <UIcon
               :name="item.icon"
-              class="size-6 text-primary"
+              class="size-5 shrink-0"
             />
             {{ item.label }}
           </NuxtLink>
@@ -460,13 +543,19 @@ onMounted(() => {
         >
           No pages are available in this section.
         </p>
+      </template>
+      <template
+        v-if="mobileGroup === 'More'"
+        #footer
+      >
         <UButton
-          v-if="mobileGroup === 'More'"
-          class="mt-5 min-h-11"
+          class="platform-mobile-sign-out text-[var(--people-lavender-ink)] bg-[var(--people-lavender)] hover:bg-[var(--people-surface)]"
           icon="i-lucide-log-out"
           color="neutral"
           variant="soft"
-          @click="auth.logout"
+          :loading="signingOut"
+          :disabled="signingOut"
+          @click="signOut"
         >
           Sign out
         </UButton>
