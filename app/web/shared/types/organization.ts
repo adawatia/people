@@ -1,6 +1,7 @@
 export interface Organization {
   id: number
   name: string
+  erp_id?: string | null
   short_name?: string | null
   industry?: string | null
   address_line1?: string | null
@@ -14,6 +15,7 @@ export interface Organization {
   website?: string | null
   tax_id?: string | null
   created_at: string
+  updated_at?: string
 }
 export interface Department { id: number, unit_id: number, name: string, code?: string | null, is_active: boolean, created_at: string }
 export interface Unit { id: number, organization_id: number, name: string, code?: string | null, city?: string | null, is_active: boolean, created_at: string, departments: Department[] }

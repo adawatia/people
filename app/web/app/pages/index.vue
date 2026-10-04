@@ -5,6 +5,11 @@ useSeoMeta({ title: 'Dashboard' })
 const auth = useAuth()
 const api = useHrmsApi()
 const workspace = useWorkspace()
+const technicalNoticeOpen = useCookie<boolean>('people_technical_notice_open', {
+  default: () => true,
+  maxAge: 60 * 60 * 24 * 30,
+  sameSite: 'lax'
+})
 const isTechnicalAdmin = computed(() => Boolean(auth.user.value?.is_superuser))
 const isExecutiveWorkspace = computed(() => workspace.current.value === 'EXECUTIVE')
 const scopeType = computed(() => auth.scopeType.value)
@@ -82,9 +87,13 @@ const shiftTimeRange = (shift?: EmployeeDashboardShift | null) => shift
 
     <template v-if="isTechnicalAdmin">
       <UAlert
+        v-if="technicalNoticeOpen"
+        v-model:open="technicalNoticeOpen"
         color="info"
         variant="soft"
         icon="i-lucide-shield-check"
+        close
+        close-icon="i-lucide-x"
         title="Technical administration workspace"
         description="Manage system access, ERP integrations, synchronization health and technical account settings. This account is not an employee and does not have attendance, leave or approval records."
         :actions="[{ label: 'Open system administration', to: '/settings' }]"

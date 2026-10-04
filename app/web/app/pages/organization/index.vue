@@ -12,6 +12,40 @@ const { data: organization, pending: organizationPending, error: organizationErr
   'organization-profile',
   () => api.request<Organization>('org/organization')
 )
+const organizationDetails = computed(() => {
+  if (!organization.value) return []
+  return [
+    { label: 'Organization name', value: organization.value.name },
+    { label: 'Organization code', value: organization.value.short_name },
+    { label: 'ERP ID', value: organization.value.erp_id },
+    { label: 'Industry', value: organization.value.industry },
+    { label: 'Address line 1', value: organization.value.address_line1 },
+    { label: 'Address line 2', value: organization.value.address_line2 },
+    { label: 'City', value: organization.value.city },
+    { label: 'State', value: organization.value.state },
+    { label: 'Country', value: organization.value.country },
+    { label: 'Postal code', value: organization.value.postal_code },
+    { label: 'Phone', value: organization.value.phone },
+    { label: 'Email', value: organization.value.email },
+    { label: 'Website', value: organization.value.website },
+    { label: 'Tax ID', value: organization.value.tax_id },
+    { label: 'Created', value: formatDateTime(organization.value.created_at) },
+    { label: 'Last updated', value: organization.value.updated_at ? formatDateTime(organization.value.updated_at) : null }
+  ]
+})
+const organizationDetailsAccordion = [{
+  label: 'Show organization details',
+  icon: 'i-lucide-list-details',
+  value: 'organization-details',
+  content: 'Organization details'
+}]
+function formatDateTime(value: string) {
+  return new Intl.DateTimeFormat('en-IN', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+    timeZone: 'Asia/Kolkata'
+  }).format(new Date(value))
+}
 const { data: rawData, pending, error, refresh } = await useAsyncData('organization-workspace', async (_app, { signal }) => {
   const endpoint = activeTab.value === 'units' ? 'org/units' : activeTab.value === 'departments' ? 'org/departments' : 'designations/'
   const result = await api.request<PaginatedResponse<Unit | Department | Designation>>(endpoint, { signal, query: list.query.value })
@@ -89,6 +123,33 @@ function unitName(id: number) {
         Units, departments and designations are maintained in ERP.
       </p>
     </header>
+    <section
+      v-if="organization"
+      class="people-card mt-5 p-3 sm:p-4"
+      aria-label="Organization details"
+    >
+      <UAccordion
+        :items="organizationDetailsAccordion"
+        :ui="{ item: 'border-0', trigger: 'rounded-xl px-4 py-3', content: 'px-4', body: 'p-0 pb-1' }"
+      >
+        <template #content>
+          <dl class="grid gap-x-8 gap-y-5 pb-2 pt-2 sm:grid-cols-2 xl:grid-cols-3">
+            <div
+              v-for="detail in organizationDetails"
+              :key="detail.label"
+              class="min-w-0 border-t border-[var(--people-border)] pt-3"
+            >
+              <dt class="text-xs font-semibold uppercase tracking-[0.08em] text-muted">
+                {{ detail.label }}
+              </dt>
+              <dd class="mt-1 break-words text-sm font-medium">
+                {{ detail.value || 'Not provided' }}
+              </dd>
+            </div>
+          </dl>
+        </template>
+      </UAccordion>
+    </section>
     <div
       data-page-tabs
       class="mt-7 flex gap-2 overflow-x-auto border-b border-[var(--people-border)]"

@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ERP CRUD Test Console</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="logo">ERP</span>
+        <div>
+          <h1 style="font-family: Georgia, "Times New Roman", serif; font-size: 24px;">ERP CRUD Test Console</h1>
+          <p class="subtitle">Exercise every <code>/api/v1/integrations/erp/**</code> endpoint</p>
+        </div>
+      </div>
+      <span class="badge badge-warn" title="Development tool only">DEV ONLY</span>
+    </header>
+
+    <div class="layout">
+      <aside class="sidebar">
+        <!-- Connection + ERP auth -->
+        <section class="panel">
+          <h2 style="font-family: Georgia, "Times New Roman", serif;">API &amp; ERP auth</h2>
+          <label class="field">
+            <span>Base URL</span>
+            <input autocomplete="off" autocapitalize="off" spellcheck="false" id="baseUrl" type="text" placeholder="http://localhost:8000" />
+          </label>
+
+          <label class="field">
+            <span>ERP auth mode</span>
+            <select id="authMode">
+              <option value="hmac">HMAC signature (X-ERP-*)</option>
+              <option value="key">Development API key (X-API-Key)</option>
+            </select>
+          </label>
+
+          <div id="hmacFields">
+            <label class="field">
+              <span>Client ID</span>
+              <input autocomplete="off" autocapitalize="off" spellcheck="false" id="clientId" type="text" placeholder="primary-erp" />
+            </label>
+            <label class="field">
+              <span>Client secret</span>
+              <input autocomplete="off" autocapitalize="off" spellcheck="false" id="clientSecret" type="password" placeholder="32+ characters" />
+            </label>
+          </div>
+
+          <div id="keyFields" hidden>
+            <label class="field">
+              <span>ERP API key</span>
+              <input autocomplete="off" autocapitalize="off" spellcheck="false" id="apiKey" type="password" placeholder="ERP_API_KEY" />
+            </label>
+          </div>
+
+          <label class="checkbox">
+            <input autocomplete="off" autocapitalize="off" spellcheck="false" id="rememberSecret" type="checkbox" />
+            <span>Remember secrets in this browser (local only)</span>
+          </label>
+          <p class="hint" id="authHint"></p>
+        </section>
+
+        <!-- Human login for lookups -->
+        <section class="panel">
+          <h2 style="font-family: Georgia, "Times New Roman", serif;">Lookup login</h2>
+          <p class="hint">
+            Used only to load reference IDs for dropdowns; ERP writes never use this session. Sign in as a
+            <strong>business user</strong> — the technical Super Admin is blocked from workforce data.
+          </p>
+          <label class="field">
+            <span>Login endpoint</span>
+            <select id="loginPath"></select>
+          </label>
+          <label class="field">
+            <span>Username</span>
+            <input autocomplete="off" autocapitalize="off" spellcheck="false" id="loginUsername" type="text" autocomplete="off" placeholder="superadmin" />
+          </label>
+          <label class="field">
+            <span>Password</span>
+            <input autocomplete="off" autocapitalize="off" spellcheck="false" id="loginPassword" type="password" autocomplete="off" />
+          </label>
+          <div class="row">
+            <button id="loginBtn" class="btn" type="button">Sign in</button>
+            <button id="loadRefsBtn" class="btn btn-ghost" type="button" disabled>Load reference data</button>
+          </div>
+          <p class="status" id="loginStatus"></p>
+
+          <div id="pwChangeWrap" hidden>
+            <p class="hint">
+              ERP-provisioned accounts must change their temporary password before any workforce data can be read.
+              Choose a new password here, or set one through the application first.
+            </p>
+            <label class="field">
+              <span>New password</span>
+              <input autocomplete="off" autocapitalize="off" spellcheck="false" id="newPassword" type="password" autocomplete="off" />
+            </label>
+            <button id="pwChangeBtn" class="btn" type="button">Change password &amp; re-sign in</button>
+          </div>
+        </section>
+
+        <!-- Catalog -->
+        <section class="panel panel-grow">
+          <h2 style="font-family: Georgia, "Times New Roman", serif;">Endpoints</h2>
+          <div id="catalog" class="catalog"></div>
+        </section>
+      </aside>
+
+      <main class="content">
+        <!-- Request -->
+        <section class="panel">
+          <div class="panel-head">
+            <h2 style="font-family: Georgia, "Times New Roman", serif;">Request</h2>
+            <span class="badge" id="reqScope">—</span>
+          </div>
+          <div class="request-line">
+            <span class="method" id="reqMethod">GET</span>
+            <input autocomplete="off" autocapitalize="off" spellcheck="false" id="reqPath" type="text" class="path-input" spellcheck="false" />
+          </div>
+          <p class="hint" id="reqHint">Pick an endpoint from the catalog to begin.</p>
+
+          <div id="pathParamsWrap" class="params-grid"></div>
+          <div id="queryParamsWrap" class="params-grid"></div>
+
+          <div id="bodyWrap" class="body-wrap">
+            <div class="body-head">
+              <span>Request body</span>
+            </div>
+            <div id="bodyForm" class="body-form"></div>
+            <details class="payload-preview">
+              <summary>Payload preview (generated JSON)</summary>
+              <pre id="payloadPreview" class="code-block"></pre>
+            </details>
+          </div>
+
+          <div class="row row-end">
+            <button id="sendBtn" class="btn btn-primary" type="button" disabled>Send request</button>
+          </div>
+          <p class="status" id="sendStatus"></p>
+        </section>
+
+        <!-- Response -->
+        <section class="panel">
+          <div class="panel-head">
+            <h2 style="font-family: Georgia, "Times New Roman", serif;">Response</h2>
+            <span class="badge" id="respStatus">—</span>
+          </div>
+          <p class="hint" id="respMeta"></p>
+          <pre id="respBody" class="code-block">No request sent yet.</pre>
+        </section>
+
+        <!-- History -->
+        <section class="panel">
+          <div class="panel-head">
+            <h2 style="font-family: Georgia, "Times New Roman", serif;">History</h2>
+            <button id="clearHistoryBtn" class="btn btn-ghost" type="button">Clear</button>
+          </div>
+          <div id="historyList" class="history"></div>
+        </section>
+      </main>
+
+      <aside class="refs">
+        <section class="panel panel-grow">
+          <h2 style="font-family: Georgia, "Times New Roman", serif;">Reference IDs</h2>
+          <p class="hint">Sign in and load reference data to populate this list. Click an ID to copy it.</p>
+          <div id="refIds" class="ref-ids"></div>
+        </section>
+      </aside>
+    </div>
+
+    <div id="toast" class="toast" hidden></div>
+
+    <script src="endpoints.js"></script>
+    <script src="lookups.js"></script>
+    <script src="form.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
