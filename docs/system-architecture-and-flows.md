@@ -554,7 +554,7 @@ Config: `create_period`, `create_type`, `update_type`, `allocate_leaves` (writes
 | `PATCH /employees/{id}` | Update employee + sync `first_name`/`last_name`/`mobile_number` onto the login | partial updates (`exclude_unset`) |
 | `PATCH /employees/{id}/deactivate` / `/activate` | Lifecycle with optional `exit_date`/`exit_reason` | — |
 | `POST /employees/{id}/password-reset` (in `auth_login.py`) | Set temporary password | revokes all refresh sessions; sets `must_change_password` |
-| `PATCH /organization` | Update the single organization record | — |
+| `PUT /organization/{erp_id}` | Idempotently upsert the single ERP-owned organization record | — |
 | `POST/PATCH/DELETE /units`, `/departments`, `/designations` | Master-data CRUD | deletes blocked by dependent-count checks |
 | `POST /shifts`, `PATCH /shifts/{id}` | Shift definitions | — |
 | `POST /shifts/assignments`, `/assignments/bulk`, `PATCH /assignments/{id}/cancel` | Assign/rotate shifts | overlap prevention; batching added for bulk |

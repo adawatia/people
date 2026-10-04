@@ -85,17 +85,6 @@ async def upsert_designation(erp_id: str, data: DesignationCreate, session: Asyn
     return DesignationRead.model_validate(await DesignationService(session).upsert_designation(erp_id, data))
 
 
-@router.patch(
-    "/organization",
-    response_model=OrganizationRead,
-    tags=["erp-organization"],
-    summary="ERP update organization",
-    dependencies=[Depends(require_erp_scope("master-data:write"))],
-)
-async def update_organization(data: OrganizationUpdate, session: AsyncSession = Depends(get_async_session)):
-    return await OrgService(session).update_organization(data)
-
-
 @router.post(
     "/units",
     response_model=UnitRead,

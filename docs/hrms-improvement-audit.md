@@ -34,7 +34,7 @@ Every decorated endpoint below was inventoried for method, auth dependencies, re
 - `app/api/routers/erp_employees.py`: PATCH /{employee_id}, PATCH /{employee_id}/deactivate, PATCH /{employee_id}/activate, POST
 - `app/api/routers/erp_holidays.py`: POST /bulk
 - `app/api/routers/erp_leaves.py`: GET /changes, POST /changes/ack, POST /balances, POST /balances/bulk
-- `app/api/routers/erp_master_data.py`: PATCH /organization, POST /units, PATCH /units/{unit_id}, DELETE /units/{unit_id}, POST /departments, PATCH /departments/{department_id}, DELETE /departments/{department_id}, POST /designations, PATCH /designations/{designation_id}, DELETE /designations/{designation_id}
+- `app/api/routers/erp_master_data.py`: PUT /organization/{erp_id}, POST /units, PATCH /units/{unit_id}, DELETE /units/{unit_id}, POST /departments, PATCH /departments/{department_id}, DELETE /departments/{department_id}, POST /designations, PATCH /designations/{designation_id}, DELETE /designations/{designation_id}
 - `app/api/routers/erp_overtime.py`: POST /records/bulk
 - `app/api/routers/erp_shifts.py`: POST , PATCH /{shift_id}, POST /assignments, POST /assignments/bulk, PATCH /assignments/{assignment_id}/cancel
 - `app/api/routers/holidays.py`: GET /lists, GET /lists/{list_id}

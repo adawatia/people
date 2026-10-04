@@ -2,10 +2,11 @@
 .platform-skip-link { position: fixed; top: 12px; left: 12px; z-index: 100; padding: 12px 20px; border-radius: 8px; background: var(--people-surface); color: var(--ui-primary); transform: translateY(-200%); }
 .platform-skip-link:focus { transform: translateY(0); }
 .platform-sidebar { position: fixed; inset: 0 auto 0 0; z-index: 40; display: none; width: 256px; flex-direction: column; padding: 24px 16px 12px; border-right: 1px solid var(--people-border); background: var(--people-surface); }
-.platform-brand-link { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; padding: 0 12px; text-decoration: none; }
-.platform-brand-symbol { display: block; width: 40px; height: 40px; flex-shrink: 0; }
+.platform-brand-link { display: inline-flex; align-items: center; justify-content: flex-start; gap: 10px; min-width: 44px; min-height: 52px; padding: 0 12px; text-decoration: none; }
+.platform-brand-symbol { display: block; width: 48px; height: 48px; flex-shrink: 0; }
 .platform-brand-symbol img { width: 100%; height: 100%; border-radius: 10px; }
 .platform-brand-dark { display: none; }
+.platform-organization-name { min-width: 0; max-width: 156px; overflow: hidden; color: var(--people-text); font-size: 17px; font-weight: 700; letter-spacing: -0.01em; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
 .dark .platform-brand-light { display: none; }
 .dark .platform-brand-dark { display: block; }
 .platform-workspace { padding: 24px 12px 20px; border-bottom: 1px solid var(--people-border); }
@@ -56,6 +57,9 @@
 .platform-sidebar { width: var(--platform-sidebar-width); }
 .platform-sidebar-heading { display: flex; align-items: center; justify-content: space-between; gap: 4px; }
 .platform-sidebar-heading .platform-brand-link { padding: 0 4px; }
+.platform-shell--collapsed .platform-organization-name { display: none; }
+.platform-shell--collapsed .platform-brand-link { gap: 0; min-height: 44px; }
+.platform-shell--collapsed .platform-brand-symbol { width: 40px; height: 40px; }
 .platform-account-actions { gap: 8px; margin-top: 0; }
 .platform-shell .platform-sign-out { flex: 1; min-height: 44px; justify-content: center; gap: 8px; border: 1px solid var(--people-forest-ink); color: var(--people-forest-ink); background: var(--people-forest); }
 .platform-sign-out:hover { background: var(--people-surface); }

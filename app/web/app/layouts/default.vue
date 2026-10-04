@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { mobileTabPaths, WORKSPACES, type Workspace } from '~/composables/useWorkspace'
+import type { Organization } from '#shared/types/organization'
 /**
  * Application shell: sidebar navigation, top bar and content slot.
  *
@@ -13,6 +14,7 @@ import { mobileTabPaths, WORKSPACES, type Workspace } from '~/composables/useWor
 interface NavItem { label: string, icon: string, to: string, iconTone?: string, permissions?: string[] }
 const route = useRoute()
 const auth = useAuth()
+const api = useHrmsApi()
 const workspace = useWorkspace()
 const availableWorkspaces = workspace.available
 const currentWorkspace = workspace.current
@@ -42,6 +44,7 @@ const mobileGroup = ref('More')
 const globalSearchOpen = ref(false)
 const globalSearchQuery = ref('')
 const isTechnicalAdmin = computed(() => Boolean(auth.user.value?.is_superuser))
+const organizationName = ref('')
 const navByWorkspace: Record<string, NavItem[]> = {
   MY: [
     { label: 'Dashboard', icon: 'i-lucide-layout-dashboard', to: '/', iconTone: 'people-icon--blue' },
@@ -161,6 +164,10 @@ watch(() => route.fullPath, () => {
   globalSearchOpen.value = false
 })
 onMounted(() => {
+  api.request<Organization>('org/organization')
+    .then((organization) => { organizationName.value = organization.name })
+    .catch(() => { organizationName.value = '' })
+
   const desktop = window.matchMedia('(min-width: 1024px)')
   const closeOnDesktop = () => {
     if (desktop.matches) mobileOpen.value = false
@@ -197,9 +204,13 @@ onMounted(() => {
         <NuxtLink
           :to="workspace.link('/')"
           class="platform-brand-link"
-          aria-label="People by Datlabs — dashboard"
+          :aria-label="organizationName ? `${organizationName} — People dashboard` : 'People by Datlabs — dashboard'"
         >
           <BrandMark />
+          <span
+            v-if="!sidebarCollapsed && organizationName"
+            class="platform-organization-name"
+          >{{ organizationName }}</span>
         </NuxtLink>
       </div>
       <div
