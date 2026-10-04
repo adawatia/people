@@ -35,7 +35,7 @@ const organizationDetails = computed(() => {
 })
 const organizationDetailsAccordion = [{
   label: 'Show organization details',
-  icon: 'i-lucide-list-details',
+  icon: 'i-lucide-list',
   value: 'organization-details',
   content: 'Organization details'
 }]
