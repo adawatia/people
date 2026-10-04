@@ -1,1 +1,36 @@
-{"buildPath":"code"}
+{
+  "buildPath": "code",
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "design-system-font",
+        "value": "roboto",
+        "files": [
+          "docs/erp-test/styles.css"
+        ],
+        "createdAt": "2026-10-04T18:34:15.141Z",
+        "reason": "Intentional existing system sans fallback in the standalone ERP test console; preserving its established styling"
+      },
+      {
+        "rule": "design-system-font",
+        "value": "jetbrains mono",
+        "files": [
+          "docs/erp-test/styles.css"
+        ],
+        "createdAt": "2026-10-04T18:34:15.159Z",
+        "reason": "Intentional monospace typography for code, IDs, request payloads, and response data in the standalone ERP test console"
+      },
+      {
+        "rule": "all-caps-body",
+        "value": "*",
+        "files": [
+          "docs/erp-test/styles.css"
+        ],
+        "createdAt": "2026-10-04T18:38:46.139Z",
+        "reason": "Existing uppercase styling in this console applies only to short interface labels and reference section headings, not long body passages."
+      }
+    ]
+  }
+}

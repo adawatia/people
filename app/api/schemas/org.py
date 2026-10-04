@@ -67,6 +67,10 @@ class DepartmentUpdate(BaseModel):
     model_config = ConfigDict(json_schema_extra={"example": {"name": "Engineering", "is_active": False}})
 
 
+class DepartmentUpsert(DepartmentUpdate):
+    unit_id: int | None = None
+
+
 class DepartmentRead(DepartmentBase):
     id: int
     erp_id: str | None = None

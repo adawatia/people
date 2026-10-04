@@ -9,6 +9,7 @@ from schemas.org import (
     DepartmentCreate,
     DepartmentRead,
     DepartmentUpdate,
+    DepartmentUpsert,
     OrganizationCreate,
     OrganizationRead,
     OrganizationUpdate,
@@ -59,18 +60,27 @@ class OrgService:
         await self.session.commit()
         return OrganizationRead.model_validate(org)
 
-    async def upsert_organization(self, erp_id: str, data: OrganizationCreate) -> OrganizationRead:
-        await acquire_erp_upsert_lock(self.session, "organization", erp_id)
-        org = await self.repo.get_organization_by_erp_id(erp_id)
-        if org is None:
+    async def upsert_organization(self, erp_id: str, data: OrganizationUpdate | OrganizationCreate) -> OrganizationRead:
+        # The organization is a singleton: lock that row's identity, even when
+        # requests use different ERP IDs.
+        await acquire_erp_upsert_lock(self.session, "organization", "singleton")
+        fields = data.model_dump(exclude_unset=True)
+        if "name" in fields and not fields["name"]:
+            raise HTTPException(status_code=422, detail="name cannot be empty")
+        try:
             org = await self.repo.get_organization()
-        if org is None:
-            org = await self.repo.create_organization(Organization(**data.model_dump(), erp_id=erp_id))
-        else:
-            for key, value in data.model_dump().items():
-                setattr(org, key, value)
-            org.erp_id = erp_id
-        await self.session.commit()
+            if org is None:
+                if not fields.get("name"):
+                    raise HTTPException(status_code=422, detail="name is required when creating the organization")
+                org = await self.repo.create_organization(Organization(**fields, erp_id=erp_id))
+            else:
+                for key, value in fields.items():
+                    setattr(org, key, value)
+                org.erp_id = erp_id
+            await self.session.commit()
+        except IntegrityError as exc:
+            await self.session.rollback()
+            raise HTTPException(status_code=409, detail="Organization conflicts with existing master data") from exc
         await self.session.refresh(org)
         return OrganizationRead.model_validate(org)
 
@@ -117,18 +127,36 @@ class OrgService:
         refreshed = await self.repo.get_unit_by_id(unit_id)
         return UnitRead.model_validate(refreshed)
 
-    async def upsert_unit(self, erp_id: str, data: UnitCreate) -> UnitRead:
+    async def upsert_unit(self, erp_id: str, data: UnitUpdate) -> UnitRead:
         await acquire_erp_upsert_lock(self.session, "unit", erp_id)
+        if "name" in data.model_fields_set and not data.name:
+            raise HTTPException(status_code=422, detail="name cannot be empty")
+        if "is_active" in data.model_fields_set and data.is_active is None:
+            raise HTTPException(status_code=422, detail="is_active cannot be null")
         unit = await self.repo.get_unit_by_erp_id(erp_id)
-        if unit is None:
-            org = await self.repo.get_organization()
-            if org is None:
-                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Organization must be synced first")
-            unit = await self.repo.create_unit(Unit(**data.model_dump(), organization_id=org.id, erp_id=erp_id))
-        else:
-            for key, value in data.model_dump().items():
-                setattr(unit, key, value)
-        await self.session.commit()
+        try:
+            if unit is None:
+                if not data.name:
+                    raise HTTPException(status_code=422, detail="name is required when creating a unit")
+                org = await self.repo.get_organization()
+                if org is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT, detail="Organization must be synced first"
+                    )
+                unit = await self.repo.create_unit(
+                    Unit(
+                        **UnitCreate.model_validate(data.model_dump(exclude_unset=True)).model_dump(),
+                        organization_id=org.id,
+                        erp_id=erp_id,
+                    )
+                )
+            else:
+                for key, value in data.model_dump(exclude_unset=True).items():
+                    setattr(unit, key, value)
+            await self.session.commit()
+        except IntegrityError as exc:
+            await self.session.rollback()
+            raise HTTPException(status_code=409, detail="Unit conflicts with existing master data") from exc
         refreshed = await self.repo.get_unit_by_erp_id(erp_id)
         return UnitRead.model_validate(refreshed)
 
@@ -169,16 +197,37 @@ class OrgService:
         await self.session.commit()
         return DepartmentRead.model_validate(dept)
 
-    async def upsert_department(self, erp_id: str, data: DepartmentCreate) -> DepartmentRead:
+    async def upsert_department(self, erp_id: str, data: DepartmentUpsert) -> DepartmentRead:
         await acquire_erp_upsert_lock(self.session, "department", erp_id)
-        await self.get_unit(data.unit_id)
+        if "name" in data.model_fields_set and not data.name:
+            raise HTTPException(status_code=422, detail="name cannot be empty")
+        if "unit_id" in data.model_fields_set and data.unit_id is None:
+            raise HTTPException(status_code=422, detail="unit_id cannot be null")
+        if "is_active" in data.model_fields_set and data.is_active is None:
+            raise HTTPException(status_code=422, detail="is_active cannot be null")
         department = await self.repo.get_department_by_erp_id(erp_id)
-        if department is None:
-            department = await self.repo.create_department(Department(**data.model_dump(), erp_id=erp_id))
-        else:
-            for key, value in data.model_dump().items():
-                setattr(department, key, value)
-        await self.session.commit()
+        try:
+            if department is None:
+                if not data.name or data.unit_id is None:
+                    raise HTTPException(
+                        status_code=422, detail="name and unit_id are required when creating a department"
+                    )
+                await self.get_unit(data.unit_id)
+                department = await self.repo.create_department(
+                    Department(
+                        **DepartmentCreate.model_validate(data.model_dump(exclude_unset=True)).model_dump(),
+                        erp_id=erp_id,
+                    )
+                )
+            else:
+                if data.unit_id is not None:
+                    await self.get_unit(data.unit_id)
+                for key, value in data.model_dump(exclude_unset=True).items():
+                    setattr(department, key, value)
+            await self.session.commit()
+        except IntegrityError as exc:
+            await self.session.rollback()
+            raise HTTPException(status_code=409, detail="Department conflicts with existing master data") from exc
         await self.session.refresh(department)
         return DepartmentRead.model_validate(department)
 

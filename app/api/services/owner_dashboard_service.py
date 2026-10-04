@@ -5,7 +5,7 @@ from collections import defaultdict
 from datetime import date, timedelta
 
 from fastapi import HTTPException, status
-from sqlalchemy import func, or_, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.pagination import employee_search, ordered
@@ -67,26 +67,25 @@ class OwnerDashboardService:
 
         headcount = await self.session.scalar(select(func.count(Employee.id)).where(*employee_filter)) or 0
         day_records = (
-            select(AttendanceRecord.status, func.count(AttendanceRecord.id))
+            select(
+                AttendanceRecord.status,
+                func.count(AttendanceRecord.id),
+                func.sum(case((
+                    or_(AttendanceRecord.late_minutes > 0, AttendanceRecord.status == "MISSED_PUNCH"), 1
+                ), else_=0)),
+            )
             .join(Employee, AttendanceRecord.employee_id == Employee.id)
             .where(AttendanceRecord.attendance_date == end, *employee_filter)
             .group_by(AttendanceRecord.status)
         )
-        day_status = {row[0]: row[1] for row in (await self.session.execute(day_records)).all()}
+        day_rows = (await self.session.execute(day_records)).all()
+        day_status = {row[0]: row[1] for row in day_rows}
         present = sum(day_status.get(value, 0) for value in WORKING_STATUSES)
         absent = day_status.get("ABSENT", 0)
         on_leave = day_status.get("ON_LEAVE", 0)
         weekly_off = sum(day_status.get(value, 0) for value in NON_WORKING_STATUSES)
         denominator = max(headcount - on_leave - weekly_off, 0)
-        exceptions = (
-            await self.session.scalar(
-                select(func.count(AttendanceRecord.id))
-                .join(Employee, AttendanceRecord.employee_id == Employee.id)
-                .where(AttendanceRecord.attendance_date == end, *employee_filter)
-                .where(or_(AttendanceRecord.late_minutes > 0, AttendanceRecord.status == "MISSED_PUNCH"))
-            )
-            or 0
-        )
+        exceptions = sum(row[2] or 0 for row in day_rows)
         pending = await self._pending_requests(unit_id)
         overtime = await self._approved_overtime(start, end, unit_id)
 
@@ -198,22 +197,23 @@ class OwnerDashboardService:
         ids = set(headcounts)
         names = dict((await self.session.execute(select(model.id, model.name).where(model.id.in_(ids)))).all())
         status_rows = (
-            select(foreign_key, AttendanceRecord.status, func.count(AttendanceRecord.id))
+            select(
+                foreign_key,
+                AttendanceRecord.status,
+                func.sum(case((Employee.status == "ACTIVE", 1), else_=0)),
+                func.sum(case((
+                    or_(AttendanceRecord.late_minutes > 0, AttendanceRecord.status == "MISSED_PUNCH"), 1
+                ), else_=0)),
+            )
             .join(Employee, AttendanceRecord.employee_id == Employee.id)
-            .where(AttendanceRecord.attendance_date == target_date, foreign_key.in_(ids), Employee.status == "ACTIVE")
+            .where(AttendanceRecord.attendance_date == target_date, foreign_key.in_(ids))
             .group_by(foreign_key, AttendanceRecord.status)
         )
         statuses: dict[int, dict[str, int]] = defaultdict(lambda: defaultdict(int))
-        for entity_id, record_status, count in (await self.session.execute(status_rows)).all():
-            statuses[entity_id][record_status] += count
-        exception_rows = (
-            select(foreign_key, func.count(AttendanceRecord.id))
-            .join(Employee, AttendanceRecord.employee_id == Employee.id)
-            .where(AttendanceRecord.attendance_date == target_date, foreign_key.in_(ids))
-            .where(or_(AttendanceRecord.late_minutes > 0, AttendanceRecord.status == "MISSED_PUNCH"))
-            .group_by(foreign_key)
-        )
-        exception_counts = dict((await self.session.execute(exception_rows)).all())
+        exception_counts: dict[int, int] = defaultdict(int)
+        for entity_id, record_status, count, exception_count in (await self.session.execute(status_rows)).all():
+            statuses[entity_id][record_status] += count or 0
+            exception_counts[entity_id] += exception_count or 0
         overtime_rows = (
             select(foreign_key, func.coalesce(func.sum(OvertimeRecord.approved_minutes), 0))
             .join(Employee, OvertimeRecord.employee_id == Employee.id)

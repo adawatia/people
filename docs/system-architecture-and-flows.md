@@ -552,13 +552,12 @@ Config: `create_period`, `create_type`, `update_type`, `allocate_leaves` (writes
 
 | Method & path | Purpose | Idempotency / notes |
 |---|---|---|
-| `POST /employees` | Create employee **and** linked login atomically (`phone_number` + strong `initial_password` required) | `409` on duplicate code/mobile/email/username |
-| `PATCH /employees/{id}` | Update employee + sync `first_name`/`last_name`/`mobile_number` onto the login | partial updates (`exclude_unset`) |
+| `PUT /employees/by-erp-id/{erp_id}` | Create employee and linked login, then sync partial employee updates | First call requires code, name, phone, and strong initial password; retries preserve password; status transitions update login access and sessions |
 | `PATCH /employees/{id}/deactivate` / `/activate` | Lifecycle with optional `exit_date`/`exit_reason` | — |
 | `POST /employees/{id}/password-reset` (in `auth_login.py`) | Set temporary password | revokes all refresh sessions; sets `must_change_password` |
 | `PUT /organization/{erp_id}` | Idempotently upsert the single ERP-owned organization record | — |
-| `POST/PATCH/DELETE /units`, `/departments`, `/designations` | Master-data CRUD | deletes blocked by dependent-count checks |
-| `POST /shifts`, `PATCH /shifts/{id}` | Shift definitions | — |
+| `PUT /units/by-erp-id/{erp_id}`, `/departments/by-erp-id/{erp_id}`, `/designations/by-erp-id/{erp_id}` | Idempotent master-data upserts | Partial updates preserve omitted fields; `is_active=false` retires a record without deleting history |
+| `PUT /shifts/by-erp-id/{erp_id}` | Shift definition upsert | Partial updates preserve omitted fields |
 | `POST /shifts/assignments`, `/assignments/bulk`, `PATCH /assignments/{id}/cancel` | Assign/rotate shifts | overlap prevention; batching added for bulk |
 | `POST /attendance/records/bulk` | Ingest **processed** attendance | `erp_record_id` makes re-sends idempotent; per-item `accepted`/`duplicates`/`failed` result |
 | `POST /holidays/bulk` | Sync holidays per unit | keyed by `erp_holiday_id` |
@@ -881,7 +880,7 @@ The correction-request action is not available to a plain employee: it is hidden
 * Reject ⇒ modal with mandatory reason → `PATCH …/reject` → `pending` released.
 * Self-approval is impossible: the service returns `400` even if the UI were bypassed.
 
-**Reports (`/reports`).** Tabs by permission; the route **forces** `department_id` for a DM, so a DM cannot widen scope by passing `unit_id`.
+**Reports (`/reports`).** Tabs by permission; navigation displays the loading state while the selected report is fetched. The route **forces** `department_id` for a DM, so a DM cannot widen scope by passing `unit_id`.
 
 **People.** `GET /employees/` is silently limited to their department (route logic), and `GET /employees/{id}` outside the department returns `403 "You do not have access to this employee"`.
 
@@ -897,7 +896,7 @@ The correction-request action is not available to a plain employee: it is hidden
 
 **Unit HR vs organization HR.** Both hold the identical `HR_ADMIN` permission bundle; only the access scope differs (`UNIT` + `access_scope_id`, or `ORGANIZATION`). A unit HR admin sees their unit and is refused on another unit's records; organization HR (`access_scope = ORGANIZATION`, no `access_scope_id`) reaches every unit, and their dashboard KPI label reads "Organization members". Organization HR is still *not* an Organization Owner: it has no `dashboard.view_organization` and therefore no owner analytics panel.
 
-**Shifts (`/shifts`).** Definitions + assignments are read from HRMS and scoped to the active user's employee reach: self in My, department in Team, unit/organization in HR. Creating them is ERP-only, so the page is a viewer and exposes no create/assign controls.
+**Shifts (`/shifts`).** Definitions + assignments are read from HRMS and scoped to the active user's employee reach: self in My, department in Team, unit/organization in HR. The page requests only the selected tab; changing one tab's filters does not reload the other. Navigation displays its loading state while the selected request runs. Creating shifts is ERP-only, so the page is a viewer and exposes no create/assign controls.
 
 **Password operations.** `POST /auth/hr/employees/{id}/password-reset` sets a temporary password (policy-validated), sets `must_change_password`, and revokes all of the user's refresh sessions. This is the supported "reset a locked-out employee" path; the login page tells users to contact HR for exactly this reason.
 
@@ -937,11 +936,11 @@ Owner permissions exclude approval and HR operations permissions. The Owner stil
 
 | # | Flow | Calls | Notes |
 |---|---|---|---|
-| 1 | **Provision an employee + login** | `POST /integrations/erp/employees` | phone + strong `initial_password` mandatory; atomic employee+login; `409` on duplicates; `must_change_password = true` so the first human login is forced to change it |
+| 1 | **Provision an employee + login** | `PUT /integrations/erp/employees/by-erp-id/{erp_id}` | First call requires code, name, phone and strong `initial_password`; later partial updates preserve password; status changes reconcile login access |
 | 2 | **Daily attendance ingest** | `POST /integrations/erp/attendance/records/bulk` | one row per employee/date; `erp_record_id` idempotent; inspect `accepted/duplicates/failed` |
-| 3 | **Shift & roster sync** | `POST /integrations/erp/shifts`, `/shifts/assignments/bulk`, `PATCH /shifts/assignments/{id}/cancel` | overlap prevention; dated assignments override `Employee.shift_id` |
+| 3 | **Shift & roster sync** | `PUT /integrations/erp/shifts/by-erp-id/{erp_id}`, `POST /shifts/assignments/bulk`, `PATCH /shifts/assignments/{id}/cancel` | overlap prevention; dated assignments override `Employee.shift_id` |
 | 4 | **Holiday calendar sync** | `POST /integrations/erp/holidays/bulk` | keyed by `erp_holiday_id`; weekly-off generation lives in `holiday_admin` lists |
-| 5 | **Overtime sync** | `POST /integrations/erp/overtime/records/bulk` | keyed by `erp_event_id`; HRMS owns approve/decline |
+| 5 | **Overtime sync** | `POST /integrations/erp/overtime/records/bulk` | keyed by `erp_event_id`; new rows must be `PENDING` with zero approved minutes because HRMS owns approve/decline |
 | 6 | **Leave outcome pull + ack** | `GET /integrations/erp/leaves/changes?since=&limit=` → `POST /integrations/erp/leaves/changes/ack` | HRMS-produced events (`LEAVE-{id}-APPROVED/REJECTED/CANCELLED`) remain `PENDING` until acked; `has_more` signals another page |
 | 7 | **Leave balance sync** | `POST /integrations/erp/leaves/balances/bulk` | ERP is the balance authority; upserts `allocated/used/pending` per employee+code+year |
 | 8 | **Password reset from ERP** | `POST /integrations/erp/employees/{id}/password-reset` | revokes sessions, forces change |
@@ -1141,7 +1140,7 @@ These are verified against the current code and are the highest-value item in th
 
 ### C. Environment variables (backend)
 
-`DATABASE_URL`, `POSTGRES_HOST/PORT/USER/PASSWORD/DB`, `JWT_SECRET`, `ENVIRONMENT`, `EXPOSE_API_DOCS`, `ERP_API_CLIENTS`, `ERP_SIGNATURE_MAX_AGE_SECONDS`, `ERP_API_KEY` (development only), `BOOTSTRAP_SEED_DATA`, `CORS_ORIGINS`, `SUPER_ADMIN_*`, `AUTH_THROTTLE_BACKEND`, `REDIS_URL`, `MFA_*`, `PASSWORD_*`, mail and logging settings. Frontend: `NUXT_HRMS_API_BASE` (default `http://127.0.0.1:8000`).
+`DATABASE_URL`, `POSTGRES_HOST/PORT/USER/PASSWORD/DB`, `DB_POOL_SIZE` (default 10), `DB_MAX_OVERFLOW` (default 10), `DB_POOL_TIMEOUT_SECONDS` (default 30), `JWT_SECRET`, `ENVIRONMENT`, `EXPOSE_API_DOCS`, `ERP_API_CLIENTS`, `ERP_SIGNATURE_MAX_AGE_SECONDS`, `ERP_API_KEY` (development only), `BOOTSTRAP_SEED_DATA`, `CORS_ORIGINS`, `SUPER_ADMIN_*`, `AUTH_THROTTLE_BACKEND`, `REDIS_URL`, `MFA_*`, `PASSWORD_*`, mail and logging settings. The synchronous health-check engine keeps its own 1+1 pool. Frontend: `NUXT_HRMS_API_BASE` (default `http://127.0.0.1:8000`).
 
 ### D. Glossary
 

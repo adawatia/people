@@ -4,10 +4,11 @@ from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.erp_sync import acquire_erp_upsert_lock
-from db.models import Employee, Shift, ShiftAssignment, now_ist
+from db.models import Employee, Shift, ShiftAssignment, Unit, now_ist
 from repositories.employee_repo import EmployeeRepository
 from repositories.shift_repo import ShiftRepository
 from schemas.shifts import (
@@ -18,6 +19,7 @@ from schemas.shifts import (
     ShiftCreate,
     ShiftRead,
     ShiftUpdate,
+    ShiftUpsert,
     ShiftWindowDetail,
 )
 
@@ -147,17 +149,61 @@ class ShiftService:
         await self.session.refresh(shift)
         return ShiftRead.model_validate(shift)
 
-    async def upsert_shift(self, erp_id: str, data: ShiftCreate) -> ShiftRead:
+    async def upsert_shift(self, erp_id: str, data: ShiftUpsert) -> ShiftRead:
         await acquire_erp_upsert_lock(self.session, "shift", erp_id)
+        required_fields = (
+            "name",
+            "start_time",
+            "end_time",
+            "grace_minutes",
+            "break_minutes",
+            "is_cross_midnight",
+            "is_active",
+            "begin_check_in_before_minutes",
+            "allow_check_out_after_minutes",
+            "late_entry_grace_minutes",
+            "early_exit_grace_minutes",
+            "half_day_threshold_hours",
+            "absent_threshold_hours",
+            "enable_auto_attendance",
+        )
+        for field in required_fields:
+            if field in data.model_fields_set and getattr(data, field) is None:
+                raise HTTPException(status_code=422, detail=f"{field} cannot be null")
+        if "name" in data.model_fields_set and not data.name:
+            raise HTTPException(status_code=422, detail="name cannot be empty")
+        if data.unit_id is not None and await self.session.get(Unit, data.unit_id) is None:
+            raise HTTPException(status_code=404, detail=f"Unit {data.unit_id} not found")
         shift = await self.repo.get_by_erp_id(erp_id)
-        if shift is None:
-            shift = Shift(erp_id=erp_id, **self._shift_payload(data))
-            await self.repo.create_shift(shift)
-        else:
-            payload = self._shift_payload(data)
-            for key, value in payload.items():
-                setattr(shift, key, value)
-        await self.session.commit()
+        try:
+            if shift is None:
+                fields = data.model_dump(exclude_unset=True)
+                if not fields.get("name") or not fields.get("start_time") or not fields.get("end_time"):
+                    raise HTTPException(
+                        status_code=422, detail="name, start_time and end_time are required when creating a shift"
+                    )
+                shift = Shift(erp_id=erp_id, **self._shift_payload(ShiftCreate.model_validate(fields)))
+                await self.repo.create_shift(shift)
+            else:
+                fields = data.model_dump(exclude_unset=True)
+                if "start_time" in fields:
+                    fields["start_time"] = self.parse_time(fields["start_time"])
+                if "end_time" in fields:
+                    fields["end_time"] = self.parse_time(fields["end_time"])
+                start = fields.get("start_time", shift.start_time)
+                end = fields.get("end_time", shift.end_time)
+                if start == end:
+                    raise HTTPException(status_code=400, detail="Shift start time and end time cannot be identical")
+                fields["is_cross_midnight"] = start > end
+                for key, value in fields.items():
+                    setattr(shift, key, value)
+            await self.session.commit()
+        except IntegrityError as exc:
+            await self.session.rollback()
+            raise HTTPException(status_code=409, detail="Shift conflicts with existing master data") from exc
+        except (ValueError, IndexError) as exc:
+            await self.session.rollback()
+            raise HTTPException(status_code=422, detail="Invalid shift time") from exc
         await self.session.refresh(shift)
         return ShiftRead.model_validate(shift)
 

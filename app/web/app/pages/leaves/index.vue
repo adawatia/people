@@ -201,7 +201,10 @@ async function confirmCancellation() {
             </p>
           </div>
         </div>
-        <div data-leave-balances class="grid sm:grid-cols-2 xl:grid-cols-4">
+        <div
+          data-leave-balances
+          class="grid sm:grid-cols-2 xl:grid-cols-4"
+        >
           <template v-if="pending && !data">
             <div
               v-for="index in 4"

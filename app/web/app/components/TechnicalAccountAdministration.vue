@@ -36,7 +36,7 @@ const { data: rawData, pending, error, refresh } = await useAsyncData(
   { watch: [list.query] }
 )
 const data = useRetainedData(rawData)
-watch(searchInput, value => {
+watch(searchInput, (value) => {
   if (!value && submittedSearch.value) void list.update({ search: '' })
 })
 const directoryError = computed(() => {
@@ -257,7 +257,11 @@ function clearAccountFilters() {
       </p>
     </form>
 
-    <DataFeedback :pending="pending" :error="error" :has-data="Boolean(data)" />
+    <DataFeedback
+      :pending="pending"
+      :error="error"
+      :has-data="Boolean(data)"
+    />
     <AppSkeleton
       v-if="pending && !data"
       variant="list"

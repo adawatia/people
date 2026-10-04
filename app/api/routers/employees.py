@@ -91,7 +91,10 @@ async def onboard_employee(
     session: AsyncSession = Depends(get_async_session),
 ) -> EmployeeDirectoryRead:
     """Disabled: employee and account provisioning is ERP-owned."""
-    raise HTTPException(status_code=410, detail="Employee provisioning is ERP-only; use /integrations/erp/employees")
+    raise HTTPException(
+        status_code=410,
+        detail="Employee provisioning is ERP-only; use PUT /integrations/erp/employees/by-erp-id/{erp_id}",
+    )
     # Kept below temporarily for source compatibility while clients migrate.
     current_user = _
     user_id = data.user_id

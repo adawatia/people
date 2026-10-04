@@ -1,4 +1,4 @@
-/* ERP CRUD Test Console — core logic. */
+/* ERP integration test console — core logic. */
 (function () {
   "use strict";
 
@@ -167,7 +167,7 @@
     state.selected = ep;
     state.params = {};
     (ep.pathParams || []).forEach((param) => {
-      state.params[param.name] = param.sample || "";
+      state.params[param.name] = param.default || "";
     });
     state.query = {};
     (ep.queryParams || []).forEach((q) => {
@@ -267,7 +267,9 @@
         const input = document.createElement("input");
         input.type = "text";
         input.value = target === "params" ? state.params[param.name] ?? "" : state.query[param.name] ?? "";
-        if (target === "params" && param.lookup) input.placeholder = "sign in + load reference data for a dropdown";
+        if (target === "params") {
+          input.placeholder = param.placeholder || (param.lookup ? "sign in + load reference data for a dropdown" : "Enter the required path value");
+        }
         input.addEventListener("input", () => {
           if (target === "params") {
             state.params[param.name] = input.value;
@@ -281,9 +283,15 @@
         if (target === "params" && param.lookup && !options) {
           const note = document.createElement("div");
           note.className = "param-note";
-          note.textContent = "loaded from reference data";
+          note.textContent = "Sign in and load reference data to select an HRMS ID.";
           cell.appendChild(note);
         }
+      }
+      if (target === "params" && param.help) {
+        const help = document.createElement("div");
+        help.className = "param-note";
+        help.textContent = param.help;
+        cell.appendChild(help);
       }
       container.appendChild(cell);
     });
@@ -395,6 +403,11 @@
     const ep = state.selected;
     if (!ep) return;
     const sendBtn = $("sendBtn");
+    const missingParams = (ep.pathParams || []).filter((param) => !String(state.params[param.name] || "").trim());
+    if (missingParams.length) {
+      setStatus($("sendStatus"), `Enter ${missingParams.map((param) => param.name).join(", ")} before sending.`, "err");
+      return;
+    }
     sendBtn.disabled = true;
     setStatus($("sendStatus"), "Sending…");
 

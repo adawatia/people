@@ -11,15 +11,29 @@ const definitionList = useListState({ sort_order: 'asc' }, 'shift_')
 const assignmentList = useListState({ sort_order: 'desc' }, 'assignment_')
 const tab = ref<'definitions' | 'assignments'>('definitions')
 // Shift definitions and employee assignments are authored in ERP and mirrored here.
-const { data: rawData, pending, error, refresh } = await useAsyncData('shift-workspace', async () => {
+const activeQuery = computed(() => JSON.stringify({
+  tab: tab.value,
+  query: tab.value === 'definitions'
+    ? definitionList.query.value
+    : { ...assignmentList.query.value, employee_id: workspace.current.value === 'MY' ? auth.user.value?.employee_id : undefined }
+}))
+const dataKey = computed(() => `shift-workspace:${auth.user.value?.id ?? 'guest'}:${workspace.current.value}`)
+const { data: rawData, pending, error, refresh } = useLazyAsyncData(dataKey, async (_app, { signal }) => {
+  const selectedTab = tab.value
   const employee_id = workspace.current.value === 'MY' ? auth.user.value?.employee_id : undefined
-  const [shifts, assignments] = await Promise.all([
-    api.request<PaginatedResponse<Shift>>('shifts/', { query: { ...definitionList.query.value, is_active: true } }),
-    api.request<PaginatedResponse<ShiftAssignment>>('shifts/assignments', { query: { ...assignmentList.query.value, employee_id } })
-  ])
-  return { shifts: shifts.items, shiftPage: shifts, assignments: assignments.items, assignmentPage: assignments }
-}, { watch: [definitionList.query, assignmentList.query, workspace.current] })
-const data = useRetainedData(rawData)
+  if (selectedTab === 'definitions') {
+    const shifts = await api.request<PaginatedResponse<Shift>>('shifts/', {
+      signal, query: { ...definitionList.query.value, is_active: true }
+    })
+    return { tab: selectedTab, shifts: shifts.items, shiftPage: shifts, assignments: [] as ShiftAssignment[], assignmentPage: null as PaginatedResponse<ShiftAssignment> | null }
+  }
+  const assignments = await api.request<PaginatedResponse<ShiftAssignment>>('shifts/assignments', {
+    signal, query: { ...assignmentList.query.value, employee_id }
+  })
+  return { tab: selectedTab, shifts: [] as Shift[], shiftPage: null as PaginatedResponse<Shift> | null, assignments: assignments.items, assignmentPage: assignments }
+}, { watch: [activeQuery, workspace.current] })
+const retainedData = useRetainedData(rawData)
+const data = computed(() => retainedData.value?.tab === tab.value ? retainedData.value : null)
 const time = (value: string) => value?.slice(0, 5) || '—'
 const scopeDescription = computed(() => workspace.current.value === 'MY'
   ? 'Review only your assigned shift and schedule history synchronized from ERP.'
@@ -43,7 +57,10 @@ const scopeDescription = computed(() => workspace.current.value === 'MY'
           {{ scopeDescription }}
         </p>
       </div>
-    </div><div data-page-tabs class="mt-7 flex gap-2 border-b border-[var(--people-border)]">
+    </div><div
+      data-page-tabs
+      class="mt-7 flex gap-2 border-b border-[var(--people-border)]"
+    >
       <button
         v-for="item in [{ key: 'definitions', label: 'Shift definitions', icon: 'i-lucide-clock-3' }, { key: 'assignments', label: 'Assignments', icon: 'i-lucide-calendar-range' }]"
         :key="item.key"
@@ -185,14 +202,14 @@ const scopeDescription = computed(() => workspace.current.value === 'MY'
       v-if="data && tab === 'definitions'"
       v-model:page="definitionList.page.value"
       v-model:page-size="definitionList.pageSize.value"
-      :total="data.shiftPage.total"
+      :total="data.shiftPage?.total || 0"
       :loading="pending"
     />
     <ListPagination
       v-else-if="data"
       v-model:page="assignmentList.page.value"
       v-model:page-size="assignmentList.pageSize.value"
-      :total="data.assignmentPage.total"
+      :total="data.assignmentPage?.total || 0"
       :loading="pending"
     />
   </div>

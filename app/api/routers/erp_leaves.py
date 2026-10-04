@@ -1,6 +1,7 @@
 """ERP leave status change feed and acknowledgements."""
 
 from datetime import date, datetime
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, Query, status
 from pydantic import BaseModel, Field
@@ -25,6 +26,7 @@ class ErpLeaveBalance(BaseModel):
     allocated: float = Field(default=0, ge=0)
     used: float = Field(default=0, ge=0)
     pending: float = Field(default=0, ge=0)
+
     model_config = {
         "json_schema_extra": {
             "examples": [
@@ -153,29 +155,34 @@ async def sync_leave_balances(
     failed: list[dict] = []
     for item in balances:
         try:
-            employee = await session.get(Employee, item.employee_id) if item.employee_id else None
-            if employee is None and item.employee_code:
-                employee = await session.scalar(select(Employee).where(Employee.employee_code == item.employee_code))
-            leave_type = await session.scalar(select(LeaveType).where(LeaveType.code == item.leave_code.upper()))
-            if employee is None:
-                identity = item.employee_id if item.employee_id is not None else item.employee_code
-                raise ValueError(f"Employee {identity!r} not found")
-            if leave_type is None:
-                raise ValueError(f"Leave type code {item.leave_code.upper()!r} not found")
-            balance = await session.scalar(
-                select(LeaveBalance).where(
-                    LeaveBalance.employee_id == employee.id,
-                    LeaveBalance.leave_type_id == leave_type.id,
-                    LeaveBalance.year == item.year,
+            async with session.begin_nested():
+                if any(Decimal(str(value)) % Decimal("0.5") for value in (item.allocated, item.used, item.pending)):
+                    raise ValueError("Leave balances must use half-day increments")
+                employee = await session.get(Employee, item.employee_id) if item.employee_id else None
+                if employee is None and item.employee_code:
+                    employee = await session.scalar(
+                        select(Employee).where(Employee.employee_code == item.employee_code)
+                    )
+                leave_type = await session.scalar(select(LeaveType).where(LeaveType.code == item.leave_code.upper()))
+                if employee is None:
+                    identity = item.employee_id if item.employee_id is not None else item.employee_code
+                    raise ValueError(f"Employee {identity!r} not found")
+                if leave_type is None:
+                    raise ValueError(f"Leave type code {item.leave_code.upper()!r} not found")
+                balance = await session.scalar(
+                    select(LeaveBalance).where(
+                        LeaveBalance.employee_id == employee.id,
+                        LeaveBalance.leave_type_id == leave_type.id,
+                        LeaveBalance.year == item.year,
+                    )
                 )
-            )
-            if balance is None:
-                balance = LeaveBalance(employee_id=employee.id, leave_type_id=leave_type.id, year=item.year)
-                session.add(balance)
-            balance.allocated = int(item.allocated)
-            balance.used = int(item.used)
-            balance.pending = int(item.pending)
-            await session.flush()
+                if balance is None:
+                    balance = LeaveBalance(employee_id=employee.id, leave_type_id=leave_type.id, year=item.year)
+                    session.add(balance)
+                balance.allocated = Decimal(str(item.allocated))
+                balance.used = Decimal(str(item.used))
+                balance.pending = Decimal(str(item.pending))
+                await session.flush()
             accepted.append({"employee_id": employee.id, "leave_code": leave_type.code, "year": item.year})
         except Exception as exc:
             failed.append({"employee_code": item.employee_code, "leave_code": item.leave_code, "error": str(exc)})
@@ -204,7 +211,9 @@ async def sync_leave_balances_bulk(
     dependencies=[Depends(require_erp_scope("leave-master:write"))],
     summary="Create an ERP-owned leave period",
 )
-async def create_leave_period(data: LeavePeriodCreate, session: AsyncSession = Depends(get_async_session)) -> LeavePeriodRead:
+async def create_leave_period(
+    data: LeavePeriodCreate, session: AsyncSession = Depends(get_async_session)
+) -> LeavePeriodRead:
     return await LeaveService(session).create_period(data)
 
 

@@ -1,4 +1,5 @@
 from datetime import date, timedelta
+from decimal import Decimal
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
@@ -166,11 +167,11 @@ class LeaveService:
                     employee_id=data.employee_id,
                     leave_type_id=data.leave_type_id,
                     year=period.from_date.year,
-                    allocated=int(total),
+                    allocated=Decimal(str(total)),
                 )
             )
         else:
-            balance.allocated += int(total)
+            balance.allocated += Decimal(str(total))
 
         await self.session.commit()
         refreshed = await self.repo.get_allocation(created_alloc.id)
@@ -349,7 +350,7 @@ class LeaveService:
         )
         created = await self.repo.create_application(app)
         if balance is not None:
-            balance.pending += int(days_count)
+            balance.pending += Decimal(str(days_count))
         await self.session.commit()
         refreshed = await self.repo.get_application_by_id(created.id)
         read_obj = LeaveApplicationRead.model_validate(refreshed)
@@ -414,10 +415,10 @@ class LeaveService:
             balance = await self._get_leave_balance(
                 app_employee_id, app_leave_type_id, app_from_date.year, for_update=True
             )
-            if balance is None or balance.pending < int(app_days_count):
+            if balance is None or balance.pending < Decimal(str(app_days_count)):
                 raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Leave balance is no longer available")
-            balance.pending -= int(app_days_count)
-            balance.used += int(app_days_count)
+            balance.pending -= Decimal(str(app_days_count))
+            balance.used += Decimal(str(app_days_count))
 
         # Debit double-entry ledger
         debit_entry = LeaveLedgerEntry(
@@ -505,7 +506,7 @@ class LeaveService:
                 app_employee_id, app_leave_type_id, app_from_date.year, for_update=True
             )
             if balance is not None:
-                balance.pending = max(0, balance.pending - int(app_days_count))
+                balance.pending = max(Decimal(0), balance.pending - Decimal(str(app_days_count)))
         await self.session.commit()
         refreshed = await self.repo.get_application_by_id(app_id)
         read_obj = LeaveApplicationRead.model_validate(refreshed)
@@ -557,9 +558,9 @@ class LeaveService:
             )
             if balance is not None:
                 if was_approved:
-                    balance.used = max(0, balance.used - int(app_days_count))
+                    balance.used = max(Decimal(0), balance.used - Decimal(str(app_days_count)))
                 else:
-                    balance.pending = max(0, balance.pending - int(app_days_count))
+                    balance.pending = max(Decimal(0), balance.pending - Decimal(str(app_days_count)))
 
         # Reversal ledger entry and attendance cleanup if it was previously approved
         if was_approved:
@@ -672,7 +673,7 @@ class LeaveService:
                 app.employee_id, app.leave_type_id, original_from_date.year, for_update=True
             )
             if balance is not None:
-                balance.used = max(0, balance.used - int(refundable_days))
+                balance.used = max(Decimal(0), balance.used - Decimal(str(refundable_days)))
         await self.repo.create_ledger_entry(
             LeaveLedgerEntry(
                 employee_id=app.employee_id,

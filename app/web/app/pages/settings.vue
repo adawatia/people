@@ -262,27 +262,55 @@ onMounted(async () => {
     <section class="people-card overflow-hidden">
       <div class="grid divide-y divide-[var(--people-border)] sm:grid-cols-3 sm:divide-x sm:divide-y-0">
         <div class="p-5">
-          <UIcon name="i-lucide-key-round" class="size-5 text-primary" />
-          <p class="mt-3 text-sm font-semibold">Password</p>
-          <p class="mt-1 text-xs leading-5 text-muted">8+ characters, breach screened, and checked against your personal details.</p>
+          <UIcon
+            name="i-lucide-key-round"
+            class="size-5 text-primary"
+          />
+          <p class="mt-3 text-sm font-semibold">
+            Password
+          </p>
+          <p class="mt-1 text-xs leading-5 text-muted">
+            8+ characters, breach screened, and checked against your personal details.
+          </p>
         </div>
         <div class="p-5">
-          <UIcon :name="mfaStatus?.enabled ? 'i-lucide-shield-check' : 'i-lucide-shield-alert'" class="size-5 text-primary" />
-          <p class="mt-3 text-sm font-semibold">{{ mfaStatus?.enabled ? 'MFA on every login' : 'MFA not enabled' }}</p>
-          <p class="mt-1 text-xs leading-5 text-muted">{{ mfaStatus?.enabled ? 'A fresh password sign-in also requires your authenticator code.' : 'Turn it on below to protect new sign-ins.' }}</p>
+          <UIcon
+            :name="mfaStatus?.enabled ? 'i-lucide-shield-check' : 'i-lucide-shield-alert'"
+            class="size-5 text-primary"
+          />
+          <p class="mt-3 text-sm font-semibold">
+            {{ mfaStatus?.enabled ? 'MFA on every login' : 'MFA not enabled' }}
+          </p>
+          <p class="mt-1 text-xs leading-5 text-muted">
+            {{ mfaStatus?.enabled ? 'A fresh password sign-in also requires your authenticator code.' : 'Turn it on below to protect new sign-ins.' }}
+          </p>
         </div>
         <div class="p-5">
-          <UIcon name="i-lucide-monitor-smartphone" class="size-5 text-primary" />
-          <p class="mt-3 text-sm font-semibold">{{ sessions.length }} signed-in device{{ sessions.length === 1 ? '' : 's' }}</p>
-          <p class="mt-1 text-xs leading-5 text-muted">Review and revoke access you do not recognize.</p>
+          <UIcon
+            name="i-lucide-monitor-smartphone"
+            class="size-5 text-primary"
+          />
+          <p class="mt-3 text-sm font-semibold">
+            {{ sessions.length }} signed-in device{{ sessions.length === 1 ? '' : 's' }}
+          </p>
+          <p class="mt-1 text-xs leading-5 text-muted">
+            Review and revoke access you do not recognize.
+          </p>
         </div>
       </div>
     </section>
 
-    <section v-if="isTechnicalAdmin" class="space-y-4">
+    <section
+      v-if="isTechnicalAdmin"
+      class="space-y-4"
+    >
       <div>
-        <h2 class="text-lg font-semibold">Workforce account administration</h2>
-        <p class="mt-1 text-sm text-muted">Support workforce sign-in accounts without changing ERP-owned employee data.</p>
+        <h2 class="text-lg font-semibold">
+          Workforce account administration
+        </h2>
+        <p class="mt-1 text-sm text-muted">
+          Support workforce sign-in accounts without changing ERP-owned employee data.
+        </p>
       </div>
       <TechnicalAccountAdministration />
     </section>
@@ -328,7 +356,12 @@ onMounted(async () => {
           placeholder="Confirm with your password"
         />
       </UFormField>
-      <p v-if="usernameError" id="username-save-error" class="text-sm text-error" role="alert">
+      <p
+        v-if="usernameError"
+        id="username-save-error"
+        class="text-sm text-error"
+        role="alert"
+      >
         {{ usernameError }}
       </p>
       <UButton
@@ -420,9 +453,27 @@ onMounted(async () => {
           Turn this on to require an authenticator code after every new password sign-in. Existing sessions are not interrupted.
         </p>
       </div>
-      <p v-if="loadingMfa" role="status" class="text-sm text-muted">Loading verification status…</p>
-      <UAlert v-if="mfaStatusError" color="error" title="Verification status could not be loaded" :description="mfaStatusError" :actions="[{ label: 'Retry', onClick: loadMfaStatus }]" />
-      <UAlert v-if="mfaActionError" color="error" title="Verification change could not be completed" :description="mfaActionError" role="alert" />
+      <p
+        v-if="loadingMfa"
+        role="status"
+        class="text-sm text-muted"
+      >
+        Loading verification status…
+      </p>
+      <UAlert
+        v-if="mfaStatusError"
+        color="error"
+        title="Verification status could not be loaded"
+        :description="mfaStatusError"
+        :actions="[{ label: 'Retry', onClick: loadMfaStatus }]"
+      />
+      <UAlert
+        v-if="mfaActionError"
+        color="error"
+        title="Verification change could not be completed"
+        :description="mfaActionError"
+        role="alert"
+      />
       <UAlert
         v-if="mfaStatus"
         :color="mfaStatus?.enabled ? 'success' : 'warning'"
@@ -593,8 +644,20 @@ onMounted(async () => {
           Sign out everywhere
         </UButton>
       </div>
-      <p v-if="loadingSessions" role="status" class="text-sm text-muted">Loading signed-in devices…</p>
-      <UAlert v-if="sessionsError" color="error" title="Devices could not be loaded" :description="sessionsError" :actions="[{ label: 'Retry', onClick: loadSessions }]" />
+      <p
+        v-if="loadingSessions"
+        role="status"
+        class="text-sm text-muted"
+      >
+        Loading signed-in devices…
+      </p>
+      <UAlert
+        v-if="sessionsError"
+        color="error"
+        title="Devices could not be loaded"
+        :description="sessionsError"
+        :actions="[{ label: 'Retry', onClick: loadSessions }]"
+      />
       <ul class="divide-y divide-[var(--people-border)]">
         <li
           v-for="device in sessions"

@@ -115,8 +115,8 @@ const overtimeChartOption = computed<ECOption>(() => ({
     />
     <template v-if="(selfService ? employeeId : true) && (data || pending)">
       <DashboardSummary
-        label="Overtime summary"
         v-if="selfService"
+        label="Overtime summary"
         class="mt-6"
         variant="compact"
         :pending="pending"

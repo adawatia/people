@@ -30,12 +30,18 @@ def get_engine() -> Engine:
     # pool_pre_ping issues a lightweight liveness check before reusing a
     # pooled connection, so stale connections (e.g. after a DB restart)
     # fail transparently instead of raising on the first query.
-    return create_engine(settings.resolved_database_url_sync(), pool_pre_ping=True)
+    return create_engine(settings.resolved_database_url_sync(), pool_pre_ping=True, pool_size=1, max_overflow=1)
 
 
 def get_async_engine() -> AsyncEngine:
     """Build the async engine used by all request-scoped work."""
-    return create_async_engine(settings.resolved_database_url(), pool_pre_ping=True)
+    return create_async_engine(
+        settings.resolved_database_url(),
+        pool_pre_ping=True,
+        pool_size=settings.db_pool_size,
+        max_overflow=settings.db_max_overflow,
+        pool_timeout=settings.db_pool_timeout_seconds,
+    )
 
 
 # Global async engine and session maker.

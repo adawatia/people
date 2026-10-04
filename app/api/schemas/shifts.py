@@ -45,6 +45,10 @@ class ShiftUpdate(BaseModel):
     enable_auto_attendance: bool | None = None
 
 
+class ShiftUpsert(ShiftUpdate):
+    unit_id: int | None = None
+
+
 class ShiftRead(ShiftBase):
     id: int
     erp_id: str | None = None

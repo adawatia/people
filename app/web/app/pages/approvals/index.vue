@@ -165,7 +165,10 @@ async function rejectRequest() {
       />
     </div>
 
-    <div data-page-tabs class="mt-7 flex gap-2 overflow-x-auto border-b border-[var(--people-border)]">
+    <div
+      data-page-tabs
+      class="mt-7 flex gap-2 overflow-x-auto border-b border-[var(--people-border)]"
+    >
       <button
         v-if="canLeave"
         type="button"

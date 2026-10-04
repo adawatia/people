@@ -60,20 +60,23 @@ async def sync_holidays_bulk(
     failed: list[dict] = []
     for item in holidays:
         try:
-            holiday = await session.scalar(select(Holiday).where(Holiday.erp_holiday_id == item.erp_holiday_id))
-            if holiday is None:
-                holiday = Holiday(erp_holiday_id=item.erp_holiday_id, holiday_list_id=calendar.id)
-                session.add(holiday)
-            holiday.holiday_list_id = calendar.id
-            holiday.name = item.name
-            holiday.holiday_date = item.holiday_date
-            holiday.description = item.description
-            holiday.is_organization_wide = True
-            holiday.is_weekly_off = False
-            if item.is_active:
-                accepted.append(item.erp_holiday_id)
-            else:
-                await session.delete(holiday)
+            async with session.begin_nested():
+                holiday = await session.scalar(select(Holiday).where(Holiday.erp_holiday_id == item.erp_holiday_id))
+                if holiday is None and item.is_active:
+                    holiday = Holiday(erp_holiday_id=item.erp_holiday_id, holiday_list_id=calendar.id)
+                    session.add(holiday)
+                if holiday is not None:
+                    if item.is_active:
+                        holiday.holiday_list_id = calendar.id
+                        holiday.name = item.name
+                        holiday.holiday_date = item.holiday_date
+                        holiday.description = item.description
+                        holiday.is_organization_wide = True
+                        holiday.is_weekly_off = False
+                    else:
+                        await session.delete(holiday)
+                    await session.flush()
+            accepted.append(item.erp_holiday_id)
         except Exception as exc:
             failed.append({"erp_holiday_id": item.erp_holiday_id, "error": str(exc)})
     await session.commit()

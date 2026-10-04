@@ -7,18 +7,20 @@ useSeoMeta({ title: 'Reports' })
 const api = useHrmsApi()
 const list = useListState({ sort_order: 'asc' })
 const auth = useAuth()
+const workspace = useWorkspace()
 const tab = ref<'attendance' | 'leave'>(auth.hasPermission('reports.attendance') ? 'attendance' : 'leave')
 const month = list.field('month', new Date().toISOString().slice(0, 7))
 const year = computed({
   get: () => Number(list.field('year', String(new Date().getFullYear())).value),
   set: value => { void list.update({ year: value }) }
 })
-const { data: rawData, pending, error, refresh } = await useAsyncData('reports', async () => {
+const dataKey = computed(() => `reports:${auth.user.value?.id ?? 'guest'}:${workspace.current.value}`)
+const { data: rawData, pending, error, refresh } = useLazyAsyncData(dataKey, async (_app, { signal }) => {
   if (tab.value === 'attendance') {
     const [yearValue, monthValue] = month.value.split('-').map(Number)
     return {
       attendance: await api.request<AttendanceMatrix>('reports/attendance-matrix', {
-        query: { ...list.query.value, year: yearValue, month: monthValue }
+        signal, query: { ...list.query.value, year: yearValue, month: monthValue }
       }),
       leave: null
     }
@@ -26,7 +28,7 @@ const { data: rawData, pending, error, refresh } = await useAsyncData('reports',
   return {
     attendance: null,
     leave: await api.request<LeaveSummary>('reports/leave-summary', {
-      query: { ...list.query.value, year: year.value }
+      signal, query: { ...list.query.value, year: year.value }
     })
   }
 }, { watch: [tab, month, year, list.query] })

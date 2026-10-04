@@ -63,9 +63,10 @@ class EmployeeService:
         full_name_parts = [part for part in (emp.first_name, emp.last_name) if part]
         manager_name = None
         if emp.reporting_manager:
-            manager_name = " ".join(
-                part for part in (emp.reporting_manager.first_name, emp.reporting_manager.last_name) if part
-            ) or emp.reporting_manager.employee_code
+            manager_name = (
+                " ".join(part for part in (emp.reporting_manager.first_name, emp.reporting_manager.last_name) if part)
+                or emp.reporting_manager.employee_code
+            )
         return EmployeeDirectoryRead(
             id=emp.id,
             employee_code=emp.employee_code,
@@ -110,7 +111,9 @@ class EmployeeService:
         employees, total = await self.repo.list_paginated(
             page=page,
             page_size=page_size,
-            search=search, sort_by=sort_by, sort_order=sort_order,
+            search=search,
+            sort_by=sort_by,
+            sort_order=sort_order,
             unit_id=unit_id,
             department_id=department_id,
             designation_id=designation_id,
@@ -122,6 +125,7 @@ class EmployeeService:
         )
         items = [self.enrich_directory(e) for e in employees]
         import math
+
         total_pages = math.ceil(total / page_size) if total else 1
         return PaginatedEmployeesResponse(
             items=items,
@@ -129,7 +133,8 @@ class EmployeeService:
             page=page,
             page_size=page_size,
             total_pages=total_pages,
-            has_next=page < total_pages, has_prev=page > 1,
+            has_next=page < total_pages,
+            has_prev=page > 1,
         )
 
     async def get_employee(self, employee_id: int) -> Employee:
@@ -275,7 +280,7 @@ class EmployeeService:
         refreshed = await self.get_employee(emp.id)
         return self.enrich(refreshed)
 
-    async def update_employee(self, employee_id: int, data: EmployeeUpdate) -> EmployeeRead:
+    async def update_employee(self, employee_id: int, data: EmployeeUpdate, *, commit: bool = True) -> EmployeeRead:
         emp = await self.get_employee(employee_id)
         update_data = data.model_dump(exclude_unset=True)
 
@@ -401,7 +406,10 @@ class EmployeeService:
             )
             await self.repo.add_work_history(movement_history)
 
-        await self.session.commit()
+        if commit:
+            await self.session.commit()
+        else:
+            await self.session.flush()
         self.session.expire_all()
         refreshed = await self.get_employee(employee_id)
         return self.enrich(refreshed)
@@ -411,6 +419,8 @@ class EmployeeService:
         employee_id: int,
         exit_date: date | None = None,
         exit_reason: str | None = None,
+        *,
+        commit: bool = True,
     ) -> EmployeeRead:
         emp = await self.get_employee(employee_id)
         emp.status = "INACTIVE"
@@ -425,12 +435,15 @@ class EmployeeService:
                 .where(AuthSession.user_id == emp.user_id, AuthSession.revoked_at.is_(None))
                 .values(revoked_at=now_ist())
             )
-        await self.session.commit()
+        if commit:
+            await self.session.commit()
+        else:
+            await self.session.flush()
         self.session.expire_all()
         refreshed = await self.get_employee(employee_id)
         return self.enrich(refreshed)
 
-    async def activate_employee(self, employee_id: int) -> EmployeeRead:
+    async def activate_employee(self, employee_id: int, *, commit: bool = True) -> EmployeeRead:
         emp = await self.get_employee(employee_id)
         emp.status = "ACTIVE"
         emp.exit_date = None
@@ -439,7 +452,10 @@ class EmployeeService:
             user = await self.session.get(User, emp.user_id)
             if user:
                 user.is_active = True
-        await self.session.commit()
+        if commit:
+            await self.session.commit()
+        else:
+            await self.session.flush()
         self.session.expire_all()
         refreshed = await self.get_employee(employee_id)
         return self.enrich(refreshed)
@@ -447,9 +463,7 @@ class EmployeeService:
     async def delete_employee(self, employee_id: int) -> None:
         emp = await self.get_employee(employee_id)
         await self.session.execute(
-            update(Employee)
-            .where(Employee.reporting_manager_id == employee_id)
-            .values(reporting_manager_id=None)
+            update(Employee).where(Employee.reporting_manager_id == employee_id).values(reporting_manager_id=None)
         )
         await self.repo.delete(emp)
         await self.session.commit()

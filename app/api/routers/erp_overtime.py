@@ -23,7 +23,7 @@ class ErpOvertimeRecord(BaseModel):
     overtime_end: datetime | None = None
     calculated_minutes: int = Field(..., ge=0)
     approved_minutes: int = Field(default=0, ge=0)
-    status: str = "APPROVED"
+    status: str = "PENDING"
 
 
 class ErpOvertimeSyncAccepted(BaseModel):
@@ -54,37 +54,54 @@ async def sync_overtime_bulk(
     accepted: list[dict] = []
     duplicates: list[dict] = []
     failed: list[dict] = []
-    for item in records:
-        try:
-            existing = await session.scalar(
-                select(OvertimeRecord).where(OvertimeRecord.erp_event_id == item.erp_event_id)
+    for start in range(0, len(records), 500):
+        chunk = records[start:start + 500]
+        requested_ids = {item.employee_id for item in chunk if item.employee_id is not None}
+        requested_codes = {item.employee_code for item in chunk if item.employee_code}
+        employee_ids = set(await session.scalars(select(Employee.id).where(Employee.id.in_(requested_ids))))
+        employee_codes = dict((await session.execute(
+            select(Employee.employee_code, Employee.id).where(Employee.employee_code.in_(requested_codes))
+        )).all())
+        attendance_owners = dict((await session.execute(
+            select(AttendanceRecord.id, AttendanceRecord.employee_id).where(
+                AttendanceRecord.id.in_({item.attendance_record_id for item in chunk})
             )
-            if existing:
-                duplicates.append({"erp_event_id": item.erp_event_id, "id": existing.id})
-                continue
-            employee = await session.get(Employee, item.employee_id) if item.employee_id else None
-            if employee is None and item.employee_code:
-                employee = await session.scalar(select(Employee).where(Employee.employee_code == item.employee_code))
-            attendance = await session.get(AttendanceRecord, item.attendance_record_id)
-            if employee is None or attendance is None or attendance.employee_id != employee.id:
-                raise ValueError("Employee or attendance record not found, or they do not match")
-            if item.approved_minutes > item.calculated_minutes:
-                raise ValueError("approved_minutes cannot exceed calculated_minutes")
-            record = OvertimeRecord(
-                employee_id=employee.id,
-                attendance_record_id=attendance.id,
-                calculated_minutes=item.calculated_minutes,
-                approved_minutes=item.approved_minutes,
-                status=item.status.upper(),
-                erp_event_id=item.erp_event_id,
-                overtime_start=item.overtime_start,
-                overtime_end=item.overtime_end,
-                source="ERP",
+        )).all())
+        existing_events = dict((await session.execute(
+            select(OvertimeRecord.erp_event_id, OvertimeRecord.id).where(
+                OvertimeRecord.erp_event_id.in_({item.erp_event_id for item in chunk})
             )
-            session.add(record)
-            await session.flush()
-            accepted.append({"erp_event_id": item.erp_event_id, "id": record.id})
-        except Exception as exc:
-            failed.append({"erp_event_id": item.erp_event_id, "error": str(exc)})
+        )).all())
+
+        for item in chunk:
+            try:
+                if existing_id := existing_events.get(item.erp_event_id):
+                    duplicates.append({"erp_event_id": item.erp_event_id, "id": existing_id})
+                    continue
+                employee_id = item.employee_id if item.employee_id in employee_ids else employee_codes.get(item.employee_code)
+                if employee_id is None or attendance_owners.get(item.attendance_record_id) != employee_id:
+                    raise ValueError("Employee or attendance record not found, or they do not match")
+                if item.status.upper() != "PENDING" or item.approved_minutes != 0:
+                    raise ValueError("ERP overtime must be pending with zero approved minutes; HRMS owns approval")
+                if item.approved_minutes > item.calculated_minutes:
+                    raise ValueError("approved_minutes cannot exceed calculated_minutes")
+                async with session.begin_nested():
+                    record = OvertimeRecord(
+                        employee_id=employee_id,
+                        attendance_record_id=item.attendance_record_id,
+                        calculated_minutes=item.calculated_minutes,
+                        approved_minutes=item.approved_minutes,
+                        status=item.status.upper(),
+                        erp_event_id=item.erp_event_id,
+                        overtime_start=item.overtime_start,
+                        overtime_end=item.overtime_end,
+                        source="ERP",
+                    )
+                    session.add(record)
+                    await session.flush()
+                existing_events[item.erp_event_id] = record.id
+                accepted.append({"erp_event_id": item.erp_event_id, "id": record.id})
+            except Exception as exc:
+                failed.append({"erp_event_id": item.erp_event_id, "error": str(exc)})
     await session.commit()
     return {"accepted": accepted, "duplicates": duplicates, "failed": failed}

@@ -32,6 +32,11 @@ h1 {
   margin: 0;
 }
 
+.console-title {
+  font-size: 24px;
+  font-weight: 700;
+}
+
 h2 {
   font-size: 13px;
   text-transform: uppercase;
@@ -703,6 +708,10 @@ textarea:focus {
 }
 
 @media (max-width: 820px) {
+  .console-title {
+    font-size: 18px;
+  }
+
   .layout {
     grid-template-columns: 1fr;
   }

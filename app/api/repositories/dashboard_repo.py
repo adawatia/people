@@ -1,6 +1,8 @@
-"""routers/dashboard.py — Dynamic permission-based dashboard widget API."""
+"""Dynamic permission-based dashboard widget queries."""
 
-from sqlalchemy import func, select
+from datetime import date
+
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -12,6 +14,7 @@ from db.models import (
     Employee,
     LeaveApplication,
     LeaveBalance,
+    LeaveType,
     OvertimeRecord,
     User,
     WorkArrangementRequest,
@@ -27,6 +30,8 @@ async def dashboard_metrics(user: User, session: AsyncSession) -> DashboardMetri
     today = now_ist().date()
     yr = today.year
     mo = today.month
+    month_start = date(yr, mo, 1)
+    next_month = date(yr + 1, 1, 1) if mo == 12 else date(yr, mo + 1, 1)
 
     # Defaults
     unit_metrics = {
@@ -124,35 +129,30 @@ async def dashboard_metrics(user: User, session: AsyncSession) -> DashboardMetri
         if total_working > 0:
             unit_metrics["attendanceRate"] = round((unit_metrics["presentCount"] / total_working) * 100, 1)
 
-        # 4. Overtime hours (Today & Month)
-        today_ot_stmt = (
-            select(func.sum(OvertimeRecord.approved_minutes))
-            .join(AttendanceRecord, OvertimeRecord.attendance_record_id == AttendanceRecord.id)
-            .join(Employee, AttendanceRecord.employee_id == Employee.id)
-            .where(AttendanceRecord.attendance_date == today)
-        )
-        monthly_ot_stmt = (
-            select(func.sum(OvertimeRecord.approved_minutes))
+        # One date-bounded scan provides both overtime figures.
+        overtime_stmt = (
+            select(
+                func.coalesce(func.sum(case(
+                    (AttendanceRecord.attendance_date == today, OvertimeRecord.approved_minutes), else_=0
+                )), 0),
+                func.coalesce(func.sum(OvertimeRecord.approved_minutes), 0),
+            )
             .join(AttendanceRecord, OvertimeRecord.attendance_record_id == AttendanceRecord.id)
             .join(Employee, AttendanceRecord.employee_id == Employee.id)
             .where(
-                func.extract('month', AttendanceRecord.attendance_date) == mo,
-                func.extract('year', AttendanceRecord.attendance_date) == yr,
+                AttendanceRecord.attendance_date >= month_start,
+                AttendanceRecord.attendance_date < next_month,
             )
         )
         if not has_org_scope:
             if unit_scope_ids:
-                today_ot_stmt = today_ot_stmt.where(Employee.unit_id.in_(unit_scope_ids))
-                monthly_ot_stmt = monthly_ot_stmt.where(Employee.unit_id.in_(unit_scope_ids))
+                overtime_stmt = overtime_stmt.where(Employee.unit_id.in_(unit_scope_ids))
             elif dept_scope_ids:
-                today_ot_stmt = today_ot_stmt.where(Employee.department_id.in_(dept_scope_ids))
-                monthly_ot_stmt = monthly_ot_stmt.where(Employee.department_id.in_(dept_scope_ids))
+                overtime_stmt = overtime_stmt.where(Employee.department_id.in_(dept_scope_ids))
 
-        today_ot = await session.scalar(today_ot_stmt)
+        today_ot, monthly_ot = (await session.execute(overtime_stmt)).one()
         if today_ot:
             unit_metrics["todayOvertimeHours"] = round(today_ot / 60, 1)
-
-        monthly_ot = await session.scalar(monthly_ot_stmt)
         if monthly_ot:
             unit_metrics["monthlyOvertimeHours"] = round(monthly_ot / 60, 1)
 
@@ -337,30 +337,25 @@ async def dashboard_metrics(user: User, session: AsyncSession) -> DashboardMetri
         # today window and the upcoming search.
 
 
-        # Today's attendance
-        today_att = (await session.execute(
-            select(AttendanceRecord).where(AttendanceRecord.employee_id == emp.id, AttendanceRecord.attendance_date == today)
-        )).scalar_one_or_none()
+        # A month contains at most 31 rows per employee, including today's row.
+        month_records = (await session.scalars(
+            select(AttendanceRecord).where(
+                AttendanceRecord.employee_id == emp.id,
+                AttendanceRecord.attendance_date >= month_start,
+                AttendanceRecord.attendance_date < next_month,
+            )
+        )).all()
+        today_att = next((record for record in month_records if record.attendance_date == today), None)
         if today_att:
             employee_metrics["todayStatus"] = today_att.status
             employee_metrics["punchIn"] = today_att.punch_in.strftime("%I:%M %p") if today_att.punch_in else None
             employee_metrics["punchOut"] = today_att.punch_out.strftime("%I:%M %p") if today_att.punch_out else None
 
-        # Monthly attendance
-        mo_att_counts = (await session.execute(
-            select(AttendanceRecord.status, func.count(AttendanceRecord.id))
-            .where(
-                AttendanceRecord.employee_id == emp.id,
-                func.extract('month', AttendanceRecord.attendance_date) == mo,
-                func.extract('year', AttendanceRecord.attendance_date) == yr
-            )
-            .group_by(AttendanceRecord.status)
-        )).all()
-        for status, count in mo_att_counts:
-            if status == "PRESENT": employee_metrics["monthlyPresent"] += count
-            elif status == "ABSENT": employee_metrics["monthlyAbsent"] += count
-            elif status == "ON_LEAVE": employee_metrics["monthlyLeave"] += count
-            elif status == "HOLIDAY": employee_metrics["monthlyHoliday"] += count
+        for record in month_records:
+            if record.status == "PRESENT": employee_metrics["monthlyPresent"] += 1
+            elif record.status == "ABSENT": employee_metrics["monthlyAbsent"] += 1
+            elif record.status == "ON_LEAVE": employee_metrics["monthlyLeave"] += 1
+            elif record.status == "HOLIDAY": employee_metrics["monthlyHoliday"] += 1
 
         # Overtime (monthly)
         mo_ot = (await session.execute(
@@ -368,26 +363,19 @@ async def dashboard_metrics(user: User, session: AsyncSession) -> DashboardMetri
             .join(AttendanceRecord)
             .where(
                 OvertimeRecord.employee_id == emp.id,
-                func.extract('month', AttendanceRecord.attendance_date) == mo,
-                func.extract('year', AttendanceRecord.attendance_date) == yr
+                AttendanceRecord.attendance_date >= month_start,
+                AttendanceRecord.attendance_date < next_month,
             )
         )).scalar()
         if mo_ot:
             employee_metrics["overtimeHours"] = round(mo_ot / 60, 1)
 
         balances_q = (await session.execute(
-            select(LeaveBalance)
+            select(LeaveBalance, LeaveType)
+            .outerjoin(LeaveType, LeaveBalance.leave_type_id == LeaveType.id)
             .where(LeaveBalance.employee_id == emp.id, LeaveBalance.year == yr)
-        )).scalars().all()
-        # Fetch leave type names separately to avoid lazy-load
-        from db.models import LeaveType as LT
-        lt_ids = [b.leave_type_id for b in balances_q]
-        lt_map: dict[int, object] = {}
-        if lt_ids:
-            lt_results = (await session.execute(select(LT).where(LT.id.in_(lt_ids)))).scalars().all()
-            lt_map = {lt.id: lt for lt in lt_results}
-        for b in balances_q:
-            lt = lt_map.get(b.leave_type_id)
+        )).all()
+        for b, lt in balances_q:
             employee_metrics["leaveBalances"].append({
                 "type": lt.name if lt else str(b.leave_type_id),
                 "available": b.allocated - b.used - b.pending,

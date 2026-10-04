@@ -52,6 +52,7 @@ from services.auth_service import (
 )
 
 router = APIRouter(prefix="/auth")
+erp_router = APIRouter(prefix="/integrations/erp", tags=["erp-employees"])
 PASSWORD_RECOVERY_GENERIC = "If the account is eligible, continue with your authenticator code."
 
 
@@ -545,9 +546,8 @@ async def hr_password_reset(
     return await _reset_password(employee, payload, manager, session, request=request, source="hr")
 
 
-@router.post(
-    "/integrations/erp/employees/{employee_id}/password-reset",
-    tags=["erp-employees"],
+@erp_router.post(
+    "/employees/{employee_id}/password-reset",
     summary="ERP set employee temporary password",
     dependencies=[Depends(require_erp_scope("identity:write"))],
 )

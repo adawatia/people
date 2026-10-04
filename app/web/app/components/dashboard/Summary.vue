@@ -37,7 +37,10 @@ const displayValue = (value: number | string) => typeof value === 'number' ? num
         <template v-else>
           {{ unavailable ? '—' : displayValue(item.value) }}
         </template>
-        <small v-if="item.note && !unavailable" class="dashboard-description">{{ item.note }}</small>
+        <small
+          v-if="item.note && !unavailable"
+          class="dashboard-description"
+        >{{ item.note }}</small>
       </dd>
     </div>
   </dl>

@@ -71,9 +71,13 @@ const details = computed(() => [
         <div class="min-w-0 flex-1">
           <div class="flex flex-wrap items-center gap-3">
             <h2 class="text-xl font-semibold">
-            {{ auth.displayName.value }}
+              {{ auth.displayName.value }}
             </h2>
-            <UBadge color="success" variant="soft" icon="i-lucide-circle-check">
+            <UBadge
+              color="success"
+              variant="soft"
+              icon="i-lucide-circle-check"
+            >
               Active account
             </UBadge>
           </div>
@@ -87,23 +91,39 @@ const details = computed(() => [
       </div>
       <div class="grid border-t border-[var(--people-border)] sm:grid-cols-3">
         <div class="p-5 sm:border-r sm:border-[var(--people-border)]">
-          <p class="text-xs font-medium text-muted">Account role</p>
-          <p class="mt-1 text-sm font-semibold">{{ roleLabel }}</p>
+          <p class="text-xs font-medium text-muted">
+            Account role
+          </p>
+          <p class="mt-1 text-sm font-semibold">
+            {{ roleLabel }}
+          </p>
         </div>
         <div class="border-t border-[var(--people-border)] p-5 sm:border-l-0 sm:border-t-0 sm:border-r sm:border-[var(--people-border)]">
-          <p class="text-xs font-medium text-muted">Employee code</p>
-          <p class="mt-1 text-sm font-semibold">{{ employee?.employee_code || user?.employee_code || 'Not available' }}</p>
+          <p class="text-xs font-medium text-muted">
+            Employee code
+          </p>
+          <p class="mt-1 text-sm font-semibold">
+            {{ employee?.employee_code || user?.employee_code || 'Not available' }}
+          </p>
         </div>
         <div class="border-t border-[var(--people-border)] p-5 sm:border-l-0 sm:border-t-0">
-          <p class="text-xs font-medium text-muted">Access scope</p>
-          <p class="mt-1 text-sm font-semibold">{{ user?.scope_type?.toLowerCase() || 'Self' }}</p>
+          <p class="text-xs font-medium text-muted">
+            Access scope
+          </p>
+          <p class="mt-1 text-sm font-semibold">
+            {{ user?.scope_type?.toLowerCase() || 'Self' }}
+          </p>
         </div>
       </div>
     </section>
     <section class="people-card mt-6 overflow-hidden">
       <div class="border-b border-[var(--people-border)] p-5 sm:px-6">
-        <h2 class="font-semibold">Personal and employment details</h2>
-        <p class="mt-1 text-sm text-muted">Read-only details supplied by your People and ERP records.</p>
+        <h2 class="font-semibold">
+          Personal and employment details
+        </h2>
+        <p class="mt-1 text-sm text-muted">
+          Read-only details supplied by your People and ERP records.
+        </p>
       </div>
       <div
         v-if="pending && !employee"

@@ -60,6 +60,44 @@ async function visit(page: Page, name: string) {
   await expect(page.locator('[role=dialog]')).toHaveCount(0)
   await expect(page.locator('.nuxt-loading-indicator')).toHaveCSS('opacity', '0')
 }
+test('shifts loads the selected tab and keeps its filters independent', async ({ page }) => {
+  await setup(page)
+  const requests: string[] = []
+  page.on('request', (request) => {
+    const path = new URL(request.url()).pathname
+    if (path.startsWith('/api/hrms/shifts')) requests.push(path)
+  })
+  await visit(page, 'Shifts')
+  await expect(page.getByText('Preview shift', { exact: true })).toBeVisible()
+  expect(requests.some(path => path.includes('/assignments'))).toBe(false)
+  requests.length = 0
+  await page.getByRole('button', { name: 'Assignments', exact: true }).click()
+  await expect(page.getByText('Preview Employee', { exact: true }).first()).toBeVisible()
+  expect(requests.some(path => path === '/api/hrms/shifts/')).toBe(false)
+  requests.length = 0
+  await page.getByRole('searchbox', { name: 'Search', exact: true }).fill('Preview')
+  await expect.poll(() => requests.length).toBeGreaterThan(0)
+  expect(requests.every(path => path.includes('/assignments'))).toBe(true)
+})
+
+test('reports displays its page while data is still loading', async ({ page }) => {
+  await setup(page)
+  let release: (() => void) | undefined
+  const waitForRelease = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  await page.route('**/api/hrms/reports/attendance-matrix**', async (route) => {
+    await waitForRelease
+    await route.fulfill({ json: fixtures['reports/attendance-matrix'] })
+  })
+  await page.locator('.platform-header').getByRole('button', { name: 'Search pages', exact: true }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Reports', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Reports', exact: true })).toBeVisible()
+  await expect(page.getByRole('status')).toContainText('Loading results')
+  release?.()
+  await expect(page.getByText('Preview Employee', { exact: true }).first()).toBeVisible()
+})
+
 const routes = ['Dashboard', 'Employees', 'Attendance', 'Leave management', 'Work arrangements', 'Overtime', 'Approvals', 'Shifts', 'Holidays', 'Organization', 'Reports', 'Notifications', 'Profile', 'Settings']
 for (const theme of ['light', 'dark'] as const) for (const width of [360, 390, 768, 1366, 1920]) {
   test(`frontend all pages ${width} ${theme}`, async ({ page }) => {

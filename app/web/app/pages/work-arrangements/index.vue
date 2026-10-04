@@ -170,11 +170,13 @@ async function confirmCancellation() {
           ><UIcon
             :name="typeConfig.WORK_FROM_HOME.icon"
             class="size-5"
-          /></span><div><h3 class="font-semibold">
-            {{ typeConfig.WORK_FROM_HOME.label }}
-          </h3><p class="mt-2 text-sm leading-6 text-muted">
-            {{ typeConfig.WORK_FROM_HOME.description }}
-          </p></div>
+          /></span><div>
+            <h3 class="font-semibold">
+              {{ typeConfig.WORK_FROM_HOME.label }}
+            </h3><p class="mt-2 text-sm leading-6 text-muted">
+              {{ typeConfig.WORK_FROM_HOME.description }}
+            </p>
+          </div>
         </article>
       </div>
       <section class="people-card mt-7 overflow-hidden">

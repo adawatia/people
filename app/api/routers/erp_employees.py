@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi_users.exceptions import InvalidPasswordException
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,6 +17,7 @@ from schemas.employees import (
     EmployeeOnboardingCreate,
     EmployeeRead,
     EmployeeUpdate,
+    EmployeeUpsert,
 )
 from services.employee_service import EmployeeService
 
@@ -34,16 +36,36 @@ router = APIRouter(prefix="/integrations/erp/employees", tags=["erp-employees"])
 )
 async def upsert_employee_from_erp(
     erp_id: str,
-    data: EmployeeOnboardingCreate,
+    data: EmployeeUpsert,
     user_manager: UserManager = Depends(get_user_manager),
     session: AsyncSession = Depends(get_async_session),
 ) -> EmployeeRead:
+    if data.erp_id is not None and data.erp_id != erp_id:
+        raise HTTPException(status_code=422, detail="erp_id in the body must match the URL")
     await acquire_erp_upsert_lock(session, "employee", erp_id)
     existing = await session.scalar(select(Employee).where(Employee.erp_id == erp_id))
     if existing is None:
-        return await create_employee_from_erp(
-            data.model_copy(update={"erp_id": erp_id}), user_manager=user_manager, session=session
-        )
+        fields = data.model_dump(exclude_unset=True)
+        fields["erp_id"] = erp_id
+        if fields.get("status", "ACTIVE") != "ACTIVE":
+            raise HTTPException(status_code=422, detail="New employees must be ACTIVE; deactivate after creation")
+        try:
+            onboarding = EmployeeOnboardingCreate.model_validate(fields)
+        except ValidationError as exc:
+            raise HTTPException(status_code=422, detail=exc.errors()) from exc
+        return await _create_employee_from_erp(onboarding, user_manager, session)
+
+    if "employee_code" in data.model_fields_set and not data.employee_code:
+        raise HTTPException(status_code=422, detail="employee_code cannot be empty")
+    if data.employee_code is not None and data.employee_code != existing.employee_code:
+        raise HTTPException(status_code=409, detail="employee_code cannot change for an existing ERP employee")
+    if "first_name" in data.model_fields_set and not data.first_name:
+        raise HTTPException(status_code=422, detail="first_name cannot be empty")
+    for field in ("role", "employment_type", "overtime_eligible"):
+        if field in data.model_fields_set and getattr(data, field) is None:
+            raise HTTPException(status_code=422, detail=f"{field} cannot be null")
+    employee_id = existing.id
+    linked_user_id = existing.user_id
 
     update_fields = data.model_dump(
         exclude={
@@ -56,42 +78,50 @@ async def upsert_employee_from_erp(
         },
         exclude_unset=True,
     )
-    result = await EmployeeService(session).update_employee(existing.id, EmployeeUpdate(**update_fields))
-    linked_user = await session.get(User, existing.user_id) if existing.user_id else None
-    if linked_user:
-        for field in ("first_name", "last_name"):
-            if field in update_fields:
-                setattr(linked_user, field, update_fields[field])
-        if update_fields.get("phone_number"):
-            linked_user.mobile_number = normalize_indian_mobile(update_fields["phone_number"])
+    previous_status = existing.status
+    requested_status = update_fields.pop("status", None)
+    effective_status = requested_status or previous_status
+    if {"exit_date", "exit_reason"} & data.model_fields_set and effective_status != "INACTIVE":
+        raise HTTPException(status_code=422, detail="exit fields require INACTIVE status")
+    exit_date = update_fields.pop("exit_date", None) if requested_status != previous_status else None
+    exit_reason = update_fields.pop("exit_reason", None) if requested_status != previous_status else None
+    if "status" in data.model_fields_set and requested_status not in {"ACTIVE", "INACTIVE"}:
+        raise HTTPException(status_code=422, detail="status must be ACTIVE or INACTIVE")
+    if requested_status == "ACTIVE" and previous_status == "ACTIVE":
+        update_fields.pop("exit_date", None)
+        update_fields.pop("exit_reason", None)
+    mobile_number = None
+    if "phone_number" in data.model_fields_set and not data.phone_number:
+        raise HTTPException(status_code=422, detail="phone_number cannot be empty for a linked login")
+    if update_fields.get("phone_number"):
+        try:
+            mobile_number = normalize_indian_mobile(update_fields["phone_number"])
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    service = EmployeeService(session)
+    try:
+        if update_fields:
+            await service.update_employee(employee_id, EmployeeUpdate(**update_fields), commit=False)
+        linked_user = await session.get(User, linked_user_id) if linked_user_id else None
+        if linked_user:
+            for field in ("first_name", "last_name"):
+                if field in update_fields:
+                    setattr(linked_user, field, update_fields[field])
+            if mobile_number:
+                linked_user.mobile_number = mobile_number
+        if requested_status is not None and requested_status != previous_status:
+            if requested_status == "INACTIVE":
+                await service.deactivate_employee(
+                    employee_id, exit_date=exit_date, exit_reason=exit_reason, commit=False
+                )
+            elif requested_status == "ACTIVE":
+                await service.activate_employee(employee_id, commit=False)
         await session.commit()
-    return result
-
-
-@router.patch(
-    "/{employee_id}",
-    response_model=EmployeeRead,
-    summary="ERP update employee and linked profile",
-    dependencies=[Depends(require_erp_scope("employees:write"))],
-)
-async def update_employee_from_erp(
-    employee_id: int, data: EmployeeUpdate, session: AsyncSession = Depends(get_async_session)
-):
-    employee = await session.get(Employee, employee_id)
-    if employee is None:
-        raise HTTPException(status_code=404, detail="Employee not found")
-    linked_user_id = employee.user_id
-    result = await EmployeeService(session).update_employee(employee_id, data)
-    user = await session.get(User, linked_user_id) if linked_user_id else None
-    if user:
-        updates = data.model_dump(exclude_unset=True)
-        for field in ("first_name", "last_name"):
-            if field in updates:
-                setattr(user, field, updates[field])
-        if updates.get("phone_number"):
-            user.mobile_number = normalize_indian_mobile(updates["phone_number"])
-        await session.commit()
-    return result
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=409, detail="Employee or linked login conflicts with existing data") from exc
+    session.expire_all()
+    return service.enrich(await service.get_employee(employee_id))
 
 
 @router.patch(
@@ -122,21 +152,14 @@ async def activate_employee_from_erp(employee_id: int, session: AsyncSession = D
     return await EmployeeService(session).activate_employee(employee_id)
 
 
-@router.post(
-    "",
-    response_model=EmployeeRead,
-    summary="ERP create employee and linked login",
-    description="Creates one employee and one linked login account atomically. Requires an Indian mobile number and a strong temporary password.",
-    dependencies=[Depends(require_erp_scope("employees:write"))],
-)
-async def create_employee_from_erp(
+async def _create_employee_from_erp(
     data: EmployeeOnboardingCreate,
-    user_manager: UserManager = Depends(get_user_manager),
-    session: AsyncSession = Depends(get_async_session),
+    user_manager: UserManager,
+    session: AsyncSession,
 ) -> EmployeeRead:
     """Provision the employee and linked login from the ERP source of truth."""
     if not data.phone_number or not data.initial_password:
-        raise HTTPException(status_code=400, detail="ERP must provide phone_number and initial_password")
+        raise HTTPException(status_code=422, detail="ERP must provide phone_number and initial_password")
     email = data.official_email or f"{data.username or data.employee_code}@invalid.local"
     username = (data.username or data.employee_code).strip().lower().replace(" ", ".")
     existing = await session.scalar(select(User).where((User.username == username) | (User.email == email)))

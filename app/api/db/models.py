@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time
+from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 from fastapi_users.db import SQLAlchemyBaseUserTable
@@ -10,6 +11,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -563,9 +565,9 @@ class LeaveBalance(Base):
     employee_id: Mapped[int] = mapped_column(ForeignKey("employees.id", ondelete="CASCADE"), nullable=False, index=True)
     leave_type_id: Mapped[int] = mapped_column(ForeignKey("leave_types.id"), nullable=False)
     year: Mapped[int] = mapped_column(Integer, nullable=False)
-    allocated: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    used: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    pending: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    allocated: Mapped[Decimal] = mapped_column(Numeric(5, 1), default=0, nullable=False)
+    used: Mapped[Decimal] = mapped_column(Numeric(5, 1), default=0, nullable=False)
+    pending: Mapped[Decimal] = mapped_column(Numeric(5, 1), default=0, nullable=False)
 
     leave_type: Mapped[LeaveType] = relationship()
 
@@ -774,3 +776,21 @@ class OvertimeApproval(Base):
     actioned_by: Mapped[int] = mapped_column(ForeignKey("users.user_id"), nullable=False)
     actioned_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_ist)
     remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+# Date-first lookups power organization dashboards, while the existing unique
+# employee/date index remains optimal for one employee's calendar.
+Index("ix_attendance_records_date_employee", AttendanceRecord.attendance_date, AttendanceRecord.employee_id)
+Index(
+    "ix_attendance_punches_employee_time_type",
+    AttendancePunch.employee_id,
+    AttendancePunch.punch_time,
+    AttendancePunch.punch_type,
+)
+Index(
+    "ix_auth_sessions_live_user_created",
+    AuthSession.user_id,
+    AuthSession.created_at.desc(),
+    AuthSession.id.desc(),
+    postgresql_where=AuthSession.revoked_at.is_(None),
+)

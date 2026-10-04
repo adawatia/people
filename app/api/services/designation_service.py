@@ -1,4 +1,5 @@
 from fastapi import HTTPException, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.erp_sync import acquire_erp_upsert_lock
@@ -73,16 +74,28 @@ class DesignationService:
         await self.session.refresh(designation)
         return designation
 
-    async def upsert_designation(self, erp_id: str, data: DesignationCreate) -> Designation:
+    async def upsert_designation(self, erp_id: str, data: DesignationUpdate) -> Designation:
         await acquire_erp_upsert_lock(self.session, "designation", erp_id)
+        if "name" in data.model_fields_set and not data.name:
+            raise HTTPException(status_code=422, detail="name cannot be empty")
+        if "is_active" in data.model_fields_set and data.is_active is None:
+            raise HTTPException(status_code=422, detail="is_active cannot be null")
         designation = await self.repo.get_by_erp_id(erp_id)
-        if designation is None:
-            designation = Designation(**data.model_dump(), erp_id=erp_id)
-            await self.repo.create(designation)
-        else:
-            for key, value in data.model_dump().items():
-                setattr(designation, key, value)
-        await self.session.commit()
+        try:
+            if designation is None:
+                if not data.name:
+                    raise HTTPException(status_code=422, detail="name is required when creating a designation")
+                designation = Designation(
+                    **DesignationCreate.model_validate(data.model_dump(exclude_unset=True)).model_dump(), erp_id=erp_id
+                )
+                await self.repo.create(designation)
+            else:
+                for key, value in data.model_dump(exclude_unset=True).items():
+                    setattr(designation, key, value)
+            await self.session.commit()
+        except IntegrityError as exc:
+            await self.session.rollback()
+            raise HTTPException(status_code=409, detail="Designation conflicts with existing master data") from exc
         await self.session.refresh(designation)
         return designation
 

@@ -43,13 +43,14 @@ const ATTENDANCE_STATUS = [
 ];
 const EMPLOYMENT_TYPES = ["PERMANENT", "PROBATION", "CONTRACT", "INTERN", "CONSULTANT"];
 
-/* Fields shared by the employee create/upsert/update endpoints. */
-function employeeFields({ update = false, account = false } = {}) {
-  const optionalDefault = (value) => (update ? undefined : value);
+/* Fields shared by the ERP employee upsert form. */
+function employeeFields({ upsert = false, account = false } = {}) {
+  const optionalDefault = (value) => (upsert ? undefined : value);
   const fields = [];
-  if (!update) {
-    fields.push({ name: "employee_code", type: "text", required: true, section: "Identity", placeholder: "EMP001" });
-  }
+  fields.push({
+    name: "employee_code", type: "text", required: !upsert, section: "Identity", placeholder: "EMP001",
+    help: upsert ? "Required when creating this ERP employee; it cannot change afterward." : undefined,
+  });
   fields.push(
     {
       name: "role",
@@ -59,7 +60,7 @@ function employeeFields({ update = false, account = false } = {}) {
       default: optionalDefault("EMPLOYEE"),
       help: "Business role; drives default access scope.",
     },
-    { name: "first_name", type: "text", required: true, section: "Identity" },
+    { name: "first_name", type: "text", required: !upsert, section: "Identity", help: upsert ? "Required when creating this ERP employee." : undefined },
     { name: "last_name", type: "text", section: "Identity" },
     { name: "date_of_joining", type: "date", section: "Identity" },
     {
@@ -79,9 +80,9 @@ function employeeFields({ update = false, account = false } = {}) {
       name: "phone_number",
       type: "text",
       section: "Contact",
-      required: !update && account,
+      required: !upsert && account,
       placeholder: "9876543210",
-      help: "Indian mobile: 10 digits starting 6-9.",
+      help: upsert ? "Required on first create because employee upsert provisions the login. Indian mobile: 10 digits starting 6-9." : "Indian mobile: 10 digits starting 6-9.",
     },
     { name: "date_of_birth", type: "date", section: "Contact" },
     { name: "gender", type: "text", section: "Contact", suggest: ["MALE", "FEMALE", "OTHER"] },
@@ -117,13 +118,15 @@ function employeeFields({ update = false, account = false } = {}) {
 
   if (account) {
     fields.push(
-      { name: "create_user_account", type: "bool", section: "Portal account", default: true },
       { name: "username", type: "text", section: "Portal account" },
-      { name: "initial_password", type: "password", section: "Portal account", required: true },
+      {
+        name: "initial_password", type: "password", section: "Portal account", required: !upsert,
+        help: upsert ? "Required only when creating the linked login. Retries never change an existing password." : undefined,
+      },
     );
   }
 
-  if (update) {
+  if (upsert) {
     fields.push(
       {
         name: "business_role",
@@ -150,11 +153,11 @@ window.ENDPOINTS = [
     method: "PUT",
     path: "/api/v1/integrations/erp/organization/{erp_id}",
     scope: "master-data:write",
-    pathParams: [{ name: "erp_id", sample: "ORG-001" }],
+    pathParams: [{ name: "erp_id", placeholder: "YOUR-ERP-ORG-ID", help: "Stable organization key from your ERP. Keep it unchanged on retries; do not use an HRMS numeric ID." }],
     body: {
       shape: "object",
       fields: [
-        { name: "name", type: "text", required: true, section: "Organization", help: "Required on first create." },
+        { name: "name", type: "text", section: "Organization", help: "Required when this ERP ID is first created; leave blank for partial updates." },
         { name: "short_name", type: "text", section: "Organization" },
         { name: "industry", type: "text", section: "Organization" },
         { name: "phone", type: "text", section: "Contact" },
@@ -170,57 +173,67 @@ window.ENDPOINTS = [
       ],
     },
   },
+  // ── Units ─────────────────────────────────────────────────────────────────
   {
-    id: "org-list",
+    id: "unit-upsert",
     group: "Organization & master data",
-    label: "List organizations",
-    method: "GET",
-    path: "/api/v1/integrations/erp/organizations",
-    scope: "master-data:read",
-    pathParams: [],
-    body: { shape: "none" },
-  },
-  {
-    id: "org-update",
-    group: "Organization & master data",
-    label: "Update organization",
-    method: "PATCH",
-    path: "/api/v1/integrations/erp/organization",
+    label: "Upsert unit",
+    method: "PUT",
+    path: "/api/v1/integrations/erp/units/by-erp-id/{erp_id}",
     scope: "master-data:write",
-    pathParams: [],
+    pathParams: [{ name: "erp_id", placeholder: "YOUR-ERP-UNIT-ID", help: "Stable unit key from your ERP, such as its branch/site identifier. Do not use the HRMS numeric unit ID." }],
     body: {
       shape: "object",
       fields: [
-        { name: "name", type: "text", section: "Organization" },
-        { name: "short_name", type: "text", section: "Organization" },
-        { name: "industry", type: "text", section: "Organization" },
-        { name: "phone", type: "text", section: "Contact" },
-        { name: "email", type: "email", section: "Contact" },
-        { name: "website", type: "text", section: "Contact" },
-        { name: "tax_id", type: "text", section: "Contact" },
-        { name: "address_line1", type: "text", section: "Address" },
-        { name: "address_line2", type: "text", section: "Address" },
-        { name: "city", type: "text", section: "Address" },
-        { name: "state", type: "text", section: "Address" },
-        { name: "country", type: "text", section: "Address" },
-        { name: "postal_code", type: "text", section: "Address" },
+        { name: "name", type: "text", section: "Unit", help: "Required when this ERP ID is first created; leave blank for partial updates." },
+        { name: "code", type: "text", section: "Unit" },
+        { name: "city", type: "text", section: "Unit" },
+
+        { name: "is_active", type: "bool", section: "Unit", help: "Set false to retire; true reactivates. Omit to preserve the current state." },
       ],
     },
   },
 
-  // ── Employees ─────────────────────────────────────────────────────────────
 
-  // ── Employees ─────────────────────────────────────────────────────────────
   {
-    id: "employee-create",
-    group: "Employees",
-    label: "Create employee + login",
-    method: "POST",
-    path: "/api/v1/integrations/erp/employees",
-    scope: "employees:write",
-    pathParams: [],
-    body: { shape: "object", fields: employeeFields({ account: true }) },
+    id: "department-upsert",
+    group: "Organization & master data",
+    label: "Upsert department",
+    method: "PUT",
+    path: "/api/v1/integrations/erp/departments/by-erp-id/{erp_id}",
+    scope: "master-data:write",
+    pathParams: [{ name: "erp_id", placeholder: "YOUR-ERP-DEPARTMENT-ID", help: "Stable department key from your ERP. Do not use the HRMS numeric department ID." }],
+    body: {
+      shape: "object",
+      fields: [
+        { name: "name", type: "text", section: "Department", help: "Required when this ERP ID is first created; leave blank for partial updates." },
+        { name: "code", type: "text", section: "Department" },
+        { name: "unit_id", type: "lookup", lookup: "units", section: "Department", help: "Required when first created. This is an HRMS numeric ID selected from reference data." },
+        { name: "is_active", type: "bool", section: "Department", help: "Set false to retire; true reactivates. Omit to preserve the current state." },
+      ],
+    },
   },
+
+  {
+    id: "designation-upsert",
+    group: "Organization & master data",
+    label: "Upsert designation",
+    method: "PUT",
+    path: "/api/v1/integrations/erp/designations/by-erp-id/{erp_id}",
+    scope: "master-data:write",
+    pathParams: [{ name: "erp_id", placeholder: "YOUR-ERP-DESIGNATION-ID", help: "Stable designation/position key from your ERP. Do not use the HRMS numeric designation ID." }],
+    body: {
+      shape: "object",
+      fields: [
+        { name: "name", type: "text", section: "Designation", help: "Required when this ERP ID is first created; leave blank for partial updates." },
+        { name: "code", type: "text", section: "Designation" },
+        { name: "description", type: "text", section: "Designation" },
+        { name: "is_active", type: "bool", section: "Designation", help: "Set false to retire; true reactivates. Omit to preserve the current state." },
+      ],
+    },
+  },
+
+
   {
     id: "employee-upsert",
     group: "Employees",
@@ -228,20 +241,11 @@ window.ENDPOINTS = [
     method: "PUT",
     path: "/api/v1/integrations/erp/employees/by-erp-id/{erp_id}",
     scope: "employees:write",
-    pathParams: [{ name: "erp_id", sample: "EMP-001" }],
-    body: { shape: "object", fields: employeeFields({ account: true }) },
-    notes: "First call creates the linked login; later calls update ERP-owned fields without touching the password.",
+    pathParams: [{ name: "erp_id", placeholder: "YOUR-ERP-EMPLOYEE-ID", help: "Stable employee key from your ERP (for example, its source person ID). Keep it unchanged; employee_code is a separate immutable business code." }],
+    body: { shape: "object", fields: employeeFields({ upsert: true, account: true }) },
+    notes: "First create requires employee_code, first_name, phone_number, and initial_password to provision the account. Later calls may send only changed fields; initial_password is ignored for an existing ERP ID. New employees must start ACTIVE.",
   },
-  {
-    id: "employee-update",
-    group: "Employees",
-    label: "Update employee",
-    method: "PATCH",
-    path: "/api/v1/integrations/erp/employees/{employee_id}",
-    scope: "employees:write",
-    pathParams: [{ name: "employee_id", sample: "1", lookup: "employees" }],
-    body: { shape: "object", fields: employeeFields({ update: true }) },
-  },
+
   {
     id: "employee-deactivate",
     group: "Employees",
@@ -249,7 +253,7 @@ window.ENDPOINTS = [
     method: "PATCH",
     path: "/api/v1/integrations/erp/employees/{employee_id}/deactivate",
     scope: "employees:write",
-    pathParams: [{ name: "employee_id", sample: "1", lookup: "employees" }],
+    pathParams: [{ name: "employee_id", lookup: "employees" }],
     body: {
       shape: "object",
       fields: [
@@ -265,7 +269,7 @@ window.ENDPOINTS = [
     method: "PATCH",
     path: "/api/v1/integrations/erp/employees/{employee_id}/activate",
     scope: "employees:write",
-    pathParams: [{ name: "employee_id", sample: "1", lookup: "employees" }],
+    pathParams: [{ name: "employee_id", lookup: "employees" }],
     body: { shape: "none" },
   },
   {
@@ -275,7 +279,7 @@ window.ENDPOINTS = [
     method: "POST",
     path: "/api/v1/integrations/erp/employees/{employee_id}/password-reset",
     scope: "identity:write",
-    pathParams: [{ name: "employee_id", sample: "1", lookup: "employees" }],
+    pathParams: [{ name: "employee_id", lookup: "employees" }],
     body: {
       shape: "object",
       fields: [
@@ -291,29 +295,7 @@ window.ENDPOINTS = [
   },
 
   // ── Shifts ────────────────────────────────────────────────────────────────
-  {
-    id: "shift-create",
-    group: "Shifts",
-    label: "Create shift",
-    method: "POST",
-    path: "/api/v1/integrations/erp/shifts",
-    scope: "shifts:write",
-    pathParams: [],
-    body: {
-      shape: "object",
-      fields: [
-        { name: "name", type: "text", required: true, section: "Shift" },
-        { name: "code", type: "text", section: "Shift" },
-        { name: "start_time", type: "time", required: true, section: "Shift" },
-        { name: "end_time", type: "time", required: true, section: "Shift" },
-        { name: "grace_minutes", type: "int", default: 10, section: "Shift" },
-        { name: "break_minutes", type: "int", default: 30, section: "Shift" },
-        { name: "is_cross_midnight", type: "bool", default: false, section: "Shift" },
-        { name: "is_active", type: "bool", default: true, section: "Shift" },
-        { name: "unit_id", type: "lookup", lookup: "units", section: "Shift" },
-      ],
-    },
-  },
+
   {
     id: "shift-upsert",
     group: "Shifts",
@@ -321,44 +303,23 @@ window.ENDPOINTS = [
     method: "PUT",
     path: "/api/v1/integrations/erp/shifts/by-erp-id/{erp_id}",
     scope: "shifts:write",
-    pathParams: [{ name: "erp_id", sample: "SHIFT-001" }],
+    pathParams: [{ name: "erp_id", placeholder: "YOUR-ERP-SHIFT-ID", help: "Stable shift key from your ERP. Do not use the HRMS numeric shift ID." }],
     body: {
       shape: "object",
       fields: [
-        { name: "name", type: "text", required: true, section: "Shift" },
+        { name: "name", type: "text", section: "Shift", help: "Required when this ERP ID is first created; leave blank for partial updates." },
         { name: "code", type: "text", section: "Shift" },
-        { name: "start_time", type: "time", required: true, section: "Shift" },
-        { name: "end_time", type: "time", required: true, section: "Shift" },
-        { name: "grace_minutes", type: "int", default: 10, section: "Shift" },
-        { name: "break_minutes", type: "int", default: 30, section: "Shift" },
-        { name: "is_cross_midnight", type: "bool", default: false, section: "Shift" },
-        { name: "is_active", type: "bool", default: true, section: "Shift" },
+        { name: "start_time", type: "time", section: "Shift", help: "Required when this ERP ID is first created." },
+        { name: "end_time", type: "time", section: "Shift", help: "Required when this ERP ID is first created." },
+        { name: "grace_minutes", type: "int", section: "Shift" },
+        { name: "break_minutes", type: "int", section: "Shift" },
+        { name: "is_cross_midnight", type: "bool", section: "Shift" },
+        { name: "is_active", type: "bool", section: "Shift", help: "Set false to retire; true reactivates. Omit to preserve the current state." },
         { name: "unit_id", type: "lookup", lookup: "units", section: "Shift" },
       ],
     },
   },
-  {
-    id: "shift-update",
-    group: "Shifts",
-    label: "Update shift",
-    method: "PATCH",
-    path: "/api/v1/integrations/erp/shifts/{shift_id}",
-    scope: "shifts:write",
-    pathParams: [{ name: "shift_id", sample: "1", lookup: "shifts" }],
-    body: {
-      shape: "object",
-      fields: [
-        { name: "name", type: "text", section: "Shift" },
-        { name: "code", type: "text", section: "Shift" },
-        { name: "start_time", type: "time", section: "Shift" },
-        { name: "end_time", type: "time", section: "Shift" },
-        { name: "grace_minutes", type: "int", section: "Shift" },
-        { name: "break_minutes", type: "int", section: "Shift" },
-        { name: "is_cross_midnight", type: "bool", section: "Shift" },
-        { name: "is_active", type: "bool", section: "Shift" },
-      ],
-    },
-  },
+
   {
     id: "shift-assign",
     group: "Shifts",
@@ -404,7 +365,7 @@ window.ENDPOINTS = [
     method: "PATCH",
     path: "/api/v1/integrations/erp/shifts/assignments/{assignment_id}/cancel",
     scope: "shifts:write",
-    pathParams: [{ name: "assignment_id", sample: "1", lookup: "shiftAssignments" }],
+    pathParams: [{ name: "assignment_id", lookup: "shiftAssignments" }],
     body: { shape: "none" },
   },
 
@@ -436,7 +397,7 @@ window.ENDPOINTS = [
         { name: "early_exit_minutes", type: "int" },
       ],
     },
-    notes: "Retries are idempotent by erp_record_id. Provide employee_id or employee_code.",
+    notes: "Use the ERP source ID for this processed daily attendance record as erp_record_id and reuse it on retries. Provide employee_id or employee_code.",
   },
 
   // ── Overtime ──────────────────────────────────────────────────────────────
@@ -460,10 +421,10 @@ window.ENDPOINTS = [
         { name: "overtime_end", type: "datetime" },
         { name: "calculated_minutes", type: "int", required: true },
         { name: "approved_minutes", type: "int" },
-        { name: "status", type: "select", options: ["APPROVED", "PENDING", "REJECTED"], default: "APPROVED" },
+        { name: "status", type: "select", options: ["PENDING"], default: "PENDING" },
       ],
     },
-    notes: "approved_minutes cannot exceed calculated_minutes. The attendance record must belong to the same employee.",
+    notes: "Use the ERP source ID for this overtime event as erp_event_id and reuse it on retries. approved_minutes cannot exceed calculated_minutes. The attendance record must belong to the same employee.",
   },
 
   // ── Holidays ──────────────────────────────────────────────────────────────
@@ -585,7 +546,7 @@ window.ENDPOINTS = [
     method: "PATCH",
     path: "/api/v1/integrations/erp/leaves/types/{type_id}",
     scope: "leave-master:write",
-    pathParams: [{ name: "type_id", sample: "1", lookup: "leaveTypes" }],
+    pathParams: [{ name: "type_id", lookup: "leaveTypes" }],
     body: {
       shape: "object",
       fields: [
@@ -602,4 +563,3 @@ window.ENDPOINTS = [
     },
   },
 ];
-

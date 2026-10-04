@@ -222,6 +222,13 @@ class EmployeeUpdate(BaseModel):
     )
 
 
+class EmployeeUpsert(EmployeeUpdate):
+    employee_code: str | None = None
+    username: str | None = None
+    initial_password: str | None = None
+    erp_id: str | None = None
+
+
 class EmployeeDeactivateRequest(BaseModel):
     exit_date: date | None = None
     exit_reason: str | None = None

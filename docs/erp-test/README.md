@@ -1,11 +1,9 @@
-# ERP CRUD Test Console
+# ERP Integration Test Console
 
-A small, dependency-free static web page for exercising every ERP integration
-endpoint (`/api/v1/integrations/erp/**`) against a running HRMS API. Use it to
-create, update and delete organization, employee, shift, attendance, overtime,
-holiday and leave data without hand-crafting signed HTTP requests.
-
-> **Light theme:** Cattupuchin (light mode).
+A small, dependency-free static page for exercising the 21 live ERP integration
+endpoints (`/api/v1/integrations/erp/**`) against a running HRMS API. It covers
+source-ID upserts, explicit employee lifecycle and shift assignment operations,
+and the existing attendance, overtime, holiday and leave synchronization flows.
 
 > **Development tool only.** It can hold an ERP signing secret in browser
 > storage and signs requests from the browser. Never host it on a deployed or
@@ -13,100 +11,106 @@ holiday and leave data without hand-crafting signed HTTP requests.
 
 ## Files
 
-| File           | Purpose                                                                 |
-| -------------- | ----------------------------------------------------------------------- |
-| `index.html`   | Page layout: connection/auth config, lookup login, endpoint catalog.    |
-| `styles.css`   | Self-contained styling (no CDN or build step). Light theme: Cattupuchin. |
-| `endpoints.js` | Catalog of all 35 ERP endpoints, each with a typed field schema.        |
-| `lookups.js`   | Human-login reference-data sources used to populate ID dropdowns.       |
-| `form.js`      | Renders the typed fields as inputs and builds the JSON payload.         |
-| `app.js`       | Signing, request execution, response rendering, history, persistence.   |
+| File | Purpose |
+| --- | --- |
+| `index.html` | Connection, auth, lookup login, and endpoint catalog layout. |
+| `styles.css` | Self-contained styling; no CDN or build step. |
+| `endpoints.js` | The 21 live ERP routes and typed request schemas. |
+| `lookups.js` | Human-login reference-data sources for HRMS numeric IDs. |
+| `form.js` | Renders typed inputs and builds JSON request payloads. |
+| `app.js` | Signs and sends requests; renders responses, history, and settings. |
 
 ## Prerequisites
 
-1. **The API is running** from `app/api/`:
+1. Start the API from `app/api/`:
    ```bash
    uv run fastapi dev main.py
    ```
-2. **ERP auth is configured.** The page supports both modes:
-
-   - **HMAC (default).** Provide an ERP client in the API environment:
+2. Configure ERP authentication. The console supports:
+   - **HMAC:** Configure an ERP client in the API environment and enter the
+     matching client ID and secret in the console:
      ```bash
      ERP_API_CLIENTS='{"primary-erp":{"secret":"replace-with-32-or-more-random-characters","scopes":["*"]}}'
      ```
-     Enter the same `client_id` and `secret` in the page.
-   - **Development API key.** Set a key and select the "development API key" auth mode:
-     ```bash
-     ENVIRONMENT=development
-     ERP_API_KEY=dev-secret
-     ```
-     `X-API-Key` is only accepted when `ENVIRONMENT=development` (or `dev`/`test`/`local`).
-
-3. **A business lookup account.** Reference-data dropdowns are read from the
-   workforce APIs, and the **technical Super Admin is denied there** (the API
-   answers `403 TECHNICAL_ADMIN_ONLY`). Sign in as a business user instead.
-   A fresh development database seeds only the Super Admin, so create one
-   employee first with the ERP employee endpoint (dev key or HMAC) using
-   `role: "ORGANIZATION_OWNER"`, then sign in with that employee's `username`
-   (or mobile number) and `initial_password` at `/auth/employee/login`.
-   An ERP-provisioned account is flagged `must_change_password`, and every
-   workforce read answers `403 PASSWORD_CHANGE_REQUIRED` until that is done.
-   When the page detects this it reveals a **Change password & re-sign in**
-   control; use it once and the account becomes usable for lookups.
-   If `MFA_REQUIRED_FOR_SUPER_ADMIN=true` the technical login returns an MFA
-   challenge, which this dev tool cannot complete.
+   - **Development API key:** Set `ENVIRONMENT=development` and `ERP_API_KEY`,
+     then select development API key mode in the console. `X-API-Key` is only
+     accepted in development, test, or local environments.
+3. Sign in for lookups as a business user. The technical Super Admin cannot
+   read workforce reference data. A new database starts with only that admin,
+   so provision an employee through the ERP employee upsert first. On first
+   creation provide its source `erp_id`, `employee_code`, `first_name`,
+   `phone_number`, and `initial_password`. For a lookup account, set
+   `business_role` to `ORGANIZATION_OWNER`. ERP-created users must change their
+   initial password before workforce lookups are available; the console
+   provides a **Change password & re-sign in** action.
 
 ## Running
 
-Serve the folder over HTTP on localhost. `file://` will not work because the
-page needs Web Crypto and CORS, both of which require a proper origin.
+Serve the folder over HTTP on localhost. `file://` does not provide the Web
+Crypto and CORS support this console needs.
 
 ```bash
 cd docs/erp-test
 python3 -m http.server 5500
-# then open http://localhost:5500
 ```
 
-The API's development CORS policy already accepts any `http://localhost:<port>`
-or `http://127.0.0.1:<port>` origin.
+Open `http://localhost:5500`. The API's development CORS policy accepts
+`http://localhost:<port>` and `http://127.0.0.1:<port>` origins.
 
-## Typical create/update walkthrough
+## Where IDs come from
 
-1. Confirm the **Base URL** (`http://localhost:8000`) and ERP auth mode.
-2. Sign in under **Lookup login** as the business user created below (not the
-   Super Admin) and click **Load reference data**. This fills the ID dropdowns
-   and the "Reference IDs" panel on the right.
-3. Pick an endpoint from the **Endpoints** catalog. The request card shows the
-   method, path and query parameters, then a **typed form** for the body:
-   text, number, date, time, checkbox-style Yes/No and dropdowns for enums and
-   reference IDs. Fields are grouped into collapsible sections, required ones
-   are marked with `*`.
-4. Fill the fields and click **Send request**. Only the fields you filled are
-   sent, so update (PATCH) endpoints behave like true partial updates. Use
-   **Payload preview** to see the exact JSON that will be sent, and **History**
-   to replay a request.
+- **`erp_id`** is the stable identifier assigned by the ERP that owns the
+  record. Use the source system's organization, unit, department, designation,
+  employee, or shift key. Keep it stable across creates, updates, and retries.
+  It goes in the upsert URL and is not generated by HRMS. Do not substitute an
+  HRMS database ID.
+- **HRMS reference IDs** such as `employee_id`, `unit_id`, `shift_id`, and
+  `attendance_record_id` are numeric IDs generated by HRMS. Sign in and load
+  reference data to select them from the dropdowns.
+- **`employee_code`** is a business code supplied by ERP. It is a separate
+  field from `erp_id`, although your ERP may choose to use the same value for
+  both. HRMS does not allow changing `employee_code` after creation.
+- **`erp_record_id`, `erp_event_id`, and `erp_holiday_id`** identify individual
+  source attendance, overtime, and holiday records. Reuse each ID when retrying
+  the same record so HRMS recognizes the retry.
+- Leave change `event_id` values are generated by HRMS. Copy them from the
+  leave changes response into the acknowledgement request.
 
-Recommended dependency order for a fresh database:
+## Typical upsert workflow
+
+1. Confirm the API base URL and ERP auth mode.
+2. Sign in under **Lookup login** as a business user and select **Load reference
+   data** to populate HRMS ID dropdowns.
+3. Pick an endpoint. Its request card shows the method, path, required scope,
+   and any query parameters.
+4. For master-data upserts, enter the source ERP key in the `erp_id` URL
+   parameter. Include the fields named in the endpoint notes on first creation.
+   For later updates, enter only changed fields; blank fields are omitted so
+   stored values remain unchanged. Review **Payload preview** before sending.
+   **History** can replay a previous request.
+
+Recommended order for a fresh database:
 
 ```
-organization → unit → department → designation
-→ shift → employee → shift assignment
-→ attendance records → overtime records → holidays
-→ leave period → leave type → leave balances → leave changes
+organization → unit → department → designation → shift → employee
+→ shift assignment → attendance records → overtime records → holidays
+→ leave period → leave type → leave balances → leave changes/acknowledgement
 ```
 
-## Notes on the API contract
+## API contract notes
 
-- Path parameters must be existing numeric IDs (`unit_id`, `employee_id`,
-  `shift_id`, `type_id`, ...). The dropdowns come straight from the read APIs.
-  Fields whose reference list is not loaded fall back to a plain text input.
-- Select fields marked `— not set —` are omitted from the payload entirely,
-  which is what lets a PATCH change one field without clearing the rest.
-- Attendance bulk uses `{ "records": [ ... ] }`; overtime, holidays, leave
-  balances and the leave acknowledgement use **bare JSON arrays**.
-- Retries are idempotent by `erp_record_id` / `erp_event_id` / `erp_holiday_id`.
-- A `403` usually means the ERP client lacks the endpoint's scope; a `409`
-  usually means a reused nonce or a duplicate record; `422` is validation.
-- HMAC canonical string: `METHOD`, path with query, timestamp, nonce and the
-  SHA-256 body hash, joined by newlines. Nonce is single-use, timestamp must be
-  within `ERP_SIGNATURE_MAX_AGE_SECONDS` (default 300s).
+- HRMS path IDs (`unit_id`, `employee_id`, `shift_id`, assignment IDs, and
+  `type_id`) are numeric lookup values. Upsert `erp_id` path values are stable
+  text keys from the source ERP.
+- Blank fields and selects marked `— not set —` are omitted from request bodies,
+  preserving existing values on partial upserts and PATCH requests.
+- Employee upsert creates its linked login only on first use. Its initial
+  password is ignored on retries; use the explicit password-reset route to
+  change an existing account password.
+- Attendance bulk uses `{ "records": [ ... ] }`. Overtime, holidays, leave
+  balances, and leave acknowledgements use bare JSON arrays.
+- A `403` usually means the ERP client lacks the endpoint scope; `409` can mean
+  a conflicting identifier; `422` indicates invalid or incomplete input.
+- HMAC canonical input is the method, path with query, timestamp, nonce, and
+  SHA-256 body hash joined by newlines. Nonces are single-use and timestamps
+  must be within `ERP_SIGNATURE_MAX_AGE_SECONDS` (default 300 seconds).

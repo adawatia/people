@@ -101,11 +101,11 @@ app = FastAPI(
         },
         {"name": "erp-employees", "description": "ERP-only employee and linked-user provisioning and synchronization."},
         {"name": "erp-organization", "description": "ERP-only updates for the single organization record."},
-        {"name": "erp-units", "description": "ERP-only unit creation, updates, and deletion."},
-        {"name": "erp-departments", "description": "ERP-only department creation, updates, and deletion."},
+        {"name": "erp-units", "description": "ERP-only unit upserts and retirement."},
+        {"name": "erp-departments", "description": "ERP-only department upserts and retirement."},
         {
             "name": "erp-designations",
-            "description": "ERP-only designation creation, updates, activation, and deletion.",
+            "description": "ERP-only designation upserts and retirement.",
         },
         {
             "name": "erp-attendance",
@@ -211,6 +211,7 @@ api_router.include_router(audit.router)
 api_router.include_router(users.router)
 api_router.include_router(notifications.router)
 api_router.include_router(auth_login.router)
+api_router.include_router(auth_login.erp_router)
 api_router.include_router(auth_mfa.router)
 api_router.include_router(auth_sessions.router)
 api_router.include_router(dashboard.router)
