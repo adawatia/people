@@ -12,10 +12,11 @@ from core.database import async_session_maker
 from db.models import AuthSession, User, now_ist
 from routers.erp_employees import upsert_employee_from_erp
 from schemas.designations import DesignationUpdate
-from schemas.employees import EmployeeUpsert
+from schemas.employees import EmployeeCreate, EmployeeUpsert
 from schemas.org import DepartmentUpsert, OrganizationCreate, UnitUpdate
-from schemas.shifts import ShiftUpsert
+from schemas.shifts import ShiftAssignmentCreate, ShiftUpsert
 from services.designation_service import DesignationService
+from services.employee_service import EmployeeService
 from services.org_service import OrgService
 from services.shift_service import ShiftService
 
@@ -127,3 +128,81 @@ async def test_employee_upsert_preserves_password_and_reconciles_login_status():
         await upsert_employee_from_erp(erp_id, EmployeeUpsert(status="ACTIVE"), manager, session)
         await session.refresh(row)
         assert row.is_active is True and row.hashed_password == "saved-hash"
+
+
+@pytest.mark.asyncio
+async def test_inactive_org_parents_block_new_assignments_without_cascading_child_flags():
+    suffix = uuid.uuid4().hex[:8]
+    async with async_session_maker() as session:
+        org_service = OrgService(session)
+        await org_service.upsert_organization(f"org-parent-{suffix}", OrganizationCreate(name=f"Parent Org {suffix}"))
+        unit = await org_service.upsert_unit(
+            f"unit-parent-{suffix}", UnitUpdate(name=f"Parent Unit {suffix}", code=f"U{suffix}")
+        )
+        department = await org_service.upsert_department(
+            f"dept-parent-{suffix}", DepartmentUpsert(name=f"Parent Dept {suffix}", unit_id=unit.id)
+        )
+        employee = await EmployeeService(session).create_employee(
+            EmployeeCreate(
+                employee_code=f"E{suffix}",
+                first_name="Test",
+                unit_id=unit.id,
+                department_id=department.id,
+            )
+        )
+        shift_service = ShiftService(session)
+        shift = await shift_service.upsert_shift(
+            f"shift-parent-{suffix}",
+            ShiftUpsert(name=f"Parent Shift {suffix}", start_time="09:00", end_time="18:00", unit_id=unit.id),
+        )
+        inactive_designation = await DesignationService(session).upsert_designation(
+            f"designation-parent-{suffix}",
+            DesignationUpdate(name=f"Parent Role {suffix}", code=f"R{suffix}", is_active=False),
+        )
+        with pytest.raises(HTTPException) as inactive_designation_assignment:
+            await EmployeeService(session).create_employee(
+                EmployeeCreate(employee_code=f"ED{suffix}", first_name="Test", designation_id=inactive_designation.id)
+            )
+        assert inactive_designation_assignment.value.status_code == 409
+
+        retired_unit = await org_service.upsert_unit(f"unit-parent-{suffix}", UnitUpdate(is_active=False))
+        assert retired_unit.is_active is False
+        assert retired_unit.departments[0].is_active is True
+        listed_department = (await org_service.list_departments(unit.id))[0]
+        assert listed_department.is_active is True and listed_department.unit_is_active is False
+        with pytest.raises(HTTPException) as inactive_department:
+            await org_service.upsert_department(
+                f"dept-new-{suffix}", DepartmentUpsert(name=f"New Dept {suffix}", unit_id=unit.id)
+            )
+        assert inactive_department.value.status_code == 409
+        with pytest.raises(HTTPException) as employee_assignment:
+            await EmployeeService(session).create_employee(
+                EmployeeCreate(
+                    employee_code=f"EU{suffix}",
+                    first_name="Test",
+                    unit_id=unit.id,
+                    department_id=department.id,
+                )
+            )
+        assert employee_assignment.value.status_code == 409
+        with pytest.raises(HTTPException) as department_reactivation:
+            await org_service.upsert_department(f"dept-parent-{suffix}", DepartmentUpsert(is_active=True))
+        assert department_reactivation.value.status_code == 409
+        with pytest.raises(HTTPException) as shift_reactivation:
+            await shift_service.upsert_shift(f"shift-parent-{suffix}", ShiftUpsert(is_active=True))
+        assert shift_reactivation.value.status_code == 409
+        with pytest.raises(HTTPException) as shift_assignment:
+            await shift_service.assign_shift(
+                ShiftAssignmentCreate(employee_id=employee.id, shift_id=shift.id, effective_from=now_ist().date())
+            )
+        assert shift_assignment.value.status_code == 409
+
+        await org_service.upsert_unit(f"unit-parent-{suffix}", UnitUpdate(is_active=True))
+        reactivated_department = await org_service.upsert_department(
+            f"dept-parent-{suffix}", DepartmentUpsert(is_active=True)
+        )
+        assert reactivated_department.is_active is True
+        assignment = await shift_service.assign_shift(
+            ShiftAssignmentCreate(employee_id=employee.id, shift_id=shift.id, effective_from=now_ist().date())
+        )
+        assert assignment.status == "ACTIVE"

@@ -171,7 +171,12 @@ class OrgService:
 
     async def list_departments(self, unit_id: int | None = None) -> list[DepartmentRead]:
         depts = await self.repo.list_departments(unit_id=unit_id)
-        return [DepartmentRead.model_validate(d) for d in depts]
+        return [
+            DepartmentRead.model_validate(dept).model_copy(
+                update={"unit_is_active": dept.unit.is_active if dept.unit else False}
+            )
+            for dept in depts
+        ]
 
     async def get_department(self, dept_id: int) -> Department:
         dept = await self.repo.get_department_by_id(dept_id)
@@ -212,7 +217,12 @@ class OrgService:
                     raise HTTPException(
                         status_code=422, detail="name and unit_id are required when creating a department"
                     )
-                await self.get_unit(data.unit_id)
+                unit = await self.get_unit(data.unit_id)
+                if unit.is_active is False and data.is_active is not False:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="An active department cannot be created under an inactive unit",
+                    )
                 department = await self.repo.create_department(
                     Department(
                         **DepartmentCreate.model_validate(data.model_dump(exclude_unset=True)).model_dump(),
@@ -221,7 +231,24 @@ class OrgService:
                 )
             else:
                 if data.unit_id is not None:
-                    await self.get_unit(data.unit_id)
+                    unit = await self.get_unit(data.unit_id)
+                    will_be_active = data.is_active if data.is_active is not None else department.is_active
+                    if (
+                        unit.is_active is False
+                        and will_be_active
+                        and (data.unit_id != department.unit_id or data.is_active is True)
+                    ):
+                        raise HTTPException(
+                            status_code=409,
+                            detail="An active department cannot be assigned to an inactive unit",
+                        )
+                elif data.is_active is True:
+                    unit = await self.get_unit(department.unit_id)
+                    if unit.is_active is False:
+                        raise HTTPException(
+                            status_code=409,
+                            detail="A department cannot be activated while its unit is inactive",
+                        )
                 for key, value in data.model_dump(exclude_unset=True).items():
                     setattr(department, key, value)
             await self.session.commit()
@@ -229,7 +256,8 @@ class OrgService:
             await self.session.rollback()
             raise HTTPException(status_code=409, detail="Department conflicts with existing master data") from exc
         await self.session.refresh(department)
-        return DepartmentRead.model_validate(department)
+        unit = await self.get_unit(department.unit_id)
+        return DepartmentRead.model_validate(department).model_copy(update={"unit_is_active": unit.is_active})
 
     async def delete_department(self, dept_id: int) -> None:
         dept = await self.get_department(dept_id)

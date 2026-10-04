@@ -75,6 +75,7 @@ class DepartmentRead(DepartmentBase):
     id: int
     erp_id: str | None = None
     unit_id: int
+    unit_is_active: bool | None = None
     created_at: datetime
     updated_at: datetime
     model_config = ConfigDict(from_attributes=True)

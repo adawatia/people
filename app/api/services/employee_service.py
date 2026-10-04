@@ -188,6 +188,8 @@ class EmployeeService:
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail=f"Department with ID {data.department_id} not found",
                 )
+            if not dept.is_active:
+                raise HTTPException(status_code=409, detail=f"Department '{dept.name}' is inactive")
             if unit_id is not None and dept.unit_id != unit_id:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -203,6 +205,8 @@ class EmployeeService:
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail=f"Unit with ID {unit_id} not found",
                 )
+            if not unit.is_active:
+                raise HTTPException(status_code=409, detail=f"Unit '{unit.name}' is inactive")
 
         # 5. Validate Designation
         designation_title = data.designation
@@ -213,12 +217,16 @@ class EmployeeService:
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail=f"Designation with ID {data.designation_id} not found",
                 )
+            if not desig.is_active:
+                raise HTTPException(status_code=409, detail=f"Designation '{desig.name}' is inactive")
             designation_title = desig.name
         elif designation_title:
             # Look up designation by name to link ID if exists
             stmt = select(Designation).where(Designation.name == designation_title)
             desig_match = (await self.session.execute(stmt)).scalar_one_or_none()
             if desig_match:
+                if not desig_match.is_active:
+                    raise HTTPException(status_code=409, detail=f"Designation '{desig_match.name}' is inactive")
                 data.designation_id = desig_match.id
 
         # 6. Validate Reporting Manager
@@ -333,10 +341,32 @@ class EmployeeService:
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail=f"Department with ID {update_data['department_id']} not found",
                 )
+            if not dept.is_active:
+                raise HTTPException(status_code=409, detail=f"Department '{dept.name}' is inactive")
             target_unit = update_data.get("unit_id", emp.unit_id)
             if target_unit is not None and dept.unit_id != target_unit:
                 # auto-align unit to department
                 update_data["unit_id"] = dept.unit_id
+
+        if {"unit_id", "department_id"} & update_data.keys():
+            target_unit_id = update_data.get("unit_id", emp.unit_id)
+            target_department_id = update_data.get("department_id", emp.department_id)
+            if target_department_id is not None:
+                target_department = await self.session.get(Department, target_department_id)
+                if not target_department:
+                    raise HTTPException(status_code=404, detail=f"Department with ID {target_department_id} not found")
+                if not target_department.is_active:
+                    raise HTTPException(status_code=409, detail=f"Department '{target_department.name}' is inactive")
+                if target_unit_id is not None and target_department.unit_id != target_unit_id:
+                    raise HTTPException(status_code=400, detail="Department does not belong to the selected unit")
+                target_unit_id = target_department.unit_id
+                update_data["unit_id"] = target_unit_id
+            if target_unit_id is not None:
+                unit = await self.session.get(Unit, target_unit_id)
+                if not unit:
+                    raise HTTPException(status_code=404, detail=f"Unit with ID {target_unit_id} not found")
+                if not unit.is_active:
+                    raise HTTPException(status_code=409, detail=f"Unit '{unit.name}' is inactive")
 
         if "designation_id" in update_data and update_data["designation_id"] is not None:
             desig = await self.session.get(Designation, update_data["designation_id"])
@@ -345,6 +375,8 @@ class EmployeeService:
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail=f"Designation with ID {update_data['designation_id']} not found",
                 )
+            if not desig.is_active:
+                raise HTTPException(status_code=409, detail=f"Designation '{desig.name}' is inactive")
             update_data["designation"] = desig.name
 
         # Authorization assignment. `role` remains the field the ERP writes, so

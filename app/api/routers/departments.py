@@ -1,11 +1,12 @@
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import current_active_user
 from core.database import get_async_session
 from core.pagination import PaginatedResponse
 from core.sorting import LookupSort
-from db.models import Department, User
+from db.models import Department, Unit, User
 from schemas import DepartmentRead
 from services.lookup_service import LookupService
 from services.org_service import OrgService
@@ -24,7 +25,7 @@ async def list_departments(
     _: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session),
 ) -> PaginatedResponse[DepartmentRead]:
-    return await LookupService(session).list_page(
+    result = await LookupService(session).list_page(
         Department,
         page=page,
         page_size=page_size,
@@ -33,6 +34,14 @@ async def list_departments(
         sort_order=sort_order,
         filters={"unit_id": unit_id},
     )
+    unit_ids = {item.unit_id for item in result["items"]}
+    units = await session.scalars(select(Unit).where(Unit.id.in_(unit_ids))) if unit_ids else []
+    unit_active_by_id = {unit.id: unit.is_active for unit in units}
+    result["items"] = [
+        DepartmentRead.model_validate(item).model_copy(update={"unit_is_active": unit_active_by_id.get(item.unit_id)})
+        for item in result["items"]
+    ]
+    return result
 
 
 @router.get("/{dept_id}", response_model=DepartmentRead)
@@ -43,4 +52,5 @@ async def get_department(
 ) -> DepartmentRead:
     service = OrgService(session)
     dept = await service.get_department(dept_id)
-    return DepartmentRead.model_validate(dept)
+    unit = await session.get(Unit, dept.unit_id)
+    return DepartmentRead.model_validate(dept).model_copy(update={"unit_is_active": unit.is_active if unit else False})

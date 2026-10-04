@@ -61,7 +61,7 @@ class OrgRepository:
     # ── Departments ────────────────────────────────────────────────────────────
 
     async def list_departments(self, unit_id: int | None = None) -> list[Department]:
-        stmt = select(Department).order_by(Department.name)
+        stmt = select(Department).options(selectinload(Department.unit)).order_by(Department.name)
         if unit_id is not None:
             stmt = stmt.where(Department.unit_id == unit_id)
         return list((await self.session.execute(stmt)).scalars().all())

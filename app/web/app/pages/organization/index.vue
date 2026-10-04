@@ -55,6 +55,9 @@ const data = useRetainedData(rawData)
 function unitName(id: number) {
   return `Unit #${id}`
 }
+function departmentIsActive(department: Department) {
+  return department.is_active && department.unit_is_active !== false
+}
 // Structure writes are ERP-owned: this page only reads and renders master data.
 </script>
 
@@ -237,12 +240,18 @@ function unitName(id: number) {
               {{ item.name }}
             </h3><p class="mt-1 text-sm text-muted">
               {{ unitName(item.unit_id) }} · {{ item.code || 'No code' }}
+            </p><p
+              v-if="item.is_active && item.unit_is_active === false"
+              class="mt-1 text-xs font-medium text-warning"
+            >
+              Parent unit inactive
             </p>
           </div><UBadge
-            :color="item.is_active ? 'success' : 'neutral'"
+            :color="departmentIsActive(item) ? 'success' : 'neutral'"
             variant="soft"
+            :title="item.is_active && item.unit_is_active === false ? 'The parent unit is inactive' : undefined"
           >
-            {{ item.is_active ? 'Active' : 'Inactive' }}
+            {{ departmentIsActive(item) ? 'Active' : 'Inactive' }}
           </UBadge>
         </article>
       </div>

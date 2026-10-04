@@ -3,12 +3,12 @@ from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.erp_sync import acquire_erp_upsert_lock
-from db.models import Employee, Shift, ShiftAssignment, Unit, now_ist
+from db.models import Department, Employee, Shift, ShiftAssignment, Unit, now_ist
 from repositories.employee_repo import EmployeeRepository
 from repositories.shift_repo import ShiftRepository
 from schemas.shifts import (
@@ -99,6 +99,12 @@ class ShiftService:
 
     async def create_shift(self, data: ShiftCreate) -> ShiftRead:
         """Create a shift; start > end (e.g. 22:00 → 06:00) means a night shift."""
+        if data.unit_id is not None:
+            unit = await self.session.get(Unit, data.unit_id)
+            if unit is None:
+                raise HTTPException(status_code=404, detail=f"Unit {data.unit_id} not found")
+            if data.is_active and not unit.is_active:
+                raise HTTPException(status_code=409, detail=f"An active shift cannot be assigned to inactive unit '{unit.name}'")
         payload = self._shift_payload(data)
         shift = Shift(**payload)
         created = await self.repo.create_shift(shift)
@@ -127,6 +133,8 @@ class ShiftService:
     async def update_shift(self, shift_id: int, data: ShiftUpdate) -> ShiftRead:
         shift = await self.get_shift(shift_id)
         update_data = data.model_dump(exclude_unset=True)
+        if update_data.get("is_active") is True:
+            await self._ensure_active_unit(shift.unit_id)
 
         if "start_time" in update_data:
             update_data["start_time"] = self.parse_time(update_data["start_time"])
@@ -148,6 +156,46 @@ class ShiftService:
         await self.session.commit()
         await self.session.refresh(shift)
         return ShiftRead.model_validate(shift)
+
+    async def _ensure_active_unit(self, unit_id: int | None) -> Unit | None:
+        if unit_id is None:
+            return None
+        unit = await self.session.get(Unit, unit_id)
+        if unit is None:
+            raise HTTPException(status_code=404, detail=f"Unit {unit_id} not found")
+        if not unit.is_active:
+            raise HTTPException(status_code=409, detail=f"Unit '{unit.name}' is inactive")
+        return unit
+
+    async def _ensure_active_department(self, department_id: int) -> Department:
+        department = await self.session.get(Department, department_id)
+        if department is None:
+            raise HTTPException(status_code=404, detail=f"Department {department_id} not found")
+        if not department.is_active:
+            raise HTTPException(status_code=409, detail=f"Department '{department.name}' is inactive")
+        await self._ensure_active_unit(department.unit_id)
+        return department
+
+    async def _ensure_active_shift_unit(self, shift: Shift) -> None:
+        if not shift.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Shift '{shift.name}' is inactive and cannot be assigned",
+            )
+        await self._ensure_active_unit(shift.unit_id)
+
+    async def _ensure_employee_operational(self, employee: Employee) -> None:
+        if employee.status != "ACTIVE":
+            raise HTTPException(status_code=409, detail="An inactive employee cannot receive a shift assignment")
+        if employee.department is not None and not employee.department.is_active:
+            raise HTTPException(status_code=409, detail=f"Department '{employee.department.name}' is inactive")
+        unit = employee.unit
+        if employee.unit_id is not None and unit is None:
+            unit = await self.session.get(Unit, employee.unit_id)
+        if unit is not None and not unit.is_active:
+            raise HTTPException(status_code=409, detail=f"Unit '{unit.name}' is inactive")
+        if employee.department is not None and employee.department.unit_id != employee.unit_id:
+            await self._ensure_active_unit(employee.department.unit_id)
 
     async def upsert_shift(self, erp_id: str, data: ShiftUpsert) -> ShiftRead:
         await acquire_erp_upsert_lock(self.session, "shift", erp_id)
@@ -172,12 +220,21 @@ class ShiftService:
                 raise HTTPException(status_code=422, detail=f"{field} cannot be null")
         if "name" in data.model_fields_set and not data.name:
             raise HTTPException(status_code=422, detail="name cannot be empty")
-        if data.unit_id is not None and await self.session.get(Unit, data.unit_id) is None:
-            raise HTTPException(status_code=404, detail=f"Unit {data.unit_id} not found")
         shift = await self.repo.get_by_erp_id(erp_id)
+        fields = data.model_dump(exclude_unset=True)
+        target_unit_id = fields.get("unit_id", shift.unit_id if shift is not None else None)
+        target_active = fields.get("is_active", shift.is_active if shift is not None else True)
+        unit = await self.session.get(Unit, target_unit_id) if target_unit_id is not None else None
+        if target_unit_id is not None and unit is None:
+            raise HTTPException(status_code=404, detail=f"Unit {target_unit_id} not found")
+        activation_or_move = shift is None or (
+            ("is_active" in fields and fields["is_active"] is True)
+            or ("unit_id" in fields and fields["unit_id"] != shift.unit_id)
+        )
+        if target_active and activation_or_move and unit is not None and not unit.is_active:
+            raise HTTPException(status_code=409, detail=f"An active shift cannot be assigned to inactive unit '{unit.name}'")
         try:
             if shift is None:
-                fields = data.model_dump(exclude_unset=True)
                 if not fields.get("name") or not fields.get("start_time") or not fields.get("end_time"):
                     raise HTTPException(
                         status_code=422, detail="name, start_time and end_time are required when creating a shift"
@@ -185,7 +242,6 @@ class ShiftService:
                 shift = Shift(erp_id=erp_id, **self._shift_payload(ShiftCreate.model_validate(fields)))
                 await self.repo.create_shift(shift)
             else:
-                fields = data.model_dump(exclude_unset=True)
                 if "start_time" in fields:
                     fields["start_time"] = self.parse_time(fields["start_time"])
                 if "end_time" in fields:
@@ -241,12 +297,11 @@ class ShiftService:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Employee with ID {data.employee_id} not found",
             )
+        await self._ensure_employee_operational(emp)
         shift = await self.get_shift(data.shift_id)
-        if not shift.is_active:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Shift '{shift.name}' is inactive and cannot be assigned",
-            )
+        await self._ensure_active_shift_unit(shift)
+        if shift.unit_id is not None and emp.unit_id != shift.unit_id:
+            raise HTTPException(status_code=400, detail="Shift unit does not match the employee's unit")
 
         if data.effective_to and data.effective_to < data.effective_from:
             raise HTTPException(
@@ -292,16 +347,28 @@ class ShiftService:
         assigned_by_user_id: int | None = None,
     ) -> list[ShiftAssignmentRead]:
         shift = await self.get_shift(data.shift_id)
-        if not shift.is_active:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Shift '{shift.name}' is inactive and cannot be assigned",
-            )
+        await self._ensure_active_shift_unit(shift)
+
+        if data.unit_id is not None:
+            await self._ensure_active_unit(data.unit_id)
+        if data.department_id is not None:
+            department = await self._ensure_active_department(data.department_id)
+            if data.unit_id is not None and department.unit_id != data.unit_id:
+                raise HTTPException(status_code=400, detail="Department does not belong to the selected unit")
 
         # Resolve employee IDs
         emp_ids = set(data.employee_ids)
         if data.department_id is not None or data.unit_id is not None:
-            stmt = select(Employee.id).where(Employee.status == "ACTIVE")
+            stmt = (
+                select(Employee.id)
+                .outerjoin(Unit, Employee.unit_id == Unit.id)
+                .outerjoin(Department, Employee.department_id == Department.id)
+                .where(
+                    Employee.status == "ACTIVE",
+                    or_(Employee.unit_id.is_(None), Unit.is_active.is_(True)),
+                    or_(Employee.department_id.is_(None), Department.is_active.is_(True)),
+                )
+            )
             if data.department_id is not None:
                 stmt = stmt.where(Employee.department_id == data.department_id)
             if data.unit_id is not None:
@@ -314,6 +381,16 @@ class ShiftService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="No employees specified or matched for bulk shift assignment",
             )
+
+        employees = await self.employee_repo.get_by_ids(sorted(emp_ids))
+        found_ids = {employee.id for employee in employees}
+        missing_ids = sorted(emp_ids - found_ids)
+        if missing_ids:
+            raise HTTPException(status_code=404, detail=f"Employees not found: {missing_ids}")
+        for employee in employees:
+            await self._ensure_employee_operational(employee)
+            if shift.unit_id is not None and employee.unit_id != shift.unit_id:
+                raise HTTPException(status_code=400, detail="Shift unit does not match every selected employee")
 
         results = []
         for emp_id in emp_ids:

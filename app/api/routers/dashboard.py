@@ -131,7 +131,12 @@ async def get_technical_metrics(
         users=await session.scalar(select(func.count(User.id)).where(User.is_superuser.is_(False))) or 0,
         employees=await session.scalar(select(func.count(Employee.id)).where(Employee.status == "ACTIVE")) or 0,
         units=await session.scalar(select(func.count(Unit.id)).where(Unit.is_active.is_(True))) or 0,
-        departments=await session.scalar(select(func.count(Department.id)).where(Department.is_active.is_(True))) or 0,
+        departments=await session.scalar(
+            select(func.count(Department.id))
+            .join(Unit, Department.unit_id == Unit.id)
+            .where(Department.is_active.is_(True), Unit.is_active.is_(True))
+        )
+        or 0,
         designations=await session.scalar(select(func.count(Designation.id)).where(Designation.is_active.is_(True)))
         or 0,
     )

@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from core.pagination import employee_search, ordered, paginate
-from db.models import Employee, Shift, ShiftAssignment, now_ist
+from db.models import Employee, Shift, ShiftAssignment, Unit, now_ist
 
 
 class ShiftRepository:
@@ -25,9 +25,14 @@ class ShiftRepository:
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
     async def list_shifts(self, unit_id: int | None = None, is_active: bool | None = True) -> list[Shift]:
-        stmt = select(Shift)
-        if is_active is not None:
-            stmt = stmt.where(Shift.is_active == is_active)
+        stmt = select(Shift).outerjoin(Unit, Shift.unit_id == Unit.id)
+        if is_active is True:
+            stmt = stmt.where(
+                Shift.is_active.is_(True),
+                or_(Shift.unit_id.is_(None), Unit.is_active.is_(True)),
+            )
+        elif is_active is False:
+            stmt = stmt.where(Shift.is_active.is_(False))
         if unit_id is not None:
             stmt = stmt.where(or_(Shift.unit_id == unit_id, Shift.unit_id.is_(None)))
         stmt = stmt.order_by(Shift.name)
@@ -122,7 +127,12 @@ class ShiftRepository:
         )
         stmt = (
             select(Shift)
-            .where(or_(Shift.id.in_(assignment_shift_ids), Shift.id.in_(default_shift_id)))
+            .outerjoin(Unit, Shift.unit_id == Unit.id)
+            .where(
+                or_(Shift.id.in_(assignment_shift_ids), Shift.id.in_(default_shift_id)),
+                Shift.is_active.is_(True),
+                or_(Shift.unit_id.is_(None), Unit.is_active.is_(True)),
+            )
             .order_by(Shift.name, Shift.id)
         )
         return list((await self.session.execute(stmt)).scalars().all())
@@ -254,7 +264,7 @@ class ShiftRepository:
         sort_by=None,
         sort_order="asc",
     ):
-        query = select(Shift)
+        query = select(Shift).outerjoin(Unit, Shift.unit_id == Unit.id)
         if not scope.organization:
             employee_ids = select(Employee.id).where(
                 or_(
@@ -277,8 +287,13 @@ class ShiftRepository:
             query = query.where(or_(Shift.id.in_(assigned), Shift.id.in_(defaults)))
         if unit_id is not None:
             query = query.where(or_(Shift.unit_id == unit_id, Shift.unit_id.is_(None)))
-        if is_active is not None:
-            query = query.where(Shift.is_active == is_active)
+        if is_active is True:
+            query = query.where(
+                Shift.is_active.is_(True),
+                or_(Shift.unit_id.is_(None), Unit.is_active.is_(True)),
+            )
+        elif is_active is False:
+            query = query.where(Shift.is_active.is_(False))
         if search:
             query = query.where(Shift.name.icontains(search.strip(), autoescape=True))
         query = ordered(

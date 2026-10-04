@@ -556,9 +556,9 @@ Config: `create_period`, `create_type`, `update_type`, `allocate_leaves` (writes
 | `PATCH /employees/{id}/deactivate` / `/activate` | Lifecycle with optional `exit_date`/`exit_reason` | — |
 | `POST /employees/{id}/password-reset` (in `auth_login.py`) | Set temporary password | revokes all refresh sessions; sets `must_change_password` |
 | `PUT /organization/{erp_id}` | Idempotently upsert the single ERP-owned organization record | — |
-| `PUT /units/by-erp-id/{erp_id}`, `/departments/by-erp-id/{erp_id}`, `/designations/by-erp-id/{erp_id}` | Idempotent master-data upserts | Partial updates preserve omitted fields; `is_active=false` retires a record without deleting history |
-| `PUT /shifts/by-erp-id/{erp_id}` | Shift definition upsert | Partial updates preserve omitted fields |
-| `POST /shifts/assignments`, `/assignments/bulk`, `PATCH /assignments/{id}/cancel` | Assign/rotate shifts | overlap prevention; batching added for bulk |
+| `PUT /units/by-erp-id/{erp_id}`, `/departments/by-erp-id/{erp_id}`, `/designations/by-erp-id/{erp_id}` | Idempotent master-data upserts | Partial updates preserve omitted fields; `is_active=false` retires a record without deleting history. A department is operational only when both it and its unit are active; new or reactivated departments cannot target an inactive unit. |
+| `PUT /shifts/by-erp-id/{erp_id}` | Shift definition upsert | Partial updates preserve omitted fields; an active unit-scoped shift requires an active unit. |
+| `POST /shifts/assignments`, `/assignments/bulk`, `PATCH /assignments/{id}/cancel` | Assign/rotate shifts | overlap prevention; batching added for bulk; new assignments require an active shift/unit, active employee, and active employee unit/department. |
 | `POST /attendance/records/bulk` | Ingest **processed** attendance | `erp_record_id` makes re-sends idempotent; per-item `accepted`/`duplicates`/`failed` result |
 | `POST /holidays/bulk` | Sync holidays per unit | keyed by `erp_holiday_id` |
 | `POST /overtime/records/bulk` | Sync overtime records | keyed by `erp_event_id` |
