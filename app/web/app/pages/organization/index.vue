@@ -139,7 +139,7 @@ function unitName(id: number) {
         class="people-card p-5"
       >
         <div class="flex items-start justify-between">
-          <span class="grid size-10 place-items-center rounded-xl bg-[var(--people-lavender)]"><UIcon name="i-lucide-badge" /></span><UBadge
+          <span class="grid size-10 place-items-center rounded-xl bg-[var(--people-forest)]"><UIcon name="i-lucide-badge" /></span><UBadge
             :color="item.is_active ? 'success' : 'neutral'"
             variant="soft"
           >

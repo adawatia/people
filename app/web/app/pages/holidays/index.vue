@@ -171,11 +171,11 @@ const summaryItems = computed(() => [
             :key="item.id"
             type="button"
             class="flex min-h-11 w-full items-center gap-3 border-b border-[var(--people-border)] p-4 text-left last:border-0"
-            :class="selectedId === item.id ? 'bg-[var(--people-lavender)]' : 'hover:bg-muted/5'"
+            :class="selectedId === item.id ? 'bg-[var(--people-forest)]' : 'hover:bg-muted/5'"
             :aria-pressed="selectedId === item.id"
             @click="selectedId = item.id"
           >
-            <span class="grid size-10 shrink-0 place-items-center rounded-xl bg-[var(--people-lavender)] text-[var(--people-lavender-ink)]"><UIcon name="i-lucide-calendar-days" /></span>
+            <span class="grid size-10 shrink-0 place-items-center rounded-xl bg-[var(--people-forest)] text-[var(--people-forest-ink)]"><UIcon name="i-lucide-calendar-days" /></span>
             <span class="min-w-0 flex-1"><span class="block break-words font-medium">{{ item.name }}</span><span class="mt-1 block text-xs text-muted">{{ weeklyOffLabel(item.weekly_off_day) }} weekly off · {{ item.holidays.length }} day{{ item.holidays.length === 1 ? '' : 's' }}</span></span>
             <UBadge
               v-if="item.is_default"
@@ -279,7 +279,7 @@ const summaryItems = computed(() => [
                       v-for="group in monthGroups"
                       :key="group.key"
                     >
-                      <tr class="bg-[var(--people-lavender)]/40">
+                      <tr class="bg-[var(--people-forest)]/40">
                         <td
                           colspan="5"
                           class="px-6 py-2 text-xs font-semibold uppercase tracking-wide text-muted"
@@ -322,7 +322,7 @@ const summaryItems = computed(() => [
                   v-for="group in monthGroups"
                   :key="group.key"
                 >
-                  <p class="bg-[var(--people-lavender)]/40 px-5 py-2 text-xs font-semibold uppercase tracking-wide text-muted">
+                  <p class="bg-[var(--people-forest)]/40 px-5 py-2 text-xs font-semibold uppercase tracking-wide text-muted">
                     {{ group.label }}
                   </p>
                   <article

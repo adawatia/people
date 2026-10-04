@@ -44,7 +44,7 @@ async function clear() {
       class="flex items-center justify-between gap-3 border-b border-[var(--people-border)] px-4 py-3 sm:px-5"
     >
       <div class="flex min-w-0 items-center gap-2">
-        <span class="grid size-8 shrink-0 place-items-center rounded-lg bg-[var(--people-lavender)] text-primary">
+        <span class="grid size-8 shrink-0 place-items-center rounded-lg bg-[var(--people-forest)] text-primary">
           <UIcon
             name="i-lucide-list-filter"
             class="size-4"

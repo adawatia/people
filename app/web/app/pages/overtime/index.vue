@@ -40,7 +40,7 @@ const statusColor = (value: string) => ({ PENDING: 'warning', APPROVED: 'success
 const overtimeChartOption = computed<ECOption>(() => ({
   backgroundColor: 'transparent',
   animation: false,
-  textStyle: { color: chartTheme.value ? '#beb2ce' : '#665e70' },
+  textStyle: { color: chartTheme.value ? '#afc0b3' : '#617168' },
   tooltip: { confine: true, trigger: 'axis', valueFormatter: value => `${value} hours` },
   grid: { top: 20, right: 16, bottom: 28, left: 42 },
   xAxis: { type: 'category', data: ['Calculated', 'Approved'] },
@@ -50,8 +50,8 @@ const overtimeChartOption = computed<ECOption>(() => ({
     type: 'bar',
     barMaxWidth: 64,
     data: [
-      { value: Number(((data.value?.summary?.total_calculated_minutes || 0) / 60).toFixed(1)), itemStyle: { color: chartTheme.value ? '#c9b2ff' : '#5637a5' } },
-      { value: Number(((data.value?.summary?.total_approved_minutes || 0) / 60).toFixed(1)), itemStyle: { color: chartTheme.value ? '#94d8b4' : '#226747' } }
+      { value: Number(((data.value?.summary?.total_calculated_minutes || 0) / 60).toFixed(1)), itemStyle: { color: chartTheme.value ? '#b4e6c3' : '#287448' } },
+      { value: Number(((data.value?.summary?.total_approved_minutes || 0) / 60).toFixed(1)), itemStyle: { color: chartTheme.value ? '#8ad5a4' : '#1d613a' } }
     ]
   }]
 }))

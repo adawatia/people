@@ -291,7 +291,7 @@ async function rejectRequest() {
           />
         </div>
         <div class="p-5 sm:p-6">
-          <div class="grid gap-3 rounded-2xl bg-[var(--people-lavender)] p-4 sm:grid-cols-3">
+          <div class="grid gap-3 rounded-2xl bg-[var(--people-forest)] p-4 sm:grid-cols-3">
             <div>
               <p class="text-xs font-semibold uppercase tracking-wide text-muted">
                 Leave type

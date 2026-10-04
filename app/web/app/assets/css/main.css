@@ -6,22 +6,22 @@
 @import "./pages.css";
 
 @theme static {
-  --color-brand-50: #f5f3ff;
-  --color-brand-100: #ede9fe;
-  --color-brand-200: #ddd6fe;
-  --color-brand-300: #c4b5fd;
-  --color-brand-400: #a78bfa;
-  --color-brand-500: #6c4df6;
-  --color-brand-600: #6040dc;
-  --color-brand-700: #5032bd;
-  --color-brand-800: #422b98;
-  --color-brand-900: #352473;
-  --color-brand-950: #231a46;
+  --color-brand-50: #f0f7f2;
+  --color-brand-100: #dceee1;
+  --color-brand-200: #bdddc5;
+  --color-brand-300: #93c9a2;
+  --color-brand-400: #65ad7b;
+  --color-brand-500: #438f5e;
+  --color-brand-600: #287448;
+  --color-brand-700: #1d613a;
+  --color-brand-800: #174d2f;
+  --color-brand-900: #123f27;
+  --color-brand-950: #092617;
   --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
 :root {
-  --ui-primary: #5637a5;
+  --ui-primary: #287448;
   --ui-bg: var(--people-surface);
   --ui-bg-muted: var(--people-canvas);
   --ui-bg-elevated: var(--people-surface);
@@ -30,27 +30,27 @@
   --ui-text-highlighted: var(--people-text);
   --ui-text-muted: var(--people-muted);
   --ui-text-dimmed: var(--people-muted);
-  --ui-success: #226747;
-  --ui-warning: #805900;
-  --ui-error: #a52b46;
-  --ui-info: #345a96;
-  --people-canvas: #faf8f4;
-  --people-surface: #fffdfa;
-  --people-border: #ded8e5;
-  --people-text: #292335;
-  --people-muted: #665e70;
-  --people-lavender: #eee7f7;
-  --people-mint: #e7f4ed;
-  --people-peach: #f9eee4;
-  --people-blue: #e8eff9;
-  --people-yellow: #fff3d6;
-  --people-rose: #fce9ed;
-  --people-blue-ink: #345a96;
-  --people-mint-ink: #226747;
-  --people-lavender-ink: #5637a5;
-  --people-peach-ink: #925025;
-  --people-yellow-ink: #805900;
-  --people-rose-ink: #a52b46;
+  --ui-success: #287448;
+  --ui-warning: #a16207;
+  --ui-error: #b42336;
+  --ui-info: #336b83;
+  --people-canvas: #f7f9f7;
+  --people-surface: #ffffff;
+  --people-border: #d7e0d9;
+  --people-text: #1b2820;
+  --people-muted: #617168;
+  --people-forest: #e2f0e6;
+  --people-mint: #e7f3e9;
+  --people-peach: #fff1e6;
+  --people-blue: #e8f1ee;
+  --people-yellow: #fff7df;
+  --people-rose: #fff0f2;
+  --people-blue-ink: #336b83;
+  --people-mint-ink: #1d613a;
+  --people-forest-ink: #1d613a;
+  --people-peach-ink: #9a4f0a;
+  --people-yellow-ink: #925d07;
+  --people-rose-ink: #b42336;
 }
 
 html, body { background: var(--people-canvas); }
@@ -72,39 +72,39 @@ button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
 
 @utility people-icon--blue { background: var(--people-blue); color: var(--people-blue-ink); }
 @utility people-icon--mint { background: var(--people-mint); color: var(--people-mint-ink); }
-@utility people-icon--lavender { background: var(--people-lavender); color: var(--people-lavender-ink); }
+@utility people-icon--forest { background: var(--people-forest); color: var(--people-forest-ink); }
 @utility people-icon--peach { background: var(--people-peach); color: var(--people-peach-ink); }
 @utility people-icon--yellow { background: var(--people-yellow); color: var(--people-yellow-ink); }
 @utility people-icon--rose { background: var(--people-rose); color: var(--people-rose-ink); }
 
 .dark {
-  --ui-primary: #c9b2ff;
-  --ui-success: #94d8b4;
-  --ui-warning: #efd184;
-  --ui-error: #f2acbd;
-  --ui-info: #abc9f5;
-  --people-canvas: #1c1923;
-  --people-surface: #25202e;
-  --people-border: #51465e;
-  --people-text: #f7f0e9;
-  --people-muted: #beb2ce;
-  --people-lavender: #30264b;
-  --people-mint: #19362c;
-  --people-peach: #382b22;
-  --people-blue: #22334e;
-  --people-yellow: #3b321c;
-  --people-rose: #3e2631;
-  --people-blue-ink: #abc9f5;
-  --people-mint-ink: #94d8b4;
-  --people-lavender-ink: #c4b5fd;
-  --people-peach-ink: #ebbb94;
-  --people-yellow-ink: #efd184;
-  --people-rose-ink: #f2acbd;
+  --ui-primary: #8ad5a4;
+  --ui-success: #8ad5a4;
+  --ui-warning: #fcd34d;
+  --ui-error: #fda4af;
+  --ui-info: #9bc9da;
+  --people-canvas: #111a14;
+  --people-surface: #18241b;
+  --people-border: #37483b;
+  --people-text: #edf5ee;
+  --people-muted: #afc0b3;
+  --people-forest: #1c3b28;
+  --people-mint: #1b4029;
+  --people-peach: #422d1a;
+  --people-blue: #1b3537;
+  --people-yellow: #3d3215;
+  --people-rose: #40212a;
+  --people-blue-ink: #9bc9da;
+  --people-mint-ink: #8ad5a4;
+  --people-forest-ink: #8ad5a4;
+  --people-peach-ink: #fdba74;
+  --people-yellow-ink: #fcd34d;
+  --people-rose-ink: #fda4af;
 }
 
 :focus-visible { outline: 2px solid var(--ui-primary); outline-offset: 3px; }
 
-::selection { background: var(--people-lavender); color: var(--people-lavender-ink); }
+::selection { background: var(--people-forest); color: var(--people-forest-ink); }
 input, textarea { caret-color: var(--ui-primary); }
 html { scrollbar-color: var(--people-muted) var(--people-canvas); }
 

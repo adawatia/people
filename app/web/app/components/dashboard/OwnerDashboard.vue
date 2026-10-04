@@ -87,7 +87,7 @@ const metrics = computed(() => [
 ])
 const trendOption = computed<ECOption>(() => {
   const dark = mode.value === 'dark'
-  const text = dark ? '#beb2ce' : '#665e70'
+  const text = dark ? '#afc0b3' : '#617168'
   return {
     animation: false,
     backgroundColor: 'transparent',
@@ -96,11 +96,11 @@ const trendOption = computed<ECOption>(() => {
     legend: { bottom: 0, textStyle: { color: text }, itemWidth: 12, itemHeight: 12 },
     grid: { left: 36, right: 12, top: 16, bottom: 76, containLabel: true },
     xAxis: { type: 'category', axisLabel: { color: text, hideOverlap: true }, data: data.value?.trend.map(item => new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short' }).format(new Date(`${item.date}T00:00:00`))) || [] },
-    yAxis: { type: 'value', minInterval: 1, axisLabel: { color: text }, splitLine: { lineStyle: { color: dark ? '#51465e' : '#ded8e5' } } },
+    yAxis: { type: 'value', minInterval: 1, axisLabel: { color: text }, splitLine: { lineStyle: { color: dark ? '#37483b' : '#d7e0d9' } } },
     series: [
-      { name: 'Present', type: 'bar', stack: 'attendance', data: data.value?.trend.map(item => item.present) || [], itemStyle: { color: dark ? '#94d8b4' : '#226747' } },
-      { name: 'Absent', type: 'bar', stack: 'attendance', data: data.value?.trend.map(item => item.absent) || [], itemStyle: { color: dark ? '#f2acbd' : '#a52b46' } },
-      { name: 'On leave', type: 'bar', stack: 'attendance', data: data.value?.trend.map(item => item.on_leave) || [], itemStyle: { color: dark ? '#c4b5fd' : '#5637a5' } },
+      { name: 'Present', type: 'bar', stack: 'attendance', data: data.value?.trend.map(item => item.present) || [], itemStyle: { color: dark ? '#8ad5a4' : '#1d613a' } },
+      { name: 'Absent', type: 'bar', stack: 'attendance', data: data.value?.trend.map(item => item.absent) || [], itemStyle: { color: dark ? '#fda4af' : '#b42336' } },
+      { name: 'On leave', type: 'bar', stack: 'attendance', data: data.value?.trend.map(item => item.on_leave) || [], itemStyle: { color: dark ? '#b4e6c3' : '#287448' } },
       { name: 'Off / holiday', type: 'bar', stack: 'attendance', data: data.value?.trend.map(item => item.weekly_off_or_holiday) || [], itemStyle: { color: text } }
     ]
   }

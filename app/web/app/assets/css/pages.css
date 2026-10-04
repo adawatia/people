@@ -8,7 +8,7 @@
 .people-page :is(button, a, input, select, textarea, [role=combobox]):focus-visible { outline: 2px solid var(--ui-primary); outline-offset: 3px; }
 .people-page :is(button, a, input, textarea, select, [role=combobox]) { scroll-margin-block: 100px; }
 .people-page .people-card, .people-page [data-slot=root]:has(> [data-slot=body]) { border-radius: 12px; background: var(--people-surface); box-shadow: none; }
-.people-page .people-icon { background: var(--people-lavender); color: var(--people-lavender-ink); border-radius: 8px; }
+.people-page .people-icon { background: var(--people-forest); color: var(--people-forest-ink); border-radius: 8px; }
 .people-page :is(table) { font-size: 13px; line-height: 1.6; }
 .people-page table tbody tr { height: 52px; }
 .people-page table tbody :is(td, th) { white-space: normal; overflow-wrap: anywhere; }
@@ -36,11 +36,11 @@
 .people-page .people-card > .people-card { border: 0; border-radius: 0; }
 .people-page [data-page-tabs] { gap: 8px; margin-top: 24px; padding-bottom: 8px; border-color: var(--people-border); }
 .people-page [data-page-tabs] > button { border: 0; border-radius: 8px; padding: 10px 14px; color: var(--people-muted); font-size: 13px; white-space: nowrap; }
-.people-page [data-page-tabs] > button[aria-pressed=true] { color: var(--people-lavender-ink); background: var(--people-lavender); }
+.people-page [data-page-tabs] > button[aria-pressed=true] { color: var(--people-forest-ink); background: var(--people-forest); }
 .people-page [data-page-tabs] > button:hover { background: var(--people-canvas); color: var(--people-text); }
-.people-page [data-page-tabs] > button[aria-pressed=true]:hover { background: var(--people-lavender); color: var(--people-lavender-ink); }
+.people-page [data-page-tabs] > button[aria-pressed=true]:hover { background: var(--people-forest); color: var(--people-forest-ink); }
 .people-page button[class*="shadow-sm"] { box-shadow: none; }
-.people-page button[aria-pressed=true][class*="shadow-sm"] { background: var(--people-lavender); color: var(--people-lavender-ink); }
+.people-page button[aria-pressed=true][class*="shadow-sm"] { background: var(--people-forest); color: var(--people-forest-ink); }
 .people-page table tbody tr:hover { background: var(--people-canvas); }
 .people-page table :is(td, th)[class*="text-right"] { font-variant-numeric: tabular-nums; }
 .people-page [data-leave-balances] { overflow: hidden; border: 1px solid var(--people-border); border-radius: 12px; background: var(--people-surface); }

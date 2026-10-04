@@ -18,7 +18,7 @@
 .platform-nav-group h2 { padding: 0 12px 8px; color: var(--people-muted); font-size: 12px; font-weight: 600; }
 .platform-nav-link { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 10px 12px; border-radius: 8px; color: var(--people-muted); font-size: 14px; font-weight: 500; line-height: 1.4; text-decoration: none; }
 .platform-nav-link:hover { background: var(--people-canvas); color: var(--people-text); }
-.platform-nav-link[aria-current=page] { background: var(--people-lavender); color: var(--people-lavender-ink); font-weight: 600; }
+.platform-nav-link[aria-current=page] { background: var(--people-forest); color: var(--people-forest-ink); font-weight: 600; }
 .platform-account { margin-top: 16px; padding: 12px 4px 0; border-top: 1px solid var(--people-border); }
 .platform-profile { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 4px 8px; border-radius: 8px; }
 .platform-profile:hover { background: var(--people-canvas); }
@@ -29,13 +29,13 @@
 .platform-header { position: sticky; top: 0; z-index: 30; display: flex; align-items: center; gap: 12px; min-height: 72px; padding: 0 20px; border-bottom: 1px solid var(--people-border); background: var(--people-surface); }
 .platform-header-actions { display: flex; align-items: center; gap: 4px; }
 .platform-shell .platform-icon-button { display: inline-flex; align-items: center; justify-content: center; width: 44px; min-width: 44px; height: 44px; padding: 0; gap: 0; flex-shrink: 0; }
-.platform-icon-button[aria-current=page] { color: var(--people-lavender-ink); background: var(--people-lavender); }
+.platform-icon-button[aria-current=page] { color: var(--people-forest-ink); background: var(--people-forest); }
 .platform-shell .platform-search-trigger { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; gap: 10px; padding: 0; }
 .platform-search-label, .platform-search-shortcut { display: none; }
 .platform-content { width: 100%; max-width: 1536px; margin: 0 auto; padding: 28px 20px 104px; min-width: 0; }
 .platform-search { padding: 4px; }
 .platform-mobile-nav { position: fixed; inset: auto 0 0; z-index: 40; padding: 8px 8px max(8px, env(safe-area-inset-bottom)); border-top: 1px solid var(--people-border); background: var(--people-surface); }
-.platform-mobile-nav a[aria-current=page] { color: var(--people-lavender-ink); background: var(--people-lavender); }
+.platform-mobile-nav a[aria-current=page] { color: var(--people-forest-ink); background: var(--people-forest); }
 .platform-mobile-links { display: grid; gap: 4px; }
 .platform-mobile-brand { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; }
 .platform-mobile-brand .platform-brand-symbol { width: 32px; height: 32px; }
@@ -57,11 +57,11 @@
 .platform-sidebar-heading { display: flex; align-items: center; justify-content: space-between; gap: 4px; }
 .platform-sidebar-heading .platform-brand-link { padding: 0 4px; }
 .platform-account-actions { gap: 8px; margin-top: 0; }
-.platform-shell .platform-sign-out { flex: 1; min-height: 44px; justify-content: center; gap: 8px; border: 1px solid var(--people-lavender-ink); color: var(--people-lavender-ink); background: var(--people-lavender); }
+.platform-shell .platform-sign-out { flex: 1; min-height: 44px; justify-content: center; gap: 8px; border: 1px solid var(--people-forest-ink); color: var(--people-forest-ink); background: var(--people-forest); }
 .platform-sign-out:hover { background: var(--people-surface); }
-.platform-mobile-sign-out { width: 100%; min-height: 48px; justify-content: center; border: 1px solid var(--people-lavender-ink); color: var(--people-lavender-ink); background: var(--people-lavender); }
+.platform-mobile-sign-out { width: 100%; min-height: 48px; justify-content: center; border: 1px solid var(--people-forest-ink); color: var(--people-forest-ink); background: var(--people-forest); }
 .platform-mobile-sign-out:hover { background: var(--people-surface); }
-.platform-mobile-nav button[data-selected=true] { background: var(--people-lavender); color: var(--people-lavender-ink); }
+.platform-mobile-nav button[data-selected=true] { background: var(--people-forest); color: var(--people-forest-ink); }
 .platform-mobile-nav a, .platform-mobile-nav button { min-width: 0; text-align: center; }
 .platform-shell--collapsed { --platform-sidebar-width: 76px; }
 .platform-shell--collapsed .platform-sidebar { padding-inline: 12px; }

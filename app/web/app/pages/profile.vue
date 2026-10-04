@@ -66,7 +66,7 @@ const details = computed(() => [
         <UAvatar
           :text="auth.initials.value"
           size="3xl"
-          class="shrink-0 ring-4 ring-[var(--people-lavender)]"
+          class="shrink-0 ring-4 ring-[var(--people-forest)]"
         />
         <div class="min-w-0 flex-1">
           <div class="flex flex-wrap items-center gap-3">

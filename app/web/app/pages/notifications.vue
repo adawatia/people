@@ -136,11 +136,11 @@ async function markAll() {
           :key="item.notification_id"
           type="button"
           class="flex w-full gap-4 p-5 text-left transition-colors hover:bg-muted/5 sm:px-6"
-          :class="!item.is_read && 'bg-[var(--people-lavender)]'"
+          :class="!item.is_read && 'bg-[var(--people-forest)]'"
           :disabled="markingAll || workingId !== null"
           @click="openNotification(item)"
         >
-          <span class="grid size-11 shrink-0 place-items-center rounded-xl bg-[var(--people-lavender)]"><UIcon
+          <span class="grid size-11 shrink-0 place-items-center rounded-xl bg-[var(--people-forest)]"><UIcon
             :name="iconFor(item.notification_type)"
             class="size-5"
           /></span><span class="min-w-0 flex-1"><span class="flex items-start justify-between gap-3"><span class="font-semibold">{{ item.title }}</span><span class="shrink-0 text-xs text-muted">{{ timeAgo(item.created_at) }}</span></span><span class="mt-1 block text-sm leading-6 text-muted">{{ item.message }}</span></span><span

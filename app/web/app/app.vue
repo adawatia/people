@@ -2,10 +2,7 @@
 useHead({
   htmlAttrs: { lang: 'en' },
   meta: [{ name: 'viewport', content: 'width=device-width, initial-scale=1, viewport-fit=cover' }],
-  link: [
-    { rel: 'icon', type: 'image/svg+xml', href: '/branding/people-app-icon-violet.svg' },
-    { rel: 'apple-touch-icon', href: '/branding/people-app-icon-violet.svg' }
-  ]
+  link: []
 })
 
 useSeoMeta({

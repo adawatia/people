@@ -226,7 +226,7 @@ async function confirmCancellation() {
                 </p>
               </div><span
                 class="grid size-10 place-items-center rounded-xl"
-                :style="{ background: 'var(--people-lavender)', color: 'var(--people-lavender-ink)' }"
+                :style="{ background: 'var(--people-forest)', color: 'var(--people-forest-ink)' }"
               ><UIcon
                 name="i-lucide-calendar-heart"
                 class="size-5"
@@ -261,7 +261,7 @@ async function confirmCancellation() {
           class="people-card mt-4 flex flex-col items-center p-8 text-center"
         >
           <span
-            class="grid size-12 place-items-center rounded-2xl bg-[var(--people-lavender)] text-primary"
+            class="grid size-12 place-items-center rounded-2xl bg-[var(--people-forest)] text-primary"
           >
             <UIcon
               name="i-lucide-sparkles"
@@ -608,7 +608,7 @@ async function confirmCancellation() {
             />
           </UFormField>
         </div>
-        <div class="mt-5 grid gap-3 rounded-2xl bg-[var(--people-lavender)] p-4 text-sm sm:grid-cols-3">
+        <div class="mt-5 grid gap-3 rounded-2xl bg-[var(--people-forest)] p-4 text-sm sm:grid-cols-3">
           <div>
             <p class="text-xs font-medium text-muted">
               Estimated request

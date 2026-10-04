@@ -99,20 +99,20 @@ const summaryCards = computed(() => {
     { label: 'Attendance', value: `${summary?.attendance_percentage ?? 0}%`, note: `${summary?.total_present ?? 0} days present`, icon: 'i-lucide-gauge', tone: 'var(--people-mint)' },
     { label: 'Working days', value: summary?.total_working_days ?? 0, note: `${summary?.total_half_day ?? 0} half days`, icon: 'i-lucide-calendar-range', tone: 'var(--people-blue)' },
     { label: 'Late arrivals', value: summary?.total_late ?? 0, note: `${summary?.total_early_exit ?? 0} early exits`, icon: 'i-lucide-clock-alert', tone: 'var(--people-peach)' },
-    { label: 'Overtime', value: formatDuration(summary?.total_overtime_minutes ?? 0), note: `${summary?.total_missed_punch ?? 0} missed punches`, icon: 'i-lucide-timer-reset', tone: 'var(--people-lavender)' }
+    { label: 'Overtime', value: formatDuration(summary?.total_overtime_minutes ?? 0), note: `${summary?.total_missed_punch ?? 0} missed punches`, icon: 'i-lucide-timer-reset', tone: 'var(--people-forest)' }
   ]
 })
 
 const statusSegments = computed(() => {
   const summary = attendanceData.value?.summary
   return [
-    { label: 'Present', value: summary?.total_present ?? 0, color: chartTheme.value ? '#94d8b4' : '#226747' },
-    { label: 'Half day', value: summary?.total_half_day ?? 0, color: chartTheme.value ? '#ebbb94' : '#925025' },
-    { label: 'On leave', value: summary?.total_leave ?? 0, color: chartTheme.value ? '#c9b2ff' : '#5637a5' },
-    { label: 'Absent', value: summary?.total_absent ?? 0, color: chartTheme.value ? '#f2acbd' : '#a52b46' },
-    { label: 'Missed punch', value: summary?.total_missed_punch ?? 0, color: chartTheme.value ? '#efd184' : '#805900' },
-    { label: 'Weekly off', value: summary?.total_weekly_off ?? 0, color: chartTheme.value ? '#beb2ce' : '#665e70' },
-    { label: 'Public holiday', value: summary?.total_holiday ?? 0, color: chartTheme.value ? '#abc9f5' : '#345a96' }
+    { label: 'Present', value: summary?.total_present ?? 0, color: chartTheme.value ? '#8ad5a4' : '#1d613a' },
+    { label: 'Half day', value: summary?.total_half_day ?? 0, color: chartTheme.value ? '#fdba74' : '#9a4f0a' },
+    { label: 'On leave', value: summary?.total_leave ?? 0, color: chartTheme.value ? '#b4e6c3' : '#287448' },
+    { label: 'Absent', value: summary?.total_absent ?? 0, color: chartTheme.value ? '#fda4af' : '#b42336' },
+    { label: 'Missed punch', value: summary?.total_missed_punch ?? 0, color: chartTheme.value ? '#fcd34d' : '#925d07' },
+    { label: 'Weekly off', value: summary?.total_weekly_off ?? 0, color: chartTheme.value ? '#afc0b3' : '#617168' },
+    { label: 'Public holiday', value: summary?.total_holiday ?? 0, color: chartTheme.value ? '#9bc9da' : '#336b83' }
   ].filter(segment => segment.value > 0)
 })
 
@@ -130,8 +130,8 @@ const attendanceChartOption = computed<ECOption>(() => ({
     subtext: 'recorded days',
     left: 'center',
     top: 'center',
-    textStyle: { fontSize: 22, fontWeight: 700, color: chartTheme.value ? '#f7f0e9' : '#292335' },
-    subtextStyle: { fontSize: 11, color: chartTheme.value ? '#beb2ce' : '#665e70' }
+    textStyle: { fontSize: 22, fontWeight: 700, color: chartTheme.value ? '#edf5ee' : '#1b2820' },
+    subtextStyle: { fontSize: 11, color: chartTheme.value ? '#afc0b3' : '#617168' }
   },
   series: [{
     name: 'Attendance status',
@@ -504,7 +504,7 @@ function hasPendingCorrection(recordId: number) {
             </p>
           </div>
           <div class="flex flex-wrap gap-2 text-xs text-muted">
-            <span class="flex items-center gap-1.5"><i class="size-2 rounded-full bg-emerald-500" />Present</span><span class="flex items-center gap-1.5"><i class="size-2 rounded-full bg-rose-500" />Absent</span><span class="flex items-center gap-1.5"><i class="size-2 rounded-full bg-violet-500" />Leave</span><span class="flex items-center gap-1.5"><i class="size-2 rounded-full bg-amber-500" />Attention</span>
+            <span class="flex items-center gap-1.5"><i class="size-2 rounded-full bg-emerald-500" />Present</span><span class="flex items-center gap-1.5"><i class="size-2 rounded-full bg-rose-500" />Absent</span><span class="flex items-center gap-1.5"><i class="size-2 rounded-full bg-brand-500" />Leave</span><span class="flex items-center gap-1.5"><i class="size-2 rounded-full bg-amber-500" />Attention</span>
           </div>
         </div>
 

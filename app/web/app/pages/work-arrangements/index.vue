@@ -19,7 +19,7 @@ const today = new Date().toISOString().slice(0, 10)
 const form = reactive({ arrangement_type: 'WORK_FROM_HOME' as WorkArrangementType, from_date: today, to_date: today, reason: '', destination_location: '', contact_phone: '' })
 
 const typeConfig: Record<WorkArrangementType, { label: string, description: string, icon: string, tone: string }> = {
-  WORK_FROM_HOME: { label: 'Work from home', description: 'Request to work remotely from your residence', icon: 'i-lucide-house-wifi', tone: 'var(--people-lavender)' },
+  WORK_FROM_HOME: { label: 'Work from home', description: 'Request to work remotely from your residence', icon: 'i-lucide-house-wifi', tone: 'var(--people-forest)' },
   OUT_DUTY: { label: 'Out duty', description: 'Official work away from your workplace', icon: 'i-lucide-building-2', tone: 'var(--people-blue)' },
   FIELD_WORK: { label: 'Field work', description: 'Work at a client or field location', icon: 'i-lucide-map-pin', tone: 'var(--people-peach)' },
   OFFICE: { label: 'Office', description: 'Temporary office-based arrangement', icon: 'i-lucide-briefcase-business', tone: 'var(--people-mint)' }
@@ -424,7 +424,7 @@ async function confirmCancellation() {
               placeholder="Explain the business or personal context for your approver."
             />
           </UFormField>
-        </div><div class="mt-5 rounded-2xl bg-[var(--people-lavender)] p-4 text-sm">
+        </div><div class="mt-5 rounded-2xl bg-[var(--people-forest)] p-4 text-sm">
           <span class="font-semibold">{{ requestDays }} day{{ requestDays === 1 ? '' : 's' }}</span><span class="ml-2 text-muted">requested as {{ typeConfig[form.arrangement_type].label.toLowerCase() }}</span>
         </div><div class="sticky bottom-0 -mx-5 mt-6 flex flex-col-reverse gap-3 border-t border-[var(--people-border)] bg-[var(--people-surface)] px-5 pt-4 sm:static sm:mx-0 sm:flex-row sm:justify-end sm:border-0 sm:p-0">
           <UButton

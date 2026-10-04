@@ -54,8 +54,7 @@ class Settings(BaseSettings):
 
     frontend_url: str = Field(default="http://192.168.103.20:3000", alias="FRONTEND_URL")
 
-    # API Keys for M2M Integration
-    api_key: str = Field(default="hrms_api_key_dev_only", alias="API_KEY")
+    # ERP machine-to-machine integration
     erp_api_key: str = Field(default="", alias="ERP_API_KEY")
     erp_api_clients: str = Field(default="", alias="ERP_API_CLIENTS")
     erp_signature_max_age_seconds: int = Field(default=300, ge=30, le=900, alias="ERP_SIGNATURE_MAX_AGE_SECONDS")
