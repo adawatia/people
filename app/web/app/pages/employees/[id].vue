@@ -5,7 +5,7 @@ import type { Employee, EmployeeWorkHistory } from '#shared/types/employee'
 
 const route = useRoute()
 const api = useHrmsApi()
-const list = useListState()
+const list = useListState({ sort_order: 'desc' })
 const employeeId = computed(() => Number(route.params.id))
 const { data: rawData, pending, error, refresh } = await useAsyncData(`employee-${employeeId.value}`, async () => {
   const [employee, history] = await Promise.all([api.request<Employee>(`employees/${employeeId.value}`), api.request<PaginatedResponse<EmployeeWorkHistory>>(`employees/${employeeId.value}/work-history`, { query: list.query.value })])
@@ -172,6 +172,15 @@ const formatDate = (value?: string | null) => value ? new Intl.DateTimeFormat('e
           </article>
         </div>
       </section>
+      <ListControls
+        v-model:search="list.search.value"
+        v-model:sort-by="list.sortBy.value"
+        v-model:sort-order="list.sortOrder.value"
+        :active="list.active.value"
+        :sorts="[{ label: 'Start date', value: 'from_date' }, { label: 'End date', value: 'to_date' }, { label: 'Recorded', value: 'created_at' }]"
+        search-placeholder="Search work-history notes"
+        @clear="list.clear"
+      />
     </template>
     <ListPagination
       v-if="data?.history"

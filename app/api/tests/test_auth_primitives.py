@@ -205,8 +205,8 @@ def test_secret_box_reads_legacy_plaintext_and_fails_closed_on_a_bad_key():
 # ── password policy ───────────────────────────────────────────────────────────
 
 
-def _check(password: str, **context: str) -> None:
-    run_async(validate_password_policy(password, context=PasswordCheckContext(**context)))
+def _check(password: str, *, settings: Settings | None = None, **context: str) -> None:
+    run_async(validate_password_policy(password, context=PasswordCheckContext(**context), settings=settings))
 
 
 @pytest.mark.parametrize(
@@ -241,6 +241,15 @@ def test_a_strong_passphrase_is_accepted_and_long_passwords_are_allowed():
     _check("gT7#vQ2$mL9!zR4&wK1^")
     with pytest.raises(PasswordPolicyError, match="at most"):
         _check("Quartz-Meadow-9!" + "x" * 300)
+
+
+def test_configured_eight_character_minimum_keeps_strength_checks():
+    relaxed = Settings(password_min_length=8)
+    _check("gT7#vQ2$m", settings=relaxed)
+    with pytest.raises(PasswordPolicyError, match="at least 8"):
+        _check("Short1!", settings=relaxed)
+    with pytest.raises(PasswordPolicyError):
+        _check("password", settings=relaxed)
 
 
 def test_breach_checker_selection_and_fail_open_behaviour():

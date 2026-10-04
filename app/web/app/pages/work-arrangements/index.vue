@@ -185,20 +185,31 @@ async function confirmCancellation() {
             </h3><p class="mt-1 text-sm text-muted">
               Current and previous work arrangements
             </p>
-          </div><div class="flex gap-1 overflow-x-auto rounded-xl bg-muted/5 p-1">
-            <button
-              v-for="option in ['ALL', 'PENDING', 'APPROVED', 'REJECTED']"
-              :key="option"
-              type="button"
-              class="rounded-lg px-3 py-2 text-xs font-semibold"
-              :class="filter === option ? 'bg-[var(--people-surface)] shadow-sm' : 'text-muted'"
-        :aria-pressed="filter === option"
-              @click="filter = option"
-            >
-              {{ option === 'ALL' ? 'All' : option.charAt(0) + option.slice(1).toLowerCase() }}
-            </button>
           </div>
         </div>
+        <ListControls
+          v-model:search="list.search.value"
+          v-model:sort-by="list.sortBy.value"
+          v-model:sort-order="list.sortOrder.value"
+          :active="list.active.value"
+          :sorts="[{ label: 'Submitted', value: 'created_at' }, { label: 'Status', value: 'status' }]"
+          search-placeholder="Search work arrangements"
+          @clear="list.clear"
+        >
+          <template #quick>
+            <UButton
+              v-for="option in ['ALL', 'PENDING', 'APPROVED', 'REJECTED']"
+              :key="option"
+              size="sm"
+              :variant="filter === option ? 'soft' : 'ghost'"
+              :color="filter === option ? 'primary' : 'neutral'"
+              :aria-pressed="filter === option"
+              @click="filter = option"
+            >
+              {{ option === 'ALL' ? 'All statuses' : option.charAt(0) + option.slice(1).toLowerCase() }}
+            </UButton>
+          </template>
+        </ListControls>
         <div
           v-if="pending && !requests"
           class="grid gap-4 p-5 sm:grid-cols-2"
@@ -279,6 +290,29 @@ async function confirmCancellation() {
       v-else-if="!selfService"
       class="people-card mt-7 overflow-hidden"
     >
+      <ListControls
+        v-model:search="list.search.value"
+        v-model:sort-by="list.sortBy.value"
+        v-model:sort-order="list.sortOrder.value"
+        :active="list.active.value"
+        :sorts="[{ label: 'Submitted', value: 'created_at' }, { label: 'Status', value: 'status' }]"
+        search-placeholder="Search employee name or code"
+        @clear="list.clear"
+      >
+        <template #quick>
+          <UButton
+            v-for="option in ['ALL', 'PENDING', 'APPROVED', 'REJECTED']"
+            :key="option"
+            size="sm"
+            :variant="filter === option ? 'soft' : 'ghost'"
+            :color="filter === option ? 'primary' : 'neutral'"
+            :aria-pressed="filter === option"
+            @click="filter = option"
+          >
+            {{ option === 'ALL' ? 'All statuses' : option.charAt(0) + option.slice(1).toLowerCase() }}
+          </UButton>
+        </template>
+      </ListControls>
       <div
         v-if="pending && !requests"
         class="space-y-3 p-5"

@@ -55,7 +55,7 @@ This is the single reference that explains **how the codebase is wired** (archit
 │ PostgreSQL (DATABASE_URL) + Alembic migrations (app/api/alembic/versions)    │
 └──────────────────────────────────────────────────────────────────────────────┘
                 ▲
-                │ X-API-Key  · /api/v1/integrations/erp/**
+                │ Scoped HMAC headers  · /api/v1/integrations/erp/**
 ┌───────────────┴──────────────────────────────────────────────────────────────┐
 │ ERP (external system of record) — one-way authoritative writes INTO HRMS     │
 │   employees · logins · units/departments/designations · shifts & assignments │
@@ -154,7 +154,7 @@ Module inventory:
                           exception path logs request_failed with stack trace
 4. Auth dependency        fastapi_users.current_user(active=True)  → JWT (aud fastapi-users:auth)
                           OR  require_permission("code")            → 403 "Missing permission: code"
-                          OR  verify_erp_api_key (X-API-Key, constant-time compare)
+                          OR  authenticate_erp_client (scoped HMAC signature)
 5. Scope resolution       get_permission_scope / require_employee_access → 403 on out-of-scope rows
 6. Service call           domain rules + transaction
 7. Response model         Pydantic serialization; HTTPException → {"detail": ...}
@@ -202,7 +202,7 @@ Notes that matter operationally:
 | `MFA_ENCRYPTION_KEY` | development key | AES-256 key (base64 or hex) encrypting TOTP seeds at rest. Empty means "unset" and resolves to the development key. **Production refuses the development default at startup** — a seed dump protected by a key sitting in the repository protects nothing. Rotating it invalidates enrolled factors (they must re-enrol), so treat it like a database credential |
 | `MFA_PENDING_TTL_SECONDS` | `900` | lifetime of an unconfirmed replacement authenticator; expired pending secrets are cleared when accessed |
 | `PASSWORD_RECOVERY_TTL_SECONDS` | `600` | lifetime of the authenticator-based password recovery and one-time reset capability |
-| `PASSWORD_MIN_LENGTH` / `PASSWORD_MAX_LENGTH` | `12` / `256` | floors/ceilings are validated, so they cannot be lowered accidentally |
+| `PASSWORD_MIN_LENGTH` / `PASSWORD_MAX_LENGTH` | `8` / `256` | floors/ceilings are validated, so they cannot be lowered below the supported minimum |
 | `PASSWORD_BREACH_CHECK` / `_URL` | `local` / `""` | `off` \| `local` \| `remote` (k-anonymity, fail-open) |
 
 **Lifespan (`main.py`)** — in order: log start → `create_db_and_tables()` **only in development** → `ensure_seed_data()` in dev or when `BOOTSTRAP_SEED_DATA=true` → start `notification_cleanup_loop()` as a task → on shutdown cancel the task cleanly.
@@ -257,7 +257,7 @@ Three authentication **domains**, one users table:
 ```
                     ┌─ business users  → /login        (all workforce roles)
 PEOPLE HRMS auth ───┼─ Super Admin     → /admin/login   (password + MFA, stricter session policy)
-                    └─ ERP machines   → /api/v1/integrations/erp/**  (X-API-Key)
+                    └─ ERP machines   → /api/v1/integrations/erp/**  (scoped HMAC)
 ```
 
 Authentication answers *who you are*; a business role never selects a login endpoint, and permissions/scope are resolved only afterwards (§2.6).
@@ -311,14 +311,14 @@ Endpoints: `POST /auth/session` (issue for an already-authenticated caller) · `
 
 **Bulk revocation:** an HR/ERP temporary-password reset (`_reset_password`) and a self-service `POST /auth/change-password` both revoke every live session for the account (`password_reset:*` / `password_changed`). A password change deliberately **does not** mint a replacement session: the user signs in again, which is the required behaviour for privileged accounts. Because an access token cannot be revoked before it expires, the exposure window after a change is one access-token TTL — the reason that TTL is minutes, and the reason permissions are never cached in the token.
 
-#### 2.5.4 Super Admin MFA (TOTP)
+#### 2.5.4 Account MFA (TOTP)
 
 Split so a stolen password alone can never replace an existing factor:
 
 * **Challenge endpoints** (unauthenticated, require the short-lived challenge token issued *after* a correct password): `POST /auth/mfa/enroll` (first-time only — returns the secret, `otpauth://` URI and 10 single-use recovery codes, shown once), `POST /auth/mfa/activate` (confirm the new secret and sign in), `POST /auth/mfa/verify` (TOTP or recovery code).
 * **Management endpoints** (authenticated **and** password re-verified): `POST /auth/mfa/reset` (new secret), `POST /auth/mfa/confirm` (activate from an existing session), `POST /auth/mfa/disable`, `GET /auth/mfa/status`.
 
-A second factor is requested when the account's *policy* mandates it **or** the account has already enrolled — an enrolled authenticator is always used, otherwise opting in from account settings would protect nothing. `MFA_REQUIRED_FOR_SUPER_ADMIN` defaults to `false` so enabling it is a deliberate, communicated rollout; `MFA_ENABLED=false` disables MFA enforcement, including for previously enrolled accounts. Verification is constant-time with a ±1 step (30 s) drift window, and recovery codes are stored as SHA-256 hashes like refresh tokens. Enrolled already? `disable` is refused while policy requires MFA.
+A user can turn MFA on or off from Security after re-verifying their password. Once enabled, a second factor is requested on **every new password login**; an existing session and its refresh rotations are not re-challenged. A second factor is also requested when the account's *policy* mandates it. `MFA_REQUIRED_FOR_SUPER_ADMIN` defaults to `false` so enabling it is a deliberate, communicated rollout; `MFA_ENABLED=false` disables MFA enforcement, including for previously enrolled accounts. Verification is constant-time with a ±1 step (30 s) drift window, and recovery codes are stored as SHA-256 hashes like refresh tokens. Enrolled already? `disable` is refused while policy requires MFA.
 
 **Forgot-password recovery** is separate from normal login: the user enters a username or mobile number, proves possession of the enrolled TOTP authenticator (or a recovery code), and receives a short-lived one-time password-reset capability. The flow never creates a session, revokes every existing session after the new password is saved, keeps MFA enrolled, and is throttled and audited. Reused TOTP steps are reported separately from mistyped codes, while an expired or replaced recovery capability returns the UI to the identity step.
 
@@ -334,11 +334,10 @@ The spec vocabulary maps onto the implemented routes as: `totp/setup` → `POST 
 
 #### 2.5.5 Password policy (enforced on register, change, and HR/ERP temporary-password set)
 
-1. ≥ 12 characters, ≤ 256 (passphrases and password-manager output are welcome)
-2. must contain upper, lower, digit, special character (kept deliberately: removing an existing control would be a silent weakening)
-3. must not contain the user's email local part / username / first / last name (≥ 3 chars) — matched **after stripping separators**, so `Warm.Comet` cannot pad past the check
-4. `zxcvbn` score ≥ 3 with those personal inputs supplied
-5. not in the embedded common-password list (also catches `Welcome@2026`-style padding and keyboard/sequential runs) and not in a breached corpus if `PASSWORD_BREACH_CHECK` is set to `remote` — the breach check is pluggable and **fails open**, so password changes never depend on a third party being reachable
+1. ≥ 8 characters, ≤ 256 (passphrases and password-manager output are welcome)
+2. must not contain the user's email local part / username / first / last name (≥ 3 chars) — matched **after stripping separators**, so `Warm.Comet` cannot pad past the check
+3. `zxcvbn` score ≥ 3 with those personal inputs supplied
+4. not in the embedded common-password list (also catches `Welcome@2026`-style padding and keyboard/sequential runs) and not in a breached corpus if `PASSWORD_BREACH_CHECK` is set to `remote` — the breach check is pluggable and **fails open**, so password changes never depend on a third party being reachable
 
 Failure raises `PasswordPolicyError` → `InvalidPasswordException` → `400 {"detail": "…reason…"}`.
 
@@ -372,7 +371,7 @@ EXPIRED and REVOKED are both represented by `revoked_at` + `revoked_reason`; reu
 
 #### 2.5.10 ERP machine authentication
 
-`X-API-Key` header validated with `secrets.compare_digest` against `settings.erp_api_key`; empty/mismatched ⇒ `403 Could not validate API KEY`. There is **no** fallback key outside development, and the key must never reach a browser. ERP credentials are a **static shared key** today: adequate for a single trusted integration on a private network, and the documented upgrade path is per-client credentials + rotation (optionally signed requests or mTLS) — not something to introduce without a product requirement. ERP is never routed through human sessions.
+Production ERP requests use four headers: `X-ERP-Client-ID`, `X-ERP-Timestamp`, `X-ERP-Nonce`, and `X-ERP-Signature`. The signature is lowercase HMAC-SHA256 over `METHOD`, request path plus query, timestamp, nonce, and the SHA-256 request-body hash, joined by newlines. Each client has a 32+ character secret and explicit scopes in `ERP_API_CLIENTS`; timestamps expire after `ERP_SIGNATURE_MAX_AGE_SECONDS` and nonces are single-use. `X-API-Key` is accepted only as a development compatibility shortcut when `ERP_API_KEY` is configured. ERP credentials never reach a browser or use a human session.
 
 ### 2.6 Authorization: identity, permissions, scope, and domain rules
 
@@ -465,7 +464,7 @@ Derived rules worth remembering:
 
 #### 2.7.1 Attendance engine (`services/attendance_service.py`)
 
-* **Ingest**: `POST /attendance/checkins` and `/checkins/bulk` now return **403** — punches are ERP-supplied. Raw punches still exist in the model and repository (`AttendancePunchRepository.find_duplicate`) for the ERP ingest path.
+* **Ingest**: processed attendance is accepted only through `POST /integrations/erp/attendance/records/bulk`. Raw punch history remains read-only through `GET /attendance/checkins`.
 * **Processing** (`process_attendance_for_employee_date` / `process_attendance_batch`, exposed as `POST /attendance/process` with `attendance.process`):
   1. Resolve the shift window for the date (dated assignment beats the ERP default shift; handles cross-midnight and `begin_check_in_before_minutes`).
   2. Classify the day: `WEEKLY_OFF`, `HOLIDAY`, `ON_LEAVE` (from approved leave), `WORK_FROM_HOME` (from approved arrangement) before computing work time.
@@ -547,7 +546,7 @@ Config: `create_period`, `create_type`, `update_type`, `allocate_leaves` (writes
 2. delete read notifications older than 3 days,
 3. keep at most the 50 newest notifications per `user_id`/`target_role` partition (window function).
 
-### 2.8 ERP integration contract (all writes use `X-API-Key`)
+### 2.8 ERP integration contract (scoped HMAC authentication)
 
 | Method & path | Purpose | Idempotency / notes |
 |---|---|---|
@@ -559,17 +558,15 @@ Config: `create_period`, `create_type`, `update_type`, `allocate_leaves` (writes
 | `POST/PATCH/DELETE /units`, `/departments`, `/designations` | Master-data CRUD | deletes blocked by dependent-count checks |
 | `POST /shifts`, `PATCH /shifts/{id}` | Shift definitions | — |
 | `POST /shifts/assignments`, `/assignments/bulk`, `PATCH /assignments/{id}/cancel` | Assign/rotate shifts | overlap prevention; batching added for bulk |
-| `POST /attendance/records`, `/records/bulk` | Ingest **processed** attendance | `erp_record_id` makes re-sends idempotent; per-item `accepted`/`duplicates`/`failed` result |
+| `POST /attendance/records/bulk` | Ingest **processed** attendance | `erp_record_id` makes re-sends idempotent; per-item `accepted`/`duplicates`/`failed` result |
 | `POST /holidays/bulk` | Sync holidays per unit | keyed by `erp_holiday_id` |
 | `POST /overtime/records/bulk` | Sync overtime records | keyed by `erp_event_id` |
 | `GET /leaves/changes?since&limit` | **ERP pulls** leave outcomes (`erp_sync_status != ACKNOWLEDGED`) | ordered by `actioned_at`; `has_more` cursor |
 | `POST /leaves/changes/ack` | ERP acknowledges event ids | marks `ACKNOWLEDGED` + `erp_synced_at`; returns `unknown[]` |
-| `POST /leaves/balances`, `/balances/bulk` | Sync leave balances (allocated/used/pending) | per-item `accepted`/`failed`; upserts by employee + leave code + year |
-| `POST /api/v1/leaves/periods`, `/types` | Create ERP-owned leave periods and types before balance sync | these two legacy paths sit outside `/integrations/erp`; both require `X-API-Key` |
+| `POST /leaves/balances/bulk` | Sync leave balances (allocated/used/pending) | per-item `accepted`/`failed`; upserts by employee + leave code + year |
+| `POST /leaves/periods`, `/types`, `PATCH /leaves/types/{id}` | Manage ERP-owned leave master data | requires `leave-master:write` |
 
 **Ingestion discipline:** bulk endpoints are intentionally *partial-success* — a bad row lands in `failed[]` with its error string and the rest are committed. Callers must inspect the result, not just the HTTP status.
-
-**Manual contract runner:** `app/api/demo.py` is an editable HTTP client for exercising the ERP contract in dependency order. It previews by default and sends requests only with `--execute`; returned unit, department, designation, shift, employee, and attendance IDs are carried into dependent calls. It does not write directly to PostgreSQL. `--leave-feed-only` can be run after a human approves or rejects leave, and acknowledgements require the separate `--ack-leave-changes` flag.
 
 **Local database reset:** `app/api/cleanup_db.py` previews by default. Execution requires `--execute` plus the exact confirmation text; remote and non-development targets require additional flags. It preserves `alembic_version` and Super Admin accounts by default, removes workforce accounts, and truncates business data. `--delete-super-admin` is accepted only together with `--reseed-bootstrap`, preventing an inaccessible cleaned database.
 
@@ -614,13 +611,12 @@ Every tag below is also an OpenAPI tag declared in `main.py`. Auth column: **E**
 | **holidays** | `GET /holidays/lists`, `GET /holidays/lists/{id}` | Any | read-only |
 | **shifts** | `GET /shifts/`, `/assignments`, `/assignments/{id}`, `/employee/{id}/schedule`, `/{id}` | Any | a plain employee (no business role) is forced to self; elevated roles see the management views |
 | **attendance** | `GET /attendance/`, `/records/{id}`, `/employee/{id}/calendar`, `/employee/{id}/summary`, `/checkins`, `/corrections` | Any | read-permission scope + `allow_self` |
-| | `POST /attendance/checkins`, `/checkins/bulk` | — | **403 — ERP supplied** |
 | | `POST /attendance/process` | perm(`attendance.process`) | HR unit scope |
 | | `POST /attendance/corrections` | perm(`attendance.correct`) + row scope | → `PENDING_ERP_RECONCILIATION` |
 |  | `PATCH /attendance/corrections/{id}/approve\|reject` | — | **route removed — ERP confirms** |
 | **leaves** | `GET /leaves/periods`, `/types`, `/types/{id}`, `/balance/employee/{id}`, `/`, `/{id}` | Any | self-service via `leave.apply`/`allow_self`; management scope otherwise |
 | | `POST /leaves/`, `PATCH /leaves/{id}/cancel` | Any | self via `leave.apply`/`leave.cancel` |
-| | `POST /leaves/periods`, `/types`, `PATCH /types/{id}` | perm(`leave.manage`) | HR |
+| **ERP leave master data** | `POST /integrations/erp/leaves/periods`, `/types`, `PATCH /types/{id}` | ERP (`leave-master:write`) | ERP-owned leave periods and types |
 |  | `PATCH /leaves/{id}/approve\|reject` | perm(`leave.approve`/`reject`) | scope + no self-approval |
 |  | `PATCH /leaves/{id}/cancellation/approve\|reject` | perm(`leave.approve`/`reject`) | scope + no self-approval |
 | **work-arrangements** | `GET /` , `GET /{id}` | Any | management scope else self |
@@ -806,8 +802,8 @@ The workspace middleware keeps hidden routes out of the current workspace and re
 | `pages/overtime/index.vue` | My: `overtime/`, `overtime/employee/{id}/summary`; Team/HR: `overtime/` | My monthly summary and records; Team/HR scoped records | management collection has no employee name or date filters yet |
 | `pages/reports/index.vue` | `reports/attendance-matrix`, `reports/leave-summary` | month picker, attendance matrix, leave summary; tabs gated by permission | — |
 | `pages/notifications.vue` | `notifications`, `notifications/{id}/read`, `notifications/mark-all-read` | list, read, mark-all | — |
-| `pages/profile.vue` | `users/me` (via composable) | identity, role label, employee code | — |
-| `pages/settings.vue` | `auth/change-password`, `auth/super-admin/username`, `auth/mfa/*`, `auth/sessions`, `users/admin/accounts/*` | own-account security plus paginated workforce-account support for Super Admin | Workforce support can issue a generated temporary password, suspend/reactivate login, reset MFA or revoke sessions; every action requires password step-up and leaves ERP-owned employee/role data unchanged |
+| `pages/profile.vue` | `users/me` (via composable) | read-only identity, role/scope and ERP-synced employment details; link to personal security | — |
+| `pages/settings.vue` | `auth/change-password`, `auth/super-admin/username`, `auth/mfa/*`, `auth/sessions`, `users/admin/accounts/*` | password, per-account MFA toggle (required on each fresh login when enabled), recovery codes and device sessions; paginated workforce-account support for Super Admin | Workforce support can issue a generated temporary password, suspend/reactivate login, reset MFA or revoke sessions; every action requires password step-up and leaves ERP-owned employee/role data unchanged |
 
 ### 3.6 Design system & responsive rules
 
@@ -944,7 +940,7 @@ Owner permissions exclude approval and HR operations permissions. The Owner stil
 | 3 | **Shift & roster sync** | `POST /integrations/erp/shifts`, `/shifts/assignments/bulk`, `PATCH /shifts/assignments/{id}/cancel` | overlap prevention; dated assignments override `Employee.shift_id` |
 | 4 | **Holiday calendar sync** | `POST /integrations/erp/holidays/bulk` | keyed by `erp_holiday_id`; weekly-off generation lives in `holiday_admin` lists |
 | 5 | **Overtime sync** | `POST /integrations/erp/overtime/records/bulk` | keyed by `erp_event_id`; HRMS owns approve/decline |
-| 6 | **Leave outcome pull + ack** | `GET /integrations/erp/leaves/changes?since=&limit=` → `POST /leaves/changes/ack` | HRMS-produced events (`LEAVE-{id}-APPROVED/REJECTED/CANCELLED`) remain `PENDING` until acked; `has_more` signals another page |
+| 6 | **Leave outcome pull + ack** | `GET /integrations/erp/leaves/changes?since=&limit=` → `POST /integrations/erp/leaves/changes/ack` | HRMS-produced events (`LEAVE-{id}-APPROVED/REJECTED/CANCELLED`) remain `PENDING` until acked; `has_more` signals another page |
 | 7 | **Leave balance sync** | `POST /integrations/erp/leaves/balances/bulk` | ERP is the balance authority; upserts `allocated/used/pending` per employee+code+year |
 | 8 | **Password reset from ERP** | `POST /integrations/erp/employees/{id}/password-reset` | revokes sessions, forces change |
 
@@ -1055,7 +1051,7 @@ These are verified against the current code and are the highest-value item in th
 | **A5** | ~~Organization page enable/disable/delete fail~~ **Resolved** | Current Organization UI is explicitly read-only; write controls are not rendered because organization master data is ERP-owned. | Resolved | Frontend lead |
 | **A6** | Holidays create/add buttons | Hidden by `canManage = false` (correct today) — the code remains and will 405 if ever enabled | Low | Frontend lead |
 | **A7** | ~~`attendance.approve_correction` is held by nobody~~ **Fixed** | The correction surfaces now gate on `attendance.correct` (which HR holds) and the approve/reject routes were removed, so `tests/test_permission_grants.py` passes with no dead-end code | Resolved | Architecture lead |
-| **A8** | `POST /attendance/checkins` + `/checkins/bulk` are 403 stubs | Intentional (ERP supplies punches) but the punch ingestion path is therefore untested through HTTP; publishing them for ERP would be cleaner than a separate ERP route | Low/Medium | Architecture lead |
+| **A8** | ~~Public attendance check-in stubs~~ **Resolved** | Non-functional public write routes were removed; the canonical ERP attendance bulk route is now the only ingest path. | Resolved | Architecture lead |
 | **A9** | Dashboard widget API is not yet consumed | `GET /dashboard/widgets` exists and is permission-aware; workspace dashboards now provide the presentation context, while widget-level composition remains a future consolidation point | Medium | Frontend lead |
 | **A10** | Invitation UI missing | `/auth/invitation/*` + email templates exist, `middleware` lists `/invitation` and `/auth/invitation` as public, but no page/route exists and no router calls `create_invitation_for_user` | Medium | Product + Frontend lead |
 | **A11** | ~~Mobile Attendance showed “Correction pending” when no correction existed~~ **Resolved** | The mobile row now renders that state only when an actual pending correction matches the record; its correction action also uses the same status/permission conditions as desktop. | Resolved | Frontend |

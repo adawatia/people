@@ -151,18 +151,6 @@ const overtimeChartOption = computed<ECOption>(() => ({
         </ClientOnly>
       </section>
       <section class="people-card mt-7 overflow-hidden">
-        <div
-          v-if="!selfService"
-          class="px-5 pt-5"
-        >
-          <UFormField label="Search employees" name="overtime-search" class="w-full sm:w-80">
-            <SearchInput
-              v-model="search"
-              placeholder="Search employee name or code"
-              aria-label="Search overtime by employee"
-            />
-          </UFormField>
-        </div>
         <div class="flex flex-col gap-4 border-b border-[var(--people-border)] p-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
           <div>
             <h3 class="font-semibold">
@@ -170,19 +158,31 @@ const overtimeChartOption = computed<ECOption>(() => ({
             </h3><p class="mt-1 text-sm text-muted">
               Calculated from processed attendance
             </p>
-          </div><div class="flex gap-1 overflow-x-auto rounded-xl bg-muted/5 p-1">
-            <button
-              v-for="option in ['ALL', 'PENDING', 'APPROVED', 'REJECTED']"
-              :key="option"
-              class="rounded-lg px-3 py-2 text-xs font-semibold"
-              :class="statusFilter === option ? 'bg-[var(--people-surface)] shadow-sm' : 'text-muted'"
-        :aria-pressed="statusFilter === option"
-              @click="statusFilter = option"
-            >
-              {{ option }}
-            </button>
           </div>
         </div>
+        <ListControls
+          v-model:search="search"
+          v-model:sort-by="list.sortBy.value"
+          v-model:sort-order="list.sortOrder.value"
+          :active="list.active.value"
+          :sorts="[{ label: 'Attendance date', value: 'attendance_date' }, { label: 'Status', value: 'status' }]"
+          :search-placeholder="selfService ? 'Search overtime records' : 'Search employee name or code'"
+          @clear="list.clear"
+        >
+          <template #quick>
+            <UButton
+              v-for="option in ['ALL', 'PENDING', 'APPROVED', 'REJECTED']"
+              :key="option"
+              size="sm"
+              :variant="statusFilter === option ? 'soft' : 'ghost'"
+              :color="statusFilter === option ? 'primary' : 'neutral'"
+              :aria-pressed="statusFilter === option"
+              @click="statusFilter = option"
+            >
+              {{ option === 'ALL' ? 'All statuses' : option.charAt(0) + option.slice(1).toLowerCase() }}
+            </UButton>
+          </template>
+        </ListControls>
         <div
           v-if="pending && !data"
           class="space-y-3 p-5"

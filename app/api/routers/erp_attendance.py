@@ -21,13 +21,6 @@ async def _employee(session: AsyncSession, employee_id: int | None, employee_cod
     return employee
 
 
-@router.post(
-    "/records",
-    response_model=ErpSyncResult,
-    summary="Sync processed ERP attendance records",
-    description="Stores ERP-calculated daily attendance. Send one record per employee/date. Re-sending the same erp_record_id is idempotent.",
-    dependencies=[Depends(require_erp_scope("attendance:write"))],
-)
 async def sync_records(
     records: list[ErpAttendanceRecordCreate],
     session: AsyncSession = Depends(get_async_session),
@@ -94,4 +87,5 @@ async def sync_records_bulk(
     payload: ErpAttendanceRecordBulkCreate,
     session: AsyncSession = Depends(get_async_session),
 ) -> ErpSyncResult:
+    """Sync ERP-calculated daily records; retries are idempotent by erp_record_id."""
     return await sync_records(payload.records, session)

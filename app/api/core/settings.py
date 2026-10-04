@@ -123,7 +123,7 @@ class Settings(BaseSettings):
     mfa_encryption_key: str = Field(default="", alias="MFA_ENCRYPTION_KEY")
 
     # ── Password policy ───────────────────────────────────────────────────────
-    password_min_length: int = Field(default=15, ge=15, alias="PASSWORD_MIN_LENGTH")
+    password_min_length: int = Field(default=8, ge=8, alias="PASSWORD_MIN_LENGTH")
     # Argon2 has no bcrypt-style truncation, but an unbounded password is a
     # cheap way to burn server CPU, so keep a generous ceiling.
     password_max_length: int = Field(default=256, ge=64, alias="PASSWORD_MAX_LENGTH")

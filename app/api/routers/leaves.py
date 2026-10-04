@@ -11,7 +11,6 @@ from core.employee_access import (
     get_permission_scope,
     require_employee_access,
 )
-from core.erp_auth import require_erp_scope
 from core.pagination import PaginatedResponse
 from core.sorting import LeaveApplicationSort, LookupSort
 from db.models import LeavePeriod, LeaveType, User
@@ -22,11 +21,8 @@ from schemas.leaves import (
     LeaveBalanceRead,
     LeaveCancellationAction,
     LeaveCancellationRequest,
-    LeavePeriodCreate,
     LeavePeriodRead,
-    LeaveTypeCreate,
     LeaveTypeRead,
-    LeaveTypeUpdate,
 )
 from services.leave_service import LeaveService
 from services.lookup_service import LookupService
@@ -64,23 +60,6 @@ async def list_leave_periods(
     )
 
 
-@router.post(
-    "/periods",
-    response_model=LeavePeriodRead,
-    status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_erp_scope("leave-master:write"))],
-    tags=["erp-leaves"],
-    summary="ERP create leave period",
-    description="ERP-only leave-period master-data sync. Requires the X-API-Key header.",
-)
-async def create_leave_period(
-    data: LeavePeriodCreate,
-    session: AsyncSession = Depends(get_async_session),
-) -> LeavePeriodRead:
-    service = LeaveService(session)
-    return await service.create_period(data)
-
-
 # ── Leave Types ───────────────────────────────────────────────────────────────
 @router.get("/types", response_model=PaginatedResponse[LeaveTypeRead])
 async def list_leave_types(
@@ -104,23 +83,6 @@ async def list_leave_types(
     )
 
 
-@router.post(
-    "/types",
-    response_model=LeaveTypeRead,
-    status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_erp_scope("leave-master:write"))],
-    tags=["erp-leaves"],
-    summary="ERP create leave type",
-    description="ERP-only leave-type master-data sync. Requires the X-API-Key header.",
-)
-async def create_leave_type(
-    data: LeaveTypeCreate,
-    session: AsyncSession = Depends(get_async_session),
-) -> LeaveTypeRead:
-    service = LeaveService(session)
-    return await service.create_type(data)
-
-
 @router.get("/types/{type_id}", response_model=LeaveTypeRead)
 async def get_leave_type(
     type_id: int,
@@ -130,23 +92,6 @@ async def get_leave_type(
     service = LeaveService(session)
     lt = await service.get_type(type_id)
     return LeaveTypeRead.model_validate(lt)
-
-
-@router.patch(
-    "/types/{type_id}",
-    response_model=LeaveTypeRead,
-    dependencies=[Depends(require_erp_scope("leave-master:write"))],
-    tags=["erp-leaves"],
-    summary="ERP update leave type",
-    description="ERP-only leave-type master-data update. Requires the X-API-Key header.",
-)
-async def update_leave_type(
-    type_id: int,
-    data: LeaveTypeUpdate,
-    session: AsyncSession = Depends(get_async_session),
-) -> LeaveTypeRead:
-    service = LeaveService(session)
-    return await service.update_type(type_id, data)
 
 
 # ── Leave Balances ────────────────────────────────────────────────────────────

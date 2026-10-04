@@ -6,9 +6,13 @@ const mode = useColorMode()
 const api = useHrmsApi()
 const today = new Date().toISOString().slice(0, 10)
 const rangeStart = new Date(Date.now() - 29 * 86_400_000).toISOString().slice(0, 10)
-const fromDate = ref(rangeStart)
-const toDate = ref(today)
-const unitId = ref(0)
+const ownerFilters = useListState({ from_date: rangeStart, to_date: today, unit_id: '0' }, 'owner_')
+const fromDate = ownerFilters.field('from_date')
+const toDate = ownerFilters.field('to_date')
+const unitId = computed({
+  get: () => Number(ownerFilters.field('unit_id').value) || 0,
+  set: (value) => { ownerFilters.field('unit_id').value = value > 0 ? String(value) : '0' }
+})
 const dateError = computed(() => {
   if (!fromDate.value || !toDate.value) return 'Enter both a start and an end date.'
   const start = Date.parse(fromDate.value)
@@ -26,9 +30,7 @@ watch([fromDate, toDate, unitId], () => {
   if (JSON.stringify(next) !== JSON.stringify(applied.value)) applied.value = next
 })
 function resetFilters() {
-  fromDate.value = rangeStart
-  toDate.value = today
-  unitId.value = 0
+  ownerFilters.clear()
 }
 const { data: response, pending, error, refresh } = useLazyAsyncData(
   'owner-dashboard',

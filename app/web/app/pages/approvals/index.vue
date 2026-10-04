@@ -201,7 +201,10 @@ async function rejectRequest() {
     <ListControls
       v-if="activeTab === 'leave'"
       v-model:search="leaveList.search.value"
+      v-model:sort-by="leaveList.sortBy.value"
+      v-model:sort-order="leaveList.sortOrder.value"
       :active="leaveList.active.value"
+      :sorts="[{ label: 'Submitted', value: 'applied_at' }, { label: 'Status', value: 'status' }]"
       label="Filter leave approvals"
       search-placeholder="Search employee name or code"
       @clear="leaveList.clear"
@@ -209,7 +212,10 @@ async function rejectRequest() {
     <ListControls
       v-else-if="activeTab === 'work'"
       v-model:search="workList.search.value"
+      v-model:sort-by="workList.sortBy.value"
+      v-model:sort-order="workList.sortOrder.value"
       :active="workList.active.value"
+      :sorts="[{ label: 'Submitted', value: 'created_at' }, { label: 'Status', value: 'status' }]"
       label="Filter work arrangement approvals"
       search-placeholder="Search employee name or code"
       @clear="workList.clear"
@@ -217,7 +223,10 @@ async function rejectRequest() {
     <ListControls
       v-else-if="activeTab === 'overtime'"
       v-model:search="overtimeList.search.value"
+      v-model:sort-by="overtimeList.sortBy.value"
+      v-model:sort-order="overtimeList.sortOrder.value"
       :active="overtimeList.active.value"
+      :sorts="[{ label: 'Attendance date', value: 'attendance_date' }, { label: 'Status', value: 'status' }]"
       label="Filter overtime approvals"
       search-placeholder="Search employee name or code"
       @clear="overtimeList.clear"

@@ -2,7 +2,7 @@
 
 Design notes (deliberate, documented because this is a security control):
 
-* **Length first.** Minimum 15 characters, and the ceiling is generous (256) so
+* **Length first.** Minimum 8 characters, and the ceiling is generous (256) so
   passphrases and password-manager output are never rejected.  Argon2 (the
   configured hasher) has no bcrypt-style 72-byte truncation, so a long password
   is verified in full.

@@ -30,7 +30,7 @@ class OvertimeService:
         department_ids: set[int] | None = None,
         from_date: date | None = None,
         to_date: date | None = None,
-        q: str | None = None,
+        search: str | None = None,
         sort_by: str | None = None,
         sort_order: str = "desc",
         page: int = 1,
@@ -40,7 +40,7 @@ class OvertimeService:
             raise HTTPException(status_code=422, detail="Start date must not be after end date")
         filters = {
             "employee_id": employee_id, "status": status, "unit_ids": unit_ids, "department_ids": department_ids,
-            "from_date": from_date, "to_date": to_date, "q": q, "sort_by": sort_by, "sort_order": sort_order,
+            "from_date": from_date, "to_date": to_date, "search": search, "sort_by": sort_by, "sort_order": sort_order,
         }
         def serialize(record):
             return OvertimeRecordRead.model_validate(record).model_copy(update={

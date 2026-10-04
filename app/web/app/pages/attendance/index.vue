@@ -258,7 +258,21 @@ function hasPendingCorrection(recordId: number) {
       :sorts="[{ label: 'Date', value: 'attendance_date' }, { label: 'Status', value: 'status' }]"
       search-placeholder="Search employee name or code"
       @clear="resetAttendanceFilters"
-    />
+    >
+      <template #quick>
+        <UButton
+          v-for="option in ['ALL', 'PRESENT', 'ABSENT', 'ON_LEAVE', 'HALF_DAY']"
+          :key="option"
+          size="sm"
+          :variant="list.field('status', 'ALL').value === option ? 'soft' : 'ghost'"
+          :color="list.field('status', 'ALL').value === option ? 'primary' : 'neutral'"
+          :aria-pressed="list.field('status', 'ALL').value === option"
+          @click="list.field('status', 'ALL').value = option"
+        >
+          {{ option === 'ALL' ? 'All statuses' : option.replaceAll('_', ' ').toLowerCase() }}
+        </UButton>
+      </template>
+    </ListControls>
 
     <UAlert
       v-if="personalView && auth.user.value?.is_superuser"

@@ -27,8 +27,7 @@ router = APIRouter(prefix="/employees", tags=["employees"])
 async def list_employees(
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=100),
-    search: str | None = None,
-    q: str | None = None,
+    search: str | None = Query(None, max_length=200),
     sort_by: EmployeeSort | None = None,
     sort_order: str = Query("asc", pattern="^(asc|desc)$"),
     unit_id: int | None = None,
@@ -64,7 +63,7 @@ async def list_employees(
     return await service.list_employees(
         page=page,
         page_size=page_size,
-        q=search if search is not None else q,
+        search=search,
         sort_by=sort_by,
         sort_order=sort_order,
         unit_id=unit_id,

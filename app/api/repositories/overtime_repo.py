@@ -20,7 +20,7 @@ class OvertimeRepository:
         department_ids: set[int] | None = None,
         from_date: date | None = None,
         to_date: date | None = None,
-        q: str | None = None,
+        search: str | None = None,
         sort_by: str | None = None,
         sort_order: str = "desc",
     ):
@@ -45,11 +45,11 @@ class OvertimeRepository:
             stmt = stmt.where(AttendanceRecord.attendance_date >= from_date)
         if to_date is not None:
             stmt = stmt.where(AttendanceRecord.attendance_date <= to_date)
-        if q and q.strip():
+        if search and search.strip():
             name = Employee.first_name + " " + func.coalesce(Employee.last_name, "")
             stmt = stmt.where(or_(
-                name.icontains(q.strip(), autoescape=True),
-                Employee.employee_code.icontains(q.strip(), autoescape=True),
+                name.icontains(search.strip(), autoescape=True),
+                Employee.employee_code.icontains(search.strip(), autoescape=True),
             ))
         return ordered(stmt, {"attendance_date": AttendanceRecord.attendance_date, "status": OvertimeRecord.status,
                               "id": OvertimeRecord.id}, sort_by, sort_order, "attendance_date", OvertimeRecord.id)

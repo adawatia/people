@@ -21,7 +21,7 @@ This report records the completed audit, implemented changes, measured evidence,
 
 Every decorated endpoint below was inventoried for method, auth dependencies, response shape and consumer coverage. ERP routes retain their ownership boundary and now support scoped signed clients and idempotent master-data upserts. A technical, read-only paginated audit API was added; no workforce audit page was introduced.
 
-- `app/api/routers/attendance.py`: POST /checkins, POST /checkins/bulk, GET /checkins, GET /, GET /records/{record_id}, GET /employee/{emp_id}/calendar, GET /employee/{emp_id}/summary, POST /process, POST /corrections, GET /corrections
+- `app/api/routers/attendance.py`: GET /checkins, GET /, GET /records/{record_id}, GET /employee/{emp_id}/calendar, GET /employee/{emp_id}/summary, POST /process, POST /corrections, GET /corrections
 - `app/api/routers/auth_invitation.py`: GET /validate, POST /set-password
 - `app/api/routers/auth_login.py`: POST /employee/login, POST /super-admin/login, POST /password-recovery/start, POST /password-recovery/verify, POST /password-recovery/reset, POST /change-password, PATCH /super-admin/username, POST /hr/employees/{employee_id}/password-reset, POST /integrations/erp/employees/{employee_id}/password-reset
 - `app/api/routers/auth_mfa.py`: POST /enroll, POST /activate, POST /verify, GET /status, POST /confirm, POST /recovery/regenerate, POST /reset, POST /disable
@@ -101,7 +101,7 @@ Staging is the configured `app/api/.env` database: read-only transactions only. 
 
 ## Pagination and API contract coverage
 
-Every growing business list now defaults to 25 rows, rejects sizes above 100, applies authorization and domain filters before counting, validates sort fields through an allowlist, and adds the row identifier as a deterministic ordering tie-breaker. Each `sort_by` query parameter publishes that endpoint's exact allowlist as an OpenAPI enum, so Nuxt and other generated clients can discover the supported keys. `search` is the public parameter; the older `q` parameter remains an alias only where Nuxt previously used it. Responses use the shared `PaginatedResponse` metadata (`total`, `page`, `page_size`, `total_pages`, `has_next`, `has_prev`).
+Every growing business list now defaults to 25 rows, rejects sizes above 100, applies authorization and domain filters before counting, validates sort fields through an allowlist, and adds the row identifier as a deterministic ordering tie-breaker. Each `sort_by` query parameter publishes that endpoint's exact allowlist as an OpenAPI enum, so Nuxt and other generated clients can discover the supported keys. `search` is the public search parameter. Responses use the shared `PaginatedResponse` metadata (`total`, `page`, `page_size`, `total_pages`, `has_next`, `has_prev`).
 
 | Dataset / consumer | Endpoint | Search and sort contract | Scope and count behavior | Result |
 |---|---|---|---|---|
@@ -113,7 +113,7 @@ Every growing business list now defaults to 25 rows, rejects sizes above 100, ap
 | Leave applications / Leave and Approvals pages | `GET /leaves/` | Employee search; applied/status/id sort allowlist | Self or authorized management scope before count | Complete |
 | Leave periods and types / forms and filters | `GET /leaves/periods`, `GET /leaves/types` | Name search; name/id sort allowlist | Active/type filters precede count | Complete |
 | Work arrangements / Work Arrangements and Approvals pages | `GET /work-arrangements/` | Employee search; created/status/id sort allowlist | Self or authorized management scope before count | Complete |
-| Overtime / Overtime and Approvals pages | `GET /overtime/` | `search` with `q` compatibility; attendance date/status/id allowlist | Self, department, unit, or organization scope before count | Complete |
+| Overtime / Overtime and Approvals pages | `GET /overtime/` | `search`; attendance date/status/id allowlist | Self, department, unit, or organization scope before count | Complete |
 | Shift definitions / Shifts page and selectors | `GET /shifts/` | Name search; name/code/start/id sort allowlist | Unit or employee-visible definitions before count | Complete |
 | Shift assignments / Shifts page | `GET /shifts/assignments` | Employee search; effective date/status/id allowlist | Central employee access scope is part of the SQL query | Complete |
 | Notifications / Notifications page | `GET /notifications` | Title search; created/id sort allowlist | Personal and role audience predicate precedes count | Complete |

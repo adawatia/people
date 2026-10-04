@@ -4,7 +4,7 @@ from db.models import now_ist
 from datetime import date
 
 from fastapi import APIRouter, Body, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,11 +23,25 @@ class ErpHoliday(BaseModel):
     is_active: bool = True
 
 
-@router.post("/bulk", dependencies=[Depends(require_erp_scope("holidays:write"))])
+class ErpHolidaySyncFailure(BaseModel):
+    erp_holiday_id: str
+    error: str
+
+
+class ErpHolidaySyncResult(BaseModel):
+    accepted: list[str] = Field(default_factory=list)
+    failed: list[ErpHolidaySyncFailure] = Field(default_factory=list)
+
+
+@router.post(
+    "/bulk",
+    response_model=ErpHolidaySyncResult,
+    dependencies=[Depends(require_erp_scope("holidays:write"))],
+)
 async def sync_holidays_bulk(
     holidays: list[ErpHoliday] = Body(..., min_length=1, max_length=5000),
     session: AsyncSession = Depends(get_async_session),
-):
+) -> ErpHolidaySyncResult:
     # One organization-wide calendar is used for all employees.
     calendar = await session.scalar(
         select(HolidayList).where(HolidayList.is_default.is_(True)).order_by(HolidayList.id)

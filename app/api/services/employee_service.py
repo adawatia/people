@@ -95,7 +95,7 @@ class EmployeeService:
         self,
         page: int = 1,
         page_size: int = 25,
-        q: str | None = None,
+        search: str | None = None,
         sort_by: str | None = None,
         sort_order: str = "asc",
         unit_id: int | None = None,
@@ -110,7 +110,7 @@ class EmployeeService:
         employees, total = await self.repo.list_paginated(
             page=page,
             page_size=page_size,
-            q=q, sort_by=sort_by, sort_order=sort_order,
+            search=search, sort_by=sort_by, sort_order=sort_order,
             unit_id=unit_id,
             department_id=department_id,
             designation_id=designation_id,

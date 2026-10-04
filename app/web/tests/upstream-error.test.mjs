@@ -37,8 +37,8 @@ test('BFF gives a useful validation message for a 422 response', () => {
   const upstreamError = loadUpstreamError()
   const result = upstreamError({
     statusCode: 422,
-    data: { detail: [{ msg: 'String should have at least 12 characters.' }] }
+    data: { detail: [{ msg: 'String should have at least 8 characters.' }] }
   })
   assert.equal(result.statusCode, 422)
-  assert.equal(result.statusMessage, 'String should have at least 12 characters.')
+  assert.equal(result.statusMessage, 'String should have at least 8 characters.')
 })

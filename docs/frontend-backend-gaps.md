@@ -10,7 +10,7 @@ This document tracks functional differences, contract gaps, and missing endpoint
 - **Frappe UX Expectation**: When an employee logs in, the dashboard immediately knows their `employee_id`, current shift, leave balance, and pending requests based on the session.
 - **Current FastAPI Status**: `/api/v1/users/me` returns user identity (`id`, `email`, `role`, `permissions`), but does not return the linked `employee_id` or `Employee` profile.
 - **Resolution**:
-  - Frontend checks if the user is linked to an employee by calling `/api/v1/employees/?q={email}` or reading `employee_code`.
+  - Frontend checks if the user is linked to an employee by calling `/api/v1/employees/?search={email}` or reading `employee_code`.
   - Recommended minor FastAPI enhancement: Include `employee_id` and `employee_code` in `UserResponse` on `/api/v1/users/me` when an employee profile exists.
 
 ---

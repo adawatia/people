@@ -26,11 +26,31 @@ class ErpOvertimeRecord(BaseModel):
     status: str = "APPROVED"
 
 
-@router.post("/records/bulk", dependencies=[Depends(require_erp_scope("overtime:write"))])
+class ErpOvertimeSyncAccepted(BaseModel):
+    erp_event_id: str
+    id: int
+
+
+class ErpOvertimeSyncFailure(BaseModel):
+    erp_event_id: str
+    error: str
+
+
+class ErpOvertimeSyncResult(BaseModel):
+    accepted: list[ErpOvertimeSyncAccepted] = Field(default_factory=list)
+    duplicates: list[ErpOvertimeSyncAccepted] = Field(default_factory=list)
+    failed: list[ErpOvertimeSyncFailure] = Field(default_factory=list)
+
+
+@router.post(
+    "/records/bulk",
+    response_model=ErpOvertimeSyncResult,
+    dependencies=[Depends(require_erp_scope("overtime:write"))],
+)
 async def sync_overtime_bulk(
     records: list[ErpOvertimeRecord] = Body(..., min_length=1, max_length=5000),
     session: AsyncSession = Depends(get_async_session),
-):
+) -> ErpOvertimeSyncResult:
     accepted: list[dict] = []
     duplicates: list[dict] = []
     failed: list[dict] = []

@@ -61,7 +61,7 @@ async def test_overtime_pages_apply_scope_search_dates_and_stable_order():
                 # Force the query to provide its related data; don't rely on fixture identity-map state.
                 session.expunge_all()
                 service = OvertimeService(AsyncQueryAdapter(session))
-                filters = {"unit_ids": {units[0].id}, "q": " Alice Singh ", "status": "PENDING",
+                filters = {"unit_ids": {units[0].id}, "search": " Alice Singh ", "status": "PENDING",
                            "from_date": date(2026, 9, 1), "to_date": date(2026, 9, 30), "page_size": 2}
                 first = await service.list_overtime(page=1, **filters)
                 second = await service.list_overtime(page=2, **filters)
@@ -74,7 +74,7 @@ async def test_overtime_pages_apply_scope_search_dates_and_stable_order():
                 assert first.items[0].employee_name == "Alice Singh"
                 assert first.items[0].employee_code == "A_100"
                 assert first.items[0].attendance_date == date(2026, 9, 2)
-                literal = await service.list_overtime(page=1, q="%", unit_ids={units[0].id})
+                literal = await service.list_overtime(page=1, search="%", unit_ids={units[0].id})
                 assert literal.total == 0
                 assert literal.total_pages == 1
                 self_page = await service.list_overtime(page=1, employee_id=alice.id)

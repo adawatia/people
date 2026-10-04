@@ -49,7 +49,10 @@ function unitName(id: number) {
     </div>
     <ListControls
       v-model:search="list.search.value"
+      v-model:sort-by="list.sortBy.value"
+      v-model:sort-order="list.sortOrder.value"
       :active="list.active.value"
+      :sorts="[{ label: 'Name', value: 'name' }, { label: 'Newest', value: 'id' }]"
       :search-placeholder="`Search ${activeTab}`"
       @clear="list.clear"
     />

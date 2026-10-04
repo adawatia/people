@@ -93,7 +93,7 @@ Creates a new user account. **Public registration is disabled.** This endpoint r
 - Other roles are forbidden from creating users.
 
 **Password Requirements:**
-- Minimum 12 characters, with at least 1 uppercase, 1 lowercase, 1 number, and 1 special character.
+- Minimum 8 characters; passwords are screened for strength, compromised values, and personal information rather than composition rules.
 - Cannot contain the user's name, username, or email.
 - Must score >= 3 on the `zxcvbn` strength checker.
 

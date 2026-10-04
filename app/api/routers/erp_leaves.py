@@ -1,8 +1,8 @@
 """ERP leave status change feed and acknowledgements."""
 
-from datetime import datetime
+from datetime import date, datetime
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +11,8 @@ from sqlalchemy.orm import selectinload
 from core.database import get_async_session
 from core.erp_auth import require_erp_scope
 from db.models import Employee, LeaveApplication, LeaveBalance, LeaveType, now_ist
+from schemas.leaves import LeavePeriodCreate, LeavePeriodRead, LeaveTypeCreate, LeaveTypeRead, LeaveTypeUpdate
+from services.leave_service import LeaveService
 
 router = APIRouter(prefix="/integrations/erp/leaves", tags=["erp-leaves"])
 
@@ -39,12 +41,57 @@ class ErpLeaveBalance(BaseModel):
     }
 
 
-@router.get("/changes", dependencies=[Depends(require_erp_scope("leaves:read"))])
+class ErpLeaveChange(BaseModel):
+    event_id: str | None
+    leave_id: int
+    employee_code: str
+    leave_code: str
+    from_date: date
+    to_date: date
+    days: float
+    status: str
+    reason: str | None
+    rejection_reason: str | None
+    approved_at: datetime | None
+
+
+class ErpLeaveChangesResponse(BaseModel):
+    items: list[ErpLeaveChange] = Field(default_factory=list)
+    has_more: bool
+
+
+class ErpLeaveChangesAcknowledgement(BaseModel):
+    acknowledged: list[str] = Field(default_factory=list)
+    unknown: list[str] = Field(default_factory=list)
+
+
+class ErpLeaveBalanceSyncAccepted(BaseModel):
+    employee_id: int
+    leave_code: str
+    year: int
+
+
+class ErpLeaveBalanceSyncFailure(BaseModel):
+    employee_code: str | None
+    leave_code: str
+    error: str
+
+
+class ErpLeaveBalanceSyncResult(BaseModel):
+    accepted: list[ErpLeaveBalanceSyncAccepted] = Field(default_factory=list)
+    failed: list[ErpLeaveBalanceSyncFailure] = Field(default_factory=list)
+
+
+@router.get(
+    "/changes",
+    response_model=ErpLeaveChangesResponse,
+    dependencies=[Depends(require_erp_scope("leaves:read"))],
+)
 async def get_leave_changes(
     since: datetime | None = Query(None, description="Return events updated after this timestamp"),
     limit: int = Query(100, ge=1, le=500),
     session: AsyncSession = Depends(get_async_session),
-):
+) -> ErpLeaveChangesResponse:
     stmt = (
         select(LeaveApplication)
         .options(selectinload(LeaveApplication.employee), selectinload(LeaveApplication.leave_type))
@@ -77,11 +124,15 @@ async def get_leave_changes(
     }
 
 
-@router.post("/changes/ack", dependencies=[Depends(require_erp_scope("leaves:write"))])
+@router.post(
+    "/changes/ack",
+    response_model=ErpLeaveChangesAcknowledgement,
+    dependencies=[Depends(require_erp_scope("leaves:write"))],
+)
 async def acknowledge_leave_changes(
     event_ids: list[str],
     session: AsyncSession = Depends(get_async_session),
-):
+) -> ErpLeaveChangesAcknowledgement:
     if not event_ids:
         return {"acknowledged": [], "unknown": []}
     result = await session.execute(select(LeaveApplication).where(LeaveApplication.erp_event_id.in_(event_ids)))
@@ -94,11 +145,10 @@ async def acknowledge_leave_changes(
     return {"acknowledged": sorted(found), "unknown": sorted(set(event_ids) - found)}
 
 
-@router.post("/balances", dependencies=[Depends(require_erp_scope("leaves:write"))])
 async def sync_leave_balances(
     balances: list[ErpLeaveBalance],
     session: AsyncSession = Depends(get_async_session),
-):
+) -> ErpLeaveBalanceSyncResult:
     accepted: list[dict] = []
     failed: list[dict] = []
     for item in balances:
@@ -135,6 +185,7 @@ async def sync_leave_balances(
 
 @router.post(
     "/balances/bulk",
+    response_model=ErpLeaveBalanceSyncResult,
     dependencies=[Depends(require_erp_scope("leaves:write"))],
     summary="Bulk sync ERP leave balances",
     description="Synchronizes balances for multiple employees, leave types, and years in one request.",
@@ -142,5 +193,39 @@ async def sync_leave_balances(
 async def sync_leave_balances_bulk(
     balances: list[ErpLeaveBalance],
     session: AsyncSession = Depends(get_async_session),
-):
+) -> ErpLeaveBalanceSyncResult:
     return await sync_leave_balances(balances, session)
+
+
+@router.post(
+    "/periods",
+    response_model=LeavePeriodRead,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_erp_scope("leave-master:write"))],
+    summary="Create an ERP-owned leave period",
+)
+async def create_leave_period(data: LeavePeriodCreate, session: AsyncSession = Depends(get_async_session)) -> LeavePeriodRead:
+    return await LeaveService(session).create_period(data)
+
+
+@router.post(
+    "/types",
+    response_model=LeaveTypeRead,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_erp_scope("leave-master:write"))],
+    summary="Create an ERP-owned leave type",
+)
+async def create_leave_type(data: LeaveTypeCreate, session: AsyncSession = Depends(get_async_session)) -> LeaveTypeRead:
+    return await LeaveService(session).create_type(data)
+
+
+@router.patch(
+    "/types/{type_id}",
+    response_model=LeaveTypeRead,
+    dependencies=[Depends(require_erp_scope("leave-master:write"))],
+    summary="Update an ERP-owned leave type",
+)
+async def update_leave_type(
+    type_id: int, data: LeaveTypeUpdate, session: AsyncSession = Depends(get_async_session)
+) -> LeaveTypeRead:
+    return await LeaveService(session).update_type(type_id, data)

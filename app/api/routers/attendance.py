@@ -17,11 +17,9 @@ from db.models import User
 from schemas.attendance import (
     AttendanceCorrectionCreate,
     AttendanceCorrectionRead,
-    AttendancePunchCreate,
     AttendancePunchRead,
     AttendanceRecordRead,
     AttendanceSummaryRead,
-    BulkPunchCreate,
     ProcessAttendanceRequest,
     ProcessAttendanceResponse,
 )
@@ -41,27 +39,6 @@ async def _attendance_read_scope(user: User, session: AsyncSession) -> EmployeeA
     for permission in ATTENDANCE_READ_PERMISSIONS:
         scope.include(await get_permission_scope(user, permission, session))
     return scope
-
-
-# ── Raw Biometric / Mobile Punch Ingestion ────────────────────────────────────
-
-
-@router.post("/checkins", response_model=AttendancePunchRead, status_code=status.HTTP_201_CREATED)
-async def record_checkin(
-    data: AttendancePunchCreate,
-    current_user: User = Depends(current_business_user),
-    session: AsyncSession = Depends(get_async_session),
-) -> AttendancePunchRead:
-    raise HTTPException(status_code=403, detail="Attendance punches are supplied by ERP")
-
-
-@router.post("/checkins/bulk", response_model=list[AttendancePunchRead], status_code=status.HTTP_201_CREATED)
-async def record_bulk_checkins(
-    data: BulkPunchCreate,
-    _: User = Depends(require_permission("attendance.process")),
-    session: AsyncSession = Depends(get_async_session),
-) -> list[AttendancePunchRead]:
-    raise HTTPException(status_code=403, detail="Attendance punches are supplied by ERP")
 
 
 @router.get("/checkins", response_model=PaginatedResponse[AttendancePunchRead])

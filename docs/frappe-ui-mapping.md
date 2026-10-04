@@ -37,18 +37,17 @@ This document provides a comprehensive mapping between Frappe HR (Desk & Mobile 
 | Frappe Reference | Nuxt Page / Route | FastAPI REST Endpoint | Key Workflow & Features |
 | :--- | :--- | :--- | :--- |
 | `Employee` DocType | `/employees` (List & Cards) | `GET /api/v1/employees/` | Filter by status, unit, department; search by code/name; responsive table. |
-| `Employee` Form | `/employees/create`, `/employees/[id]` | `POST /api/v1/employees/`, `GET/PUT /api/v1/employees/{id}` | Sectioned form: Personal, Org, Shift assignment, Biometric ID, Reporting Manager. |
-| `Department` DocType | `/org` (Departments tab) | `GET /api/v1/org/departments`, `POST /api/v1/org/departments` | Hierarchical department listing and unit linkage. |
-| `Company` / Branch | `/org` (Units tab) | `GET /api/v1/org/units`, `POST /api/v1/org/units` | Multi-unit factory/branch configuration. |
-| `Designation` DocType | `/org` (Designations tab) | `GET /api/v1/designations/`, `POST /api/v1/designations/` | Designation taxonomy management. |
+| `Employee` Form | `/employees/[id]` | `GET /api/v1/employees/{id}` | Read-only profile; ERP owns employee provisioning and master data. |
+| `Department` DocType | `/organization` (Departments tab) | `GET /api/v1/org/departments` | Read-only ERP-synchronized hierarchy. |
+| `Company` / Branch | `/organization` (Units tab) | `GET /api/v1/org/units` | Read-only ERP-synchronized units. |
+| `Designation` DocType | `/organization` (Designations tab) | `GET /api/v1/designations/` | Read-only ERP-synchronized designation taxonomy. |
 
 ### 2.2 Attendance & Punching
 | Frappe Reference | Nuxt Page / Route | FastAPI REST Endpoint | Key Workflow & Features |
 | :--- | :--- | :--- | :--- |
-| `Employee Checkin` | `/attendance/checkins` | `GET/POST /api/v1/attendance/checkins` | Raw biometric/mobile punches with GPS geolocation (`IN`/`OUT`). |
-| Mobile `CheckInPanel.vue` | Dashboard Widget & Quick Modal | `POST /api/v1/attendance/checkins` | One-touch web punch with geolocation capture and current shift countdown. |
+| `Employee Checkin` | — | `GET /api/v1/attendance/checkins` | Read-only raw punch audit; processed attendance is synchronized by ERP. |
 | `Attendance` DocType | `/attendance` | `GET /api/v1/attendance/` | Processed daily attendance status (`PRESENT`, `ABSENT`, `HALF_DAY`, `ON_LEAVE`, `WEEKLY_OFF`, `HOLIDAY`). |
-| `Attendance Request` (Regularization) | `/attendance/corrections` | `POST /api/v1/attendance/corrections`, `PATCH .../approve` | Employee punch regularisation request with manager approve/reject modal. |
+| `Attendance Request` (Regularization) | `/attendance` | `POST /api/v1/attendance/corrections` | Correction request awaiting ERP reconciliation. |
 | Attendance Processing Engine | Admin action on `/attendance` | `POST /api/v1/attendance/process` | Batch date-range calculation of attendance from raw punches and shift windows. |
 
 ### 2.3 Leave Management

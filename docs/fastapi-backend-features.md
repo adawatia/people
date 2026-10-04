@@ -59,7 +59,7 @@ Identity management is handled by `fastapi-users` combined with custom invitatio
 ### Key Features
 - **Public Registration Disabled**: All user accounts are provisioned by authorized administrators (`user.create` permission).
 - **Admin-Invited Onboarding**: When an employee is created, an invitation token is generated, and an invitation email is queued asynchronously via `EmailService`.
-- **Password Policy Engine**: Enforces a minimum of 15 characters, rejects compromised and personal-information-based values, and requires a `zxcvbn` strength score $\ge 3$ without composition rules.
+- **Password Policy Engine**: Enforces a minimum of 8 characters, rejects compromised and personal-information-based values, and requires a `zxcvbn` strength score $\ge 3$ without composition rules.
 
 ---
 
@@ -212,8 +212,6 @@ Biometric punch ingestion, daily batch processor, calendar views, and attendance
 
 | Endpoint | Method | Permission | Purpose |
 | :--- | :---: | :---: | :--- |
-| `/attendance/checkins` | `POST` | Active User | Ingests single biometric/mobile punch; binds to active shift. |
-| `/attendance/checkins/bulk`| `POST` | Active User | Ingests high-volume punches from biometric machine sync utilities. |
 | `/attendance/checkins` | `GET` | Active User | Queries raw punch logs with employee, time, and processed filters. |
 | `/attendance/` | `GET` | Active User | Lists consolidated attendance records with pagination and status filters. |
 | `/attendance/records/{id}` | `GET` | Active User | Retrieves a specific attendance record. |
@@ -222,11 +220,9 @@ Biometric punch ingestion, daily batch processor, calendar views, and attendance
 | `/attendance/process` | `POST` | `attendance.process` | Executes daily automated attendance calculation batch engine. |
 | `/attendance/corrections` | `POST` | Active User | Submits attendance regularization request with requested punch times and reason. |
 | `/attendance/corrections` | `GET` | Active User | Lists pending and processed attendance correction requests. |
-| `/attendance/corrections/{id}/approve`| `PATCH`| `attendance.approve_correction`| Approves correction, recalculates worked hours, and sets status `PRESENT`. |
-| `/attendance/corrections/{id}/reject` | `PATCH`| `attendance.approve_correction`| Rejects correction with rejection reason. |
 
 ### Key Features
-- **Punch Deduplication**: Suppresses accidental double-taps at biometric turnstiles within the same second.
+- **ERP attendance synchronization**: processed daily records enter through `POST /api/v1/integrations/erp/attendance/records/bulk`; browser punch writes are not supported.
 - **Remote Work Recognition**: The batch attendance processor queries approved Work Arrangements (WFH/OD) and marks employees `WORK_FROM_HOME` instead of falsely penalizing them as `ABSENT`.
 - **Self-Approval Prevention**: Approvers cannot approve their own regularization requests.
 

@@ -49,7 +49,7 @@ class EmployeeRepository:
         self,
         page: int = 1,
         page_size: int = 25,
-        q: str | None = None,
+        search: str | None = None,
         sort_by: str | None = None,
         sort_order: str = "asc",
         unit_id: int | None = None,
@@ -63,8 +63,8 @@ class EmployeeRepository:
     ) -> tuple[list[Employee], int]:
         base_query = select(Employee).options(*self._eager_options())
 
-        if q:
-            term = q.strip()
+        if search:
+            term = search.strip()
             base_query = base_query.where(
                 or_(
                     Employee.employee_code.icontains(term, autoescape=True),

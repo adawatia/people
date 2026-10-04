@@ -32,7 +32,6 @@ const details = computed(() => [
 
 <template>
   <div class="people-page mx-auto max-w-4xl">
-    <DataFeedback :pending="pending" :error="error" :has-data="Boolean(employee)" />
     <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
       <div>
         <h1 class="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">
@@ -62,38 +61,50 @@ const details = computed(() => [
       color="error"
       :actions="[{ label: 'Retry profile', onClick: () => refresh() }]"
     />
-    <UCard class="relative mt-7 overflow-hidden">
-      <div class="relative flex flex-col gap-5 sm:flex-row sm:items-center">
+    <section class="people-card mt-7 overflow-hidden">
+      <div class="flex flex-col gap-5 p-5 sm:flex-row sm:items-center sm:p-7">
         <UAvatar
           :text="auth.initials.value"
           size="3xl"
+          class="shrink-0 ring-4 ring-[var(--people-lavender)]"
         />
-        <div class="min-w-0">
-          <h3 class="text-xl font-semibold">
+        <div class="min-w-0 flex-1">
+          <div class="flex flex-wrap items-center gap-3">
+            <h2 class="text-xl font-semibold">
             {{ auth.displayName.value }}
-          </h3>
+            </h2>
+            <UBadge color="success" variant="soft" icon="i-lucide-circle-check">
+              Active account
+            </UBadge>
+          </div>
           <p class="mt-1 text-sm text-muted">
             {{ roleLabel }} · {{ user?.username }}
           </p>
-          <UBadge
-            class="mt-3"
-            color="success"
-            variant="soft"
-          >
-            Active account
-          </UBadge>
+          <p class="mt-4 max-w-xl text-sm leading-6 text-muted">
+            Your employment record is synchronized from ERP. Contact your HR team if a work or contact detail is incorrect.
+          </p>
         </div>
       </div>
-    </UCard>
-    <UCard
-      class="mt-6"
-      :ui="{ body: 'p-0 sm:p-0' }"
-    >
-      <template #header>
-        <h3 class="font-semibold">
-          Personal and employment details
-        </h3>
-      </template>
+      <div class="grid border-t border-[var(--people-border)] sm:grid-cols-3">
+        <div class="p-5 sm:border-r sm:border-[var(--people-border)]">
+          <p class="text-xs font-medium text-muted">Account role</p>
+          <p class="mt-1 text-sm font-semibold">{{ roleLabel }}</p>
+        </div>
+        <div class="border-t border-[var(--people-border)] p-5 sm:border-l-0 sm:border-t-0 sm:border-r sm:border-[var(--people-border)]">
+          <p class="text-xs font-medium text-muted">Employee code</p>
+          <p class="mt-1 text-sm font-semibold">{{ employee?.employee_code || user?.employee_code || 'Not available' }}</p>
+        </div>
+        <div class="border-t border-[var(--people-border)] p-5 sm:border-l-0 sm:border-t-0">
+          <p class="text-xs font-medium text-muted">Access scope</p>
+          <p class="mt-1 text-sm font-semibold">{{ user?.scope_type?.toLowerCase() || 'Self' }}</p>
+        </div>
+      </div>
+    </section>
+    <section class="people-card mt-6 overflow-hidden">
+      <div class="border-b border-[var(--people-border)] p-5 sm:px-6">
+        <h2 class="font-semibold">Personal and employment details</h2>
+        <p class="mt-1 text-sm text-muted">Read-only details supplied by your People and ERP records.</p>
+      </div>
       <div
         v-if="pending && !employee"
         class="grid gap-4 p-5 sm:grid-cols-2"
@@ -121,6 +132,6 @@ const details = computed(() => [
           </p>
         </div>
       </div>
-    </UCard>
+    </section>
   </div>
 </template>

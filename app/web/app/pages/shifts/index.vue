@@ -7,15 +7,18 @@ useSeoMeta({ title: 'Shifts' })
 const api = useHrmsApi()
 const auth = useAuth()
 const workspace = useWorkspace()
-const list = useListState({ sort_order: 'desc' })
+const definitionList = useListState({ sort_order: 'asc' }, 'shift_')
+const assignmentList = useListState({ sort_order: 'desc' }, 'assignment_')
 const tab = ref<'definitions' | 'assignments'>('definitions')
 // Shift definitions and employee assignments are authored in ERP and mirrored here.
 const { data: rawData, pending, error, refresh } = await useAsyncData('shift-workspace', async () => {
   const employee_id = workspace.current.value === 'MY' ? auth.user.value?.employee_id : undefined
-  const query = { ...list.query.value, employee_id }
-  const [shifts, assignments] = await Promise.all([api.request<PaginatedResponse<Shift>>('shifts/', { query: { ...query, is_active: true } }), api.request<PaginatedResponse<ShiftAssignment>>('shifts/assignments', { query })])
+  const [shifts, assignments] = await Promise.all([
+    api.request<PaginatedResponse<Shift>>('shifts/', { query: { ...definitionList.query.value, is_active: true } }),
+    api.request<PaginatedResponse<ShiftAssignment>>('shifts/assignments', { query: { ...assignmentList.query.value, employee_id } })
+  ])
   return { shifts: shifts.items, shiftPage: shifts, assignments: assignments.items, assignmentPage: assignments }
-}, { watch: [list.query, workspace.current] })
+}, { watch: [definitionList.query, assignmentList.query, workspace.current] })
 const data = useRetainedData(rawData)
 const time = (value: string) => value?.slice(0, 5) || '—'
 const scopeDescription = computed(() => workspace.current.value === 'MY'
@@ -53,11 +56,24 @@ const scopeDescription = computed(() => workspace.current.value === 'MY'
       </button>
     </div>
     <ListControls
-      v-if="tab === 'assignments'"
-      v-model:search="list.search.value"
-      :active="list.active.value"
+      v-if="tab === 'definitions'"
+      v-model:search="definitionList.search.value"
+      v-model:sort-by="definitionList.sortBy.value"
+      v-model:sort-order="definitionList.sortOrder.value"
+      :active="definitionList.active.value"
+      :sorts="[{ label: 'Name', value: 'name' }, { label: 'Code', value: 'code' }, { label: 'Start time', value: 'start_time' }]"
+      search-placeholder="Search shift definitions"
+      @clear="definitionList.clear"
+    />
+    <ListControls
+      v-else
+      v-model:search="assignmentList.search.value"
+      v-model:sort-by="assignmentList.sortBy.value"
+      v-model:sort-order="assignmentList.sortOrder.value"
+      :active="assignmentList.active.value"
+      :sorts="[{ label: 'Effective date', value: 'effective_from' }, { label: 'Status', value: 'status' }]"
       search-placeholder="Search employee name or code"
-      @clear="list.clear"
+      @clear="assignmentList.clear"
     />
     <UAlert
       v-if="error"
@@ -128,8 +144,8 @@ const scopeDescription = computed(() => workspace.current.value === 'MY'
         v-if="!pending && !error && !data?.assignments.length"
         title="No shift assignments found"
         description="Assigned schedules appear here after they are synchronized from ERP."
-        :filtered="list.active.value"
-        @reset="list.clear"
+        :filtered="assignmentList.active.value"
+        @reset="assignmentList.clear"
       /><div
         v-if="data?.assignments.length"
         class="divide-y divide-[var(--people-border)]"
@@ -166,10 +182,17 @@ const scopeDescription = computed(() => workspace.current.value === 'MY'
       description="Active shift definitions appear here after they are synchronized from ERP."
     />
     <ListPagination
-      v-if="data"
-      v-model:page="list.page.value"
-      v-model:page-size="list.pageSize.value"
-      :total="tab === 'assignments' ? data.assignmentPage.total : data.shiftPage.total"
+      v-if="data && tab === 'definitions'"
+      v-model:page="definitionList.page.value"
+      v-model:page-size="definitionList.pageSize.value"
+      :total="data.shiftPage.total"
+      :loading="pending"
+    />
+    <ListPagination
+      v-else-if="data"
+      v-model:page="assignmentList.page.value"
+      v-model:page-size="assignmentList.pageSize.value"
+      :total="data.assignmentPage.total"
       :loading="pending"
     />
   </div>

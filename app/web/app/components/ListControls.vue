@@ -1,11 +1,13 @@
 <script setup lang="ts">
 const props = withDefaults(defineProps<{
   active?: boolean
+  activeCount?: number
   sorts?: { label: string, value: string }[]
   searchPlaceholder?: string
   label?: string
 }>(), {
   active: false,
+  activeCount: 0,
   sorts: () => [],
   searchPlaceholder: 'Search records'
 })
@@ -18,6 +20,7 @@ const expanded = ref(false)
 const searchField = useTemplateRef('searchField')
 const panelId = `list-filters-${useId()}`
 const hasAdvanced = computed(() => Boolean(props.sorts.length || slots.default))
+const activeLabel = computed(() => `${props.activeCount || 1} active`)
 
 watch(() => props.active, (active) => {
   if (active && hasAdvanced.value) expanded.value = true
@@ -59,7 +62,7 @@ async function clear() {
           variant="soft"
           size="sm"
         >
-          Active
+          {{ activeLabel }}
         </UBadge>
       </div>
       <UButton
@@ -90,7 +93,7 @@ async function clear() {
         </UFormField>
         <UButton
           v-if="hasAdvanced"
-          class="mt-6 min-h-11 md:hidden"
+          class="mt-6 min-h-11"
           color="neutral"
           variant="outline"
           :icon="expanded ? 'i-lucide-chevron-up' : 'i-lucide-sliders-horizontal'"
@@ -103,9 +106,17 @@ async function clear() {
       </div>
 
       <div
+        v-if="slots.quick"
+        class="mt-3 flex flex-wrap items-center gap-2"
+        aria-label="Quick filters"
+      >
+        <slot name="quick" />
+      </div>
+
+      <div
         v-if="hasAdvanced"
         :id="panelId"
-        class="mt-4 gap-3 border-t border-[var(--people-border)] pt-4 md:mt-3 md:grid md:grid-cols-[repeat(auto-fit,minmax(10rem,1fr))] md:border-0 md:pt-0"
+        class="mt-4 grid gap-3 border-t border-[var(--people-border)] pt-4 md:grid-cols-[repeat(auto-fit,minmax(10rem,1fr))]"
         :class="expanded ? 'grid' : 'hidden'"
       >
         <slot />

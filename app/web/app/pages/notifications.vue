@@ -80,19 +80,21 @@ async function markAll() {
       :active="list.active.value"
       search-placeholder="Search notification titles"
       @clear="list.clear"
-    />
-    <div class="mt-7 flex gap-1 rounded-xl bg-muted/5 p-1 sm:w-fit">
-      <button
-        v-for="option in [{ key: 'all', label: 'All' }, { key: 'unread', label: `Unread (${unread})` }]"
-        :key="option.key"
-        class="rounded-lg px-4 py-2 text-sm font-medium"
-        :class="filter === option.key ? 'bg-[var(--people-surface)] shadow-sm' : 'text-muted'"
-        :aria-pressed="filter === option.key"
-        @click="filter = option.key as 'all' | 'unread'"
-      >
-        {{ option.label }}
-      </button>
-    </div>
+    >
+      <template #quick>
+        <UButton
+          v-for="option in [{ key: 'all', label: 'All' }, { key: 'unread', label: `Unread (${unread})` }]"
+          :key="option.key"
+          size="sm"
+          :variant="filter === option.key ? 'soft' : 'ghost'"
+          :color="filter === option.key ? 'primary' : 'neutral'"
+          :aria-pressed="filter === option.key"
+          @click="filter = option.key as 'all' | 'unread'"
+        >
+          {{ option.label }}
+        </UButton>
+      </template>
+    </ListControls>
     <UAlert
       v-if="error"
       class="mt-5"

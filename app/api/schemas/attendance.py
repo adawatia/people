@@ -163,7 +163,17 @@ class ErpCorrectionCreate(BaseModel):
     model_config = ConfigDict(json_schema_extra={"example": {"employee_code": "EMP001", "erp_correction_id": "ERP-CORR-5001", "attendance_date": "2026-09-20", "requested_punch_in": "09:00:00", "reason": "Biometric device correction"}})
 
 
+class ErpSyncAccepted(BaseModel):
+    erp_record_id: str
+    id: int
+
+
+class ErpSyncFailure(BaseModel):
+    erp_record_id: str
+    error: str
+
+
 class ErpSyncResult(BaseModel):
-    accepted: list[dict] = Field(default_factory=list)
-    duplicates: list[dict] = Field(default_factory=list)
-    failed: list[dict] = Field(default_factory=list)
+    accepted: list[ErpSyncAccepted] = Field(default_factory=list)
+    duplicates: list[ErpSyncAccepted] = Field(default_factory=list)
+    failed: list[ErpSyncFailure] = Field(default_factory=list)
