@@ -22,7 +22,7 @@ from core.auth import (
     limiter,
     setup_rate_limits,
 )
-from core.database import check_database_connection
+from core.database import auth_engine, check_database_connection, get_engine
 from core.logging import setup_logging
 from core.settings import get_settings
 from routers import auth_mfa, auth_sessions
@@ -65,6 +65,11 @@ async def lifespan(_: FastAPI):
         await cleanup_task
     except asyncio.CancelledError:
         pass
+    await auth_engine.dispose()
+    # The sync health-check pool is lazy; avoid creating it merely to close it.
+    if get_engine.cache_info().currsize:
+        get_engine().dispose()
+        get_engine.cache_clear()
 
 
 from fastapi.middleware.cors import CORSMiddleware

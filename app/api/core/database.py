@@ -8,6 +8,7 @@ request; individual sessions are opened per-request via the
 """
 
 from collections.abc import AsyncGenerator
+from functools import lru_cache
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
@@ -23,8 +24,9 @@ from core.settings import get_settings
 settings = get_settings()
 
 
+@lru_cache(maxsize=1)
 def get_engine() -> Engine:
-    """Build a synchronous engine (used by health checks and Alembic)."""
+    """Reuse the synchronous health-check pool instead of opening one per probe."""
     # pool_pre_ping issues a lightweight liveness check before reusing a
     # pooled connection, so stale connections (e.g. after a DB restart)
     # fail transparently instead of raising on the first query.

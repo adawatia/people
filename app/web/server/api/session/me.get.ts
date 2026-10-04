@@ -23,25 +23,35 @@ export default defineEventHandler(async (event): Promise<CurrentUser> => {
   })
 
   const token = getCookie(event, SESSION_COOKIE)
-  if (!token) throw createError({ statusCode: 401, statusMessage: 'Your session has expired.' })
-
-  try {
-    return await fetchUser(token)
-  } catch (error) {
-    const status = upstreamStatus(error)
-    const refresh = getCookie(event, REFRESH_COOKIE)
-    if (status !== 401 || !refresh) {
-      if (status === 401) clearSessionCookies(event)
-      throw upstreamError(error)
-    }
+  const refresh = getCookie(event, REFRESH_COOKIE)
+  if (token) {
     try {
-      const refreshed = await refreshSession(event, refresh)
-      setAccessCookie(event, refreshed.access_token, refreshed.expires_in)
-      setRefreshCookie(event, refreshed.refresh_token, refreshed.absolute_expires_at)
-      return await fetchUser(refreshed.access_token)
-    } catch {
-      clearSessionCookies(event)
-      throw createError({ statusCode: 401, statusMessage: 'Your session has expired. Please sign in again.' })
+      return await fetchUser(token)
+    } catch (error) {
+      if (upstreamStatus(error) !== 401) throw upstreamError(error)
     }
+  }
+
+  // The browser removes the short-lived access cookie on expiry. A valid
+  // refresh cookie must still recover the session on a full-page reload.
+  if (!refresh) {
+    clearSessionCookies(event)
+    throw createError({ statusCode: 401, statusMessage: 'Your session has expired.' })
+  }
+
+  let refreshed
+  try {
+    refreshed = await refreshSession(event, refresh)
+  } catch (error) {
+    if ([400, 401, 403].includes(upstreamStatus(error))) clearSessionCookies(event)
+    throw upstreamError(error)
+  }
+  setAccessCookie(event, refreshed.access_token, refreshed.expires_in)
+  setRefreshCookie(event, refreshed.refresh_token, refreshed.absolute_expires_at)
+  try {
+    return await fetchUser(refreshed.access_token)
+  } catch (error) {
+    if (upstreamStatus(error) === 401) clearSessionCookies(event)
+    throw upstreamError(error)
   }
 })

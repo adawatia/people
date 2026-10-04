@@ -69,6 +69,13 @@ export function setRefreshCookie(event: H3Event, token: string, absoluteExpiresA
 }
 
 export function clearSessionCookies(event: H3Event) {
+  const refresh = getCookie(event, REFRESH_COOKIE)
+  if (refresh) {
+    recentRefreshes.delete(refresh)
+    for (const [previousToken, entry] of recentRefreshes) {
+      if (entry.session.refresh_token === refresh) recentRefreshes.delete(previousToken)
+    }
+  }
   deleteCookie(event, SESSION_COOKIE, { path: '/' })
   deleteCookie(event, REFRESH_COOKIE, { path: '/' })
 }
@@ -89,14 +96,30 @@ export interface RefreshedSession {
  * all apply the same resulting cookies.
  */
 const inFlightRefreshes = new Map<string, Promise<RefreshedSession>>()
+// SSR subrequests can arrive just after a fast rotation has finished, while
+// still carrying the original request's cookies. Keep the result briefly so
+// those requests do not present a spent token to the replay-protected API.
+const recentRefreshes = new Map<string, { session: RefreshedSession, expiresAt: number }>()
+const REFRESH_GRACE_MS = 2000
+const MAX_RECENT_REFRESHES = 512
 
 export function refreshSession(event: H3Event, refreshToken: string): Promise<RefreshedSession> {
   const existing = inFlightRefreshes.get(refreshToken)
   if (existing) return existing
+  const recent = recentRefreshes.get(refreshToken)
+  if (recent && recent.expiresAt > Date.now()) return Promise.resolve(recent.session)
+  if (recent) recentRefreshes.delete(refreshToken)
 
   const pending = $fetch<RefreshedSession>(apiUrl(event, 'auth/session/refresh'), {
     method: 'POST',
     body: { refresh_token: refreshToken }
+  }).then((session) => {
+    recentRefreshes.set(refreshToken, { session, expiresAt: Date.now() + REFRESH_GRACE_MS })
+    if (recentRefreshes.size > MAX_RECENT_REFRESHES) {
+      const oldest = recentRefreshes.keys().next().value
+      if (oldest) recentRefreshes.delete(oldest)
+    }
+    return session
   }).finally(() => {
     inFlightRefreshes.delete(refreshToken)
   })

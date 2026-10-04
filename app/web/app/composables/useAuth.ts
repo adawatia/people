@@ -6,6 +6,12 @@
  * (`/api/session/me`) and cached until `force` refresh or logout.
  */
 import type { AccessScope, BusinessRole, CurrentUser, LoginPayload, LoginResult, MfaEnrollment } from '#shared/types/auth'
+import { appendResponseHeader, type H3Event } from 'h3'
+
+function forwardSessionCookies(event?: H3Event, headers?: Headers) {
+  if (!event || !headers) return
+  for (const cookie of headers.getSetCookie()) appendResponseHeader(event, 'set-cookie', cookie)
+}
 
 export function useAuth() {
   const requestFetch = useRequestFetch()
@@ -38,13 +44,26 @@ export function useAuth() {
    */
   async function fetchUser(force = false) {
     if (initialized.value && !force) return user.value
+    let resolved = false
+    const event = import.meta.server ? useRequestEvent() : undefined
+    const headers = import.meta.server ? useRequestHeaders(['cookie']) : undefined
     try {
-      user.value = await requestFetch<CurrentUser>('/api/session/me')
-    } catch {
-      // 401 or network error — treat as signed out rather than crashing.
+      const response = await $fetch.raw<CurrentUser>('/api/session/me', {
+        headers
+      })
+      forwardSessionCookies(event, response.headers)
+      user.value = response._data ?? null
+      resolved = true
+    } catch (error) {
+      forwardSessionCookies(event, (error as { response?: { headers?: Headers } }).response?.headers)
+      const status = (error as { statusCode?: number, status?: number }).statusCode
+        ?? (error as { statusCode?: number, status?: number }).status
+      if (status !== 401) throw error
       user.value = null
+      resolved = true
     } finally {
-      initialized.value = true
+      // A transient API error must not be cached as a signed-out session.
+      if (resolved) initialized.value = true
     }
     return user.value
   }

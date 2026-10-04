@@ -33,11 +33,13 @@ export default defineEventHandler(async (event) => {
     headers: { Authorization: `Bearer ${token}` }
   })
 
+  const token = getCookie(event, SESSION_COOKIE)
+  const refresh = getCookie(event, REFRESH_COOKIE)
   try {
-    return await call(getCookie(event, SESSION_COOKIE) || '')
+    if (!token) throw createError({ statusCode: 401, statusMessage: 'Access token expired.' })
+    return await call(token)
   } catch (error) {
     const status = upstreamStatus(error)
-    const refresh = getCookie(event, REFRESH_COOKIE)
     // The refresh route is itself the recovery path — never recurse into it.
     if (status === 401 && refresh && path !== 'auth/session/refresh') {
       let refreshed
