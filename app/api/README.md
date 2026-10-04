@@ -23,6 +23,30 @@ Swagger UI is available at:
 - http://localhost:8000/redoc
 - http://localhost:8000/openapi.json
 
+## Reset the local development database
+
+Use this only when intentionally wiping the local PostgreSQL database. It
+deletes every table and all HRMS data in the `public` schema. Never run it
+against a shared, staging, or production database.
+
+From `psql` while connected to the `hrms` database, run:
+
+```sql
+DROP SCHEMA public CASCADE;
+CREATE SCHEMA public AUTHORIZATION dev;
+```
+
+Then restart the API from this directory so the development startup creates
+the tables and seeds the Super Admin and organization from `.env`:
+
+```bash
+uv run fastapi dev main.py
+```
+
+The seed uses `SUPER_ADMIN_*`, `ORGANIZATION_NAME`, and `ORGANIZATION_CODE`
+only when the corresponding records do not already exist. Restarting the API
+does not overwrite existing credentials.
+
 ## API Overview
 
 ### Public endpoints

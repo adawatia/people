@@ -1,10 +1,9 @@
-import os
-
 from fastapi_users.password import PasswordHelper
 from sqlalchemy import select
 
 from core.database import async_session_maker
 from core.database import auth_engine as engine
+from core.settings import get_settings
 from db.models import Base, Organization, User
 
 
@@ -14,19 +13,20 @@ async def create_db_and_tables() -> None:
 
 
 async def ensure_seed_data() -> None:
+    settings = get_settings()
     async with async_session_maker() as session:
         organization = await session.scalar(select(Organization).order_by(Organization.id.asc()))
         if organization is None:
             session.add(Organization(
-                name=os.getenv("ORGANIZATION_NAME", "My Organization"),
-                short_name=os.getenv("ORGANIZATION_CODE", "ORG"),
+                name=settings.organization_name,
+                short_name=settings.organization_code,
             ))
             await session.flush()
-        email = os.getenv("SUPER_ADMIN_EMAIL", "admin@hrms.com")
-        username = os.getenv("SUPER_ADMIN_USERNAME", "superadmin")
-        password = os.getenv("SUPER_ADMIN_PASSWORD", "SuperAdmin@123")
-        first_name = os.getenv("SUPER_ADMIN_FIRST_NAME", "Super")
-        last_name = os.getenv("SUPER_ADMIN_LAST_NAME", "Admin")
+        email = settings.super_admin_email
+        username = settings.super_admin_username
+        password = settings.super_admin_password
+        first_name = settings.super_admin_first_name
+        last_name = settings.super_admin_last_name
 
         user = await session.scalar(select(User).where((User.email == email) | (User.username == username)))
         if user is None:

@@ -40,6 +40,8 @@ class Settings(BaseSettings):
     super_admin_password: str = Field(default="SuperAdmin@123", alias="SUPER_ADMIN_PASSWORD")
     super_admin_first_name: str = Field(default="Super", alias="SUPER_ADMIN_FIRST_NAME")
     super_admin_last_name: str = Field(default="Admin", alias="SUPER_ADMIN_LAST_NAME")
+    organization_name: str = Field(default="My Organization", alias="ORGANIZATION_NAME")
+    organization_code: str = Field(default="ORG", alias="ORGANIZATION_CODE")
 
     # Mail SMTP Configuration
     mail_server: str = Field(default="smtppro.zoho.com", alias="MAIL_SERVER")
