@@ -15,6 +15,7 @@ const fixtures: Record<string, unknown> = {
   'reports/attendance-matrix': { ...paged([{ employee_id: 901, employee_code: 'PREVIEW-901', employee_name: 'Preview Employee', department_name: 'Preview department', day_status_map: { 1: 'P', 2: 'A' }, total_present: 18, total_absent: 1, total_leave: 2 }]), year: 2026, month: 10, total_days_in_month: 31 },
   'reports/leave-summary': { ...paged([{ employee_id: 901, employee_code: 'PREVIEW-901', employee_name: 'Preview Employee', leave_type_name: 'Annual leave', leave_type_code: 'AL', allocated: 24, used: 2, pending: 1, available: 21 }]), year: 2026, breakdown: [{ leave_type_name: 'Annual leave', allocated: 24, used: 2, pending: 1 }] },
   'employees': paged([emp]), 'employees/901': emp,
+  'org/organization': { id: 1, name: 'Preview Organization', short_name: 'PREVIEW' },
   'employees/901/work-history': paged([{ id: 1, from_date: '2025-01-01', remarks: 'Synthetic preview history' }]),
   'org/units': paged([{ id: 1, name: 'Preview unit', code: 'PREVIEW', is_active: true }]),
   'org/departments': paged([{ id: 1, name: 'Preview department', code: 'PREVIEW', unit_id: 1, is_active: true }]),

@@ -57,7 +57,7 @@ const WORKSPACE_ROUTES: Record<Workspace, WorkspaceRouteRule[]> = {
     { path: '/organization', permissions: ['employee.view'] },
     { path: '/profile' }, { path: '/settings' }, { path: '/notifications' }
   ],
-  TECHNICAL: [{ path: '/' }, { path: '/settings' }, { path: '/profile' }, { path: '/notifications' }]
+  TECHNICAL: [{ path: '/' }, { path: '/organization' }, { path: '/settings' }, { path: '/profile' }, { path: '/notifications' }]
 }
 
 // Destinations promoted to the mobile bottom bar, in order. Everything else

@@ -1,13 +1,17 @@
 <script setup lang="ts">
 import type { PaginatedResponse } from '#shared/types/pagination'
 
-import type { Department, Designation, Unit } from '#shared/types/organization'
+import type { Department, Designation, Organization, Unit } from '#shared/types/organization'
 
 type Tab = 'units' | 'departments' | 'designations'
 useSeoMeta({ title: 'Organization' })
 const api = useHrmsApi()
 const list = useListState({ tab: 'units', sort_order: 'asc' })
 const activeTab = list.field('tab')
+const { data: organization, pending: organizationPending, error: organizationError, refresh: refreshOrganization } = await useAsyncData(
+  'organization-profile',
+  () => api.request<Organization>('org/organization')
+)
 const { data: rawData, pending, error, refresh } = await useAsyncData('organization-workspace', async (_app, { signal }) => {
   const endpoint = activeTab.value === 'units' ? 'org/units' : activeTab.value === 'departments' ? 'org/departments' : 'designations/'
   const result = await api.request<PaginatedResponse<Unit | Department | Designation>>(endpoint, { signal, query: list.query.value })
@@ -28,14 +32,67 @@ function unitName(id: number) {
       :has-data="Boolean(data)"
     />
     <header class="my-6">
-      <h1 class="text-2xl font-semibold">
-        Company structure
-      </h1>
-      <p class="mt-2 text-sm text-muted">
-        Organization records are maintained in ERP.
+      <p class="text-xs font-semibold uppercase tracking-[0.12em] text-muted">
+        Organization profile
+      </p>
+      <div
+        v-if="organization"
+        class="people-card mt-3 flex flex-wrap items-center justify-between gap-5 p-5 sm:p-6"
+      >
+        <div class="flex min-w-0 items-center gap-4">
+          <span class="grid size-12 shrink-0 place-items-center rounded-2xl bg-[var(--people-lavender)] text-[var(--people-lavender-ink)] sm:size-14">
+            <UIcon
+              name="i-lucide-building-2"
+              class="size-6 sm:size-7"
+            />
+          </span>
+          <div class="min-w-0">
+            <h1 class="truncate text-2xl font-semibold sm:text-3xl">
+              {{ organization.name }}
+            </h1>
+            <p class="mt-1 text-sm text-muted">
+              Company structure · Read-only ERP data
+            </p>
+          </div>
+        </div>
+        <div class="shrink-0 rounded-xl border border-[var(--people-border)] bg-[var(--people-canvas)] px-4 py-3">
+          <p class="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">
+            Organization code
+          </p>
+          <p class="mt-1 font-mono text-sm font-semibold text-[var(--people-text)]">
+            {{ organization.short_name || 'Not assigned' }}
+          </p>
+        </div>
+      </div>
+      <div
+        v-else-if="organizationPending"
+        class="people-card mt-3 flex items-center gap-4 p-5 sm:p-6"
+        aria-label="Loading organization profile"
+      >
+        <USkeleton class="size-12 rounded-2xl sm:size-14" />
+        <div class="grid min-w-0 flex-1 gap-2">
+          <USkeleton class="h-7 w-2/3" />
+          <USkeleton class="h-4 w-1/3" />
+        </div>
+      </div>
+      <UAlert
+        v-else-if="organizationError"
+        class="mt-3"
+        color="warning"
+        variant="soft"
+        icon="i-lucide-circle-alert"
+        title="Organization profile unavailable"
+        description="The organization name and code could not be loaded."
+        :actions="[{ label: 'Retry', onClick: () => refreshOrganization() }]"
+      />
+      <p class="mt-3 text-sm text-muted">
+        Units, departments and designations are maintained in ERP.
       </p>
     </header>
-    <div data-page-tabs class="mt-7 flex gap-2 overflow-x-auto border-b border-[var(--people-border)]">
+    <div
+      data-page-tabs
+      class="mt-7 flex gap-2 overflow-x-auto border-b border-[var(--people-border)]"
+    >
       <button
         v-for="tab in [{ key: 'units', label: 'Units', icon: 'i-lucide-building-2' }, { key: 'departments', label: 'Departments', icon: 'i-lucide-network' }, { key: 'designations', label: 'Designations', icon: 'i-lucide-badge' }]"
         :key="tab.key"

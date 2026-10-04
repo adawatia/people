@@ -33,6 +33,8 @@ test('personal and management routes stay separate and approvals accept overtime
   assert.equal(canVisitWorkspace(manager, 'TEAM', '/shifts'), true)
   assert.equal(canVisitWorkspace(employee, 'TEAM', '/approvals'), false)
   assert.equal(canVisitWorkspace(owner, 'HR', '/attendance'), false)
+  assert.equal(canVisitWorkspace(technical, 'TECHNICAL', '/organization'), true)
+  assert.equal(canVisitWorkspace(employee, 'TECHNICAL', '/organization'), false)
 })
 
 test('mobile bar promotes only destinations its role can open', () => {

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.auth import current_business_user
+from core.auth import current_active_user
 from core.database import get_async_session
 from core.pagination import PaginatedResponse
 from core.sorting import LookupSort
@@ -21,7 +21,7 @@ async def list_departments(
     search: str | None = None,
     sort_by: LookupSort | None = None,
     sort_order: str = Query("asc", pattern="^(asc|desc)$"),
-    _: User = Depends(current_business_user),
+    _: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session),
 ) -> PaginatedResponse[DepartmentRead]:
     return await LookupService(session).list_page(
@@ -38,7 +38,7 @@ async def list_departments(
 @router.get("/{dept_id}", response_model=DepartmentRead)
 async def get_department(
     dept_id: int,
-    _: User = Depends(current_business_user),
+    _: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session),
 ) -> DepartmentRead:
     service = OrgService(session)
