@@ -552,7 +552,7 @@ Config: `create_period`, `create_type`, `update_type`, `allocate_leaves` (writes
 
 | Method & path | Purpose | Idempotency / notes |
 |---|---|---|
-| `PUT /employees/by-erp-id/{erp_id}` | Create employee and linked login, then sync partial employee updates | First call requires code, name, phone, and strong initial password; retries preserve password; status transitions update login access and sessions |
+| `PUT /employees/by-erp-id/{erp_id}` | Create employee and linked login, then sync partial employee updates | First call requires code, name, phone, and strong initial password; retries preserve password; status transitions update login access and sessions. `role` selects the predefined HRMS role; `business_role` is resolved and stored by HRMS, not accepted as a second ERP input. |
 | `PATCH /employees/{id}/deactivate` / `/activate` | Lifecycle with optional `exit_date`/`exit_reason` | — |
 | `POST /employees/{id}/password-reset` (in `auth_login.py`) | Set temporary password | revokes all refresh sessions; sets `must_change_password` |
 | `PUT /organization/{erp_id}` | Idempotently upsert the single ERP-owned organization record | — |
@@ -607,7 +607,6 @@ Every tag below is also an OpenAPI tag declared in `main.py`. Auth column: **E**
 | | `GET /dashboard/owner`, `/owner/exceptions` | perm(`dashboard.view_organization`) | organization-wide + audit row |
 | **employees** | `GET /employees/` | Any | organization scope = all · UNIT scope = that unit · DEPARTMENT scope = that department · SELF = own record only |
 | | `GET /employees/{id}`, `/work-history` | Any | `employee.view` + `allow_self` |
-| | `POST /employees/onboard` | perm(`employee.create`) | **returns 410** (ERP-only) |
 | **designations / org / units / departments** | `GET` list + detail | Any | read-only mirrors |
 | **holidays** | `GET /holidays/lists`, `GET /holidays/lists/{id}` | Any | read-only |
 | **shifts** | `GET /shifts/`, `/assignments`, `/assignments/{id}`, `/employee/{id}/schedule`, `/{id}` | Any | a plain employee (no business role) is forced to self; elevated roles see the management views |
@@ -890,7 +889,7 @@ The correction-request action is not available to a plain employee: it is hidden
 
 **Dashboard.** In `MY`, HR sees personal metrics and shift/attendance cards. In `HR`, dashboard metrics use the configured `UNIT` or `ORGANIZATION` scope and label the headcount accordingly; personal cards are not mixed into the HR view.
 
-**Employees (`/employees`).** Unit-limited directory with search/filters, pagination (`page_size` ≤ 100), detail page with separately paginated work history. Provisioning is ERP-only: `POST /employees/onboard` returns `410`, and the page explains ERP ownership without exposing unsupported activate, deactivate, delete, or edit actions.
+**Employees (`/employees`).** Unit-limited directory with search/filters, pagination (`page_size` ≤ 100), detail page with separately paginated work history. Provisioning is ERP-only through the ERP employee upsert; the page explains ERP ownership without exposing unsupported activate, deactivate, delete, or edit actions.
 
 **Growing-list contract.** Nuxt-facing business lists use `page` (default 1), `page_size` (default 25, maximum 100), `search`, `sort_by`, `sort_order`, and their domain filters. Responses use `PaginatedResponse` navigation metadata. Authorization and filters are applied before counts; every endpoint publishes its accepted `sort_by` values as an OpenAPI enum matching the repository allowlist, and SQL ordering always appends the row identifier. Employee-month calendars, aggregate summaries, effective schedule windows, leave balances by configured type, one holiday list's entries, and policy-limited session lists are bounded collections rather than business-list exceptions. ERP ingestion and change-feed response shapes remain integration contracts and are unchanged.
 

@@ -54,11 +54,14 @@ function employeeFields({ upsert = false, account = false } = {}) {
   fields.push(
     {
       name: "role",
+      label: upsert ? "HRMS role" : undefined,
       type: "select",
-      section: "Identity",
+      section: upsert ? "Access" : "Identity",
       options: ROLES,
       default: optionalDefault("EMPLOYEE"),
-      help: "Business role; drives default access scope.",
+      help: upsert
+        ? "Assigns a predefined HRMS role. Omit to keep the current role; EMPLOYEE clears elevated access."
+        : "Assigns a predefined HRMS role; defaults to EMPLOYEE.",
     },
     { name: "first_name", type: "text", required: !upsert, section: "Identity", help: upsert ? "Required when creating this ERP employee." : undefined },
     { name: "last_name", type: "text", section: "Identity" },
@@ -129,14 +132,18 @@ function employeeFields({ upsert = false, account = false } = {}) {
   if (upsert) {
     fields.push(
       {
-        name: "business_role",
+        name: "access_scope",
         type: "select",
         section: "Access",
-        options: ROLES,
-        help: "Explicit role grant for ERP-driven provisioning.",
+        options: SCOPES,
+        help: "Optional scope for roles that support it; HR_ADMIN can be UNIT or ORGANIZATION.",
       },
-      { name: "access_scope", type: "select", section: "Access", options: SCOPES },
-      { name: "access_scope_id", type: "int", section: "Access" },
+      {
+        name: "access_scope_id",
+        type: "int",
+        section: "Access",
+        help: "HRMS database ID of the selected unit or department. Omit for the employee's default scope.",
+      },
       { name: "exit_date", type: "date", section: "Access" },
       { name: "exit_reason", type: "text", section: "Access" },
     );
@@ -243,7 +250,7 @@ window.ENDPOINTS = [
     scope: "employees:write",
     pathParams: [{ name: "erp_id", placeholder: "YOUR-ERP-EMPLOYEE-ID", help: "Stable employee key from your ERP (for example, its source person ID). Keep it unchanged; employee_code is a separate immutable business code." }],
     body: { shape: "object", fields: employeeFields({ upsert: true, account: true }) },
-    notes: "First create requires employee_code, first_name, phone_number, and initial_password to provision the account. Later calls may send only changed fields; initial_password is ignored for an existing ERP ID. New employees must start ACTIVE.",
+    notes: "First create requires employee_code, first_name, phone_number, and initial_password to provision the account. Later calls may send only changed fields; initial_password is ignored for an existing ERP ID. Use role to select an HRMS role; business_role is no longer accepted. New employees must start ACTIVE.",
   },
 
   {

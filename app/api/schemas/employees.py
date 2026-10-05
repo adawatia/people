@@ -137,9 +137,6 @@ class EmployeeOnboardingCreate(EmployeeCreate):
 
 class EmployeeUpdate(BaseModel):
     role: BusinessRole | None = None
-    # Explicit authorization assignment, used by the ERP integration to grant a
-    # business role and to place HR at unit or organization scope.
-    business_role: BusinessRole | None = None
     access_scope: AccessScope | None = None
     access_scope_id: int | None = None
     first_name: str | None = None
@@ -227,6 +224,10 @@ class EmployeeUpsert(EmployeeUpdate):
     username: str | None = None
     initial_password: str | None = None
     erp_id: str | None = None
+
+    # Catch stale ERP payloads (notably the retired ``business_role`` input)
+    # instead of silently accepting a role assignment that HRMS ignores.
+    model_config = ConfigDict(extra="forbid")
 
 
 class EmployeeDeactivateRequest(BaseModel):

@@ -40,9 +40,12 @@ and the existing attendance, overtime, holiday and leave synchronization flows.
    so provision an employee through the ERP employee upsert first. On first
    creation provide its source `erp_id`, `employee_code`, `first_name`,
    `phone_number`, and `initial_password`. For a lookup account, set
-   `business_role` to `ORGANIZATION_OWNER`. ERP-created users must change their
-   initial password before workforce lookups are available; the console
-   provides a **Change password & re-sign in** action.
+   `role` to `ORGANIZATION_OWNER`. The ERP upsert accepts `role` as the single
+   role selector; the old `business_role` input is rejected. `access_scope` and
+   `access_scope_id` optionally specify where supported roles apply.
+   ERP-created users must change their initial password before workforce
+   lookups are available; the console provides a **Change password & re-sign
+   in** action.
 
 ## Running
 
@@ -54,7 +57,9 @@ cd docs/erp-test
 python3 -m http.server 5500
 ```
 
-Open `http://localhost:5500`. The API's development CORS policy accepts
+Open `http://localhost:5500`. Although Python reports `0.0.0.0` as its bind
+address, use `localhost` in the browser; the console redirects `0.0.0.0` to
+`localhost` automatically. The API's development CORS policy accepts
 `http://localhost:<port>` and `http://127.0.0.1:<port>` origins.
 
 ## Where IDs come from

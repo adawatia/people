@@ -2,6 +2,15 @@
 (function () {
   "use strict";
 
+  // 0.0.0.0 is the server's bind address, not the browser origin allowed by
+  // the API's development CORS policy. Preserve the URL and switch to localhost.
+  if (window.location.hostname === "0.0.0.0") {
+    const localUrl = new URL(window.location.href);
+    localUrl.hostname = "localhost";
+    window.location.replace(localUrl.href);
+    return;
+  }
+
   const $ = (id) => document.getElementById(id);
   const CONFIG_KEY = "erpTest.config";
   const SECRET_KEY = "erpTest.secrets";

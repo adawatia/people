@@ -1,6 +1,10 @@
 """Regression checks for the canonical, coordinated API surface."""
 
+import pytest
+from pydantic import ValidationError
+
 from main import app
+from schemas.employees import EmployeeUpsert
 
 
 def test_erp_ingestion_uses_only_canonical_bulk_routes():
@@ -51,6 +55,22 @@ def test_erp_master_data_has_one_write_route_per_external_identity():
     assert all(prefix + path in paths for path in retained)
     assert "/api/v1/auth/integrations/erp/employees/{employee_id}/password-reset" not in paths
     assert len([path for path in paths if path.startswith(prefix)]) == 21
+
+
+def test_employee_onboarding_is_exposed_only_through_erp_upsert():
+    paths = app.openapi()["paths"]
+
+    assert "/api/v1/employees/onboard" not in paths
+    operation = paths["/api/v1/integrations/erp/employees/by-erp-id/{erp_id}"]["put"]
+    assert set(paths["/api/v1/integrations/erp/employees/by-erp-id/{erp_id}"]) == {"put"}
+    schema_ref = operation["requestBody"]["content"]["application/json"]["schema"]["$ref"]
+    properties = app.openapi()["components"]["schemas"][schema_ref.rsplit("/", 1)[-1]]["properties"]
+    assert "role" in properties
+    assert "business_role" not in properties
+    request_schema = app.openapi()["components"]["schemas"][schema_ref.rsplit("/", 1)[-1]]
+    assert request_schema["additionalProperties"] is False
+    with pytest.raises(ValidationError, match="business_role"):
+        EmployeeUpsert.model_validate({"business_role": "ORGANIZATION_OWNER"})
 
 
 def test_public_attendance_checkins_are_read_only():

@@ -45,6 +45,14 @@ export default defineNuxtConfig({
 
   compatibilityDate: '2026-06-30',
 
+  vite: {
+    server: {
+      // Cloudflare quick tunnels use a new hostname on each run. Vite applies
+      // this list to its dev server; the suffix limits it to that domain.
+      allowedHosts: ['.trycloudflare.com']
+    }
+  },
+
   // Keep owner-dashboard charts small: only register the chart primitives
   // used by the application. VChart is auto-imported by nuxt-echarts.
   echarts: {
