@@ -57,6 +57,10 @@ Locally preview production build:
 pnpm preview
 ```
 
+## Progressive Web App
+
+The app can be installed from supported browsers when served over HTTPS (localhost is also supported). The service worker caches static app assets and a generic offline page. Signed-in pages and API responses are never stored for offline use, so users must be online to authenticate and load workspace data.
+
 Check out the [deployment documentation](https://nuxt.com/docs/getting-started/deployment) for more information.
 
 ## Renovate integration

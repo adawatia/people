@@ -637,6 +637,8 @@ Every tag below is also an OpenAPI tag declared in `main.py`. Auth column: **E**
 
 ### 3.1 Stack and structure
 
+The web app is installable as a PWA through `public/manifest.webmanifest`. Its service worker caches the offline notice and same-origin static assets only. Navigations always go to the server first, with a generic offline notice when unavailable; BFF/API requests and authenticated page responses are never cached. This preserves account and workspace scoping and means business data requires a network connection.
+
 Nuxt 4 (`app/` directory layout) with `@nuxt/ui`, `@nuxt/icon`, `@nuxt/image`, and `nuxt-echarts` (only `BarChart`, `LineChart`, `PieChart` + a small component set are registered — keeps the owner dashboard bundle small). Authentication uses the application's own `/api/session/**` BFF handlers and HttpOnly cookies; no separate Nuxt session module is registered.
 
 ```

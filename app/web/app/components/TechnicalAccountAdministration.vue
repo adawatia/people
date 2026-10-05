@@ -262,11 +262,17 @@ function clearAccountFilters() {
       :error="error"
       :has-data="Boolean(data)"
     />
-    <AppSkeleton
+    <div
       v-if="pending && !data"
-      variant="list"
-      :rows="4"
-    />
+      class="space-y-3"
+      aria-hidden="true"
+    >
+      <USkeleton
+        v-for="row in 4"
+        :key="row"
+        class="h-16 w-full"
+      />
+    </div>
     <div
       v-if="error"
       class="rounded-xl border border-[var(--people-border)] bg-[var(--people-rose)] p-5"

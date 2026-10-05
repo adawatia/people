@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#1d613a">
+    <title>Offline · People</title>
+    <style>
+      :root { color-scheme: light; font-family: system-ui, sans-serif; background: #f7f8f5; color: #183126; }
+      body { min-height: 100vh; margin: 0; display: grid; place-items: center; }
+      main { width: min(28rem, calc(100% - 3rem)); padding: 2rem; border: 1px solid #dce5dd; border-radius: 1.25rem; background: white; }
+      img { width: 3.5rem; height: 3.5rem; }
+      h1 { margin: 1.5rem 0 0.5rem; font-size: 1.5rem; }
+      p { color: #52645a; line-height: 1.6; }
+      button { margin-top: 1rem; padding: 0.75rem 1rem; border: 0; border-radius: 0.65rem; background: #1d613a; color: white; font: inherit; cursor: pointer; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <img src="/branding/people-app-icon-192.png" alt="People">
+      <h1>You’re offline</h1>
+      <p>Connect to the internet to sign in and securely load your People workspace.</p>
+      <button type="button" onclick="location.reload()">Try again</button>
+    </main>
+  </body>
+</html>
