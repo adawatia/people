@@ -1,6 +1,6 @@
 const CACHE_NAME = 'people-static-v1'
 const OFFLINE_URL = '/offline.html'
-const STATIC_PREFIXES = ['/_nuxt/', '/branding/', '/fonts/']
+const STATIC_PREFIXES = ['/_nuxt/', '/branding/', '/brand/', '/fonts/']
 
 self.addEventListener('install', (event) => {
   event.waitUntil(

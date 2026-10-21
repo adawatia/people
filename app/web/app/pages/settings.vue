@@ -239,7 +239,7 @@ onMounted(async () => {
         {{ pageTitle }}
       </h1>
       <p class="mt-2 text-sm text-muted">
-        {{ isTechnicalAdmin ? 'Manage the technical login and the operational controls available to this installation.' : 'Keep your People account secure by updating your own password.' }}
+        {{ isTechnicalAdmin ? 'Manage the technical login and the operational controls available to this installation.' : 'Keep your Emploi account secure by updating your own password.' }}
       </p>
     </div>
     <UAlert

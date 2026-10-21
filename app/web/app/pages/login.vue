@@ -2,7 +2,7 @@
 import type { MfaChallenge } from '#shared/types/auth'
 
 definePageMeta({ layout: 'auth' })
-useSeoMeta({ title: 'Sign in · People by Datlabs' })
+useSeoMeta({ title: 'Sign in · Emploi' })
 const route = useRoute()
 const auth = useAuth()
 const form = reactive({ identity: '', password: '' })
@@ -60,7 +60,7 @@ async function afterMfa() {
       @cancelled="challenge = null"
     />
     <template v-else>
-      <h1>Sign in to People</h1>
+      <h1>Sign in to Emploi</h1>
       <form
         class="auth-form"
         :aria-busy="auth.loading.value"

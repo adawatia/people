@@ -1,8 +1,26 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
-  <title id="title">People by Datlabs</title>
-  <desc id="desc">A People monogram in the People forest-green palette.</desc>
-  <rect width="1024" height="1024" rx="232" fill="#287448"/>
-  <path d="M328 782V254h224c154 0 268 95 268 245 0 149-114 244-268 244H466v39H328Zm138-177h81c80 0 132-41 132-106s-52-107-132-107h-81v213Z" fill="#FFFFFF"/>
-  <circle cx="700" cy="318" r="70" fill="#8AD5A4"/>
-  <path d="M678 388h44v234c0 39 32 70 70 70h26v138h-33c-97 0-177-79-177-177V458c0-39 31-70 70-70Z" fill="#E2F0E6"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="people-title-brand people-desc-brand">
+  <title id="people-title-brand">People</title>
+  <desc id="people-desc-brand">A signature forest-green People app icon with white and luminous emerald accents.</desc>
+  <defs>
+    <linearGradient id="p-bg-brand" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1B663B"/>
+      <stop offset="100%" stop-color="#0E4426"/>
+    </linearGradient>
+    <linearGradient id="p-beacon-brand" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6EE7B7"/>
+      <stop offset="100%" stop-color="#34D399"/>
+    </linearGradient>
+  </defs>
+  <!-- Squircle container -->
+  <rect width="1024" height="1024" rx="232" fill="url(#p-bg-brand)"/>
+  <rect x="12" y="12" width="1000" height="1000" rx="220" fill="none" stroke="#2D8550" stroke-width="12" opacity="0.6"/>
+  
+  <!-- Doorway / P Monogram -->
+  <path d="M312 768c-13.25 0-24-10.75-24-24V274c0-13.25 10.75-24 24-24h236c152 0 264 94 264 242 0 146-112 240-264 240H440v36c0 13.25-10.75 24-24 24h-104zm128-216h108c82 0 132-40 132-104s-50-104-132-104H440v208z" fill="#FFFFFF"/>
+  
+  <!-- Welcoming Person Figure -->
+  <path d="M684 392c0-11 9-20 20-20h12c11 0 20 9 20 20v224c0 38 31 69 69 69h25c12 0 22 10 22 22v37c0 13.25-10.75 24-24 24h-35c-98 0-177-79-177-177V460c0-38 30-68 68-68z" fill="#A7F3D0"/>
+
+  <!-- Radiant Beacon / Head -->
+  <circle cx="704" cy="316" r="68" fill="url(#p-beacon-brand)"/>
 </svg>

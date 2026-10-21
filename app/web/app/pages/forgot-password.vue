@@ -1,6 +1,6 @@
 <script setup lang="ts">
 definePageMeta({ layout: 'auth' })
-useSeoMeta({ title: 'Recover password · People by Datlabs' })
+useSeoMeta({ title: 'Recover password · Emploi' })
 
 const identity = ref('')
 const code = ref('')
@@ -94,7 +94,7 @@ async function reset() {
   <div>
     <h1>{{ step === 'done' ? 'You’re ready to return.' : 'Reset your password' }}</h1>
     <p class="auth-description">
-      Use the authenticator app linked to your People account. Resetting your password signs out your other sessions.
+      Use the authenticator app linked to your Emploi account. Resetting your password signs out your other sessions.
     </p>
     <ol
       class="auth-steps"

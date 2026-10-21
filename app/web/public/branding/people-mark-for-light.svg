@@ -1,7 +1,25 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
-  <title id="title">People by Datlabs mark</title>
-  <desc id="desc">A green People monogram formed from a doorway and a person.</desc>
-  <path d="M20 112V16h37c26 0 45 16 45 44 0 27-19 44-45 44H45v8H20Zm25-32h13c13 0 21-7 21-20s-8-20-21-20H45v40Z" fill="#1D613A"/>
-  <circle cx="87" cy="28" r="12" fill="#8AD5A4"/>
-  <path d="M83 40h8v42c0 7 6 12 13 12h5v25h-6c-17 0-31-14-31-31V52c0-7 5-12 11-12Z" fill="#287448"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="people-mark-title-light">
+  <title id="people-mark-title-light">People</title>
+  <defs>
+    <linearGradient id="p-mark-door-light" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0E4426"/>
+      <stop offset="100%" stop-color="#1B663B"/>
+    </linearGradient>
+    <linearGradient id="p-mark-person-light" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#15803D"/>
+      <stop offset="100%" stop-color="#10B981"/>
+    </linearGradient>
+    <linearGradient id="p-mark-beacon-light" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#34D399"/>
+      <stop offset="100%" stop-color="#059669"/>
+    </linearGradient>
+  </defs>
+  <!-- Doorway / P Monogram -->
+  <path d="M18 108c-1.6 0-3-1.4-3-3V20c0-1.6 1.4-3 3-3h38c24 0 42 15 42 39 0 23-18 38-42 38H39v11c0 1.6-1.4 3-3 3H18zm21-34h17c13 0 21-6 21-16s-8-17-21-17H39v33z" fill="url(#p-mark-door-light)"/>
+  
+  <!-- Welcoming Person Figure -->
+  <path d="M83 40c0-1.5 1.2-2.8 2.8-2.8h1.4c1.5 0 2.8 1.2 2.8 2.8v34c0 6 5 11 11 11h4c1.8 0 3.2 1.4 3.2 3.2v6.8c0 1.8-1.4 3.2-3.2 3.2h-5.6c-15.5 0-28-12.5-28-28V51c0-6 4.8-11 10.8-11z" fill="url(#p-mark-person-light)"/>
+
+  <!-- Radiant Beacon / Head -->
+  <circle cx="86" cy="27" r="11" fill="url(#p-mark-beacon-light)"/>
 </svg>

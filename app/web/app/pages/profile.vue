@@ -122,7 +122,7 @@ const details = computed(() => [
           Personal and employment details
         </h2>
         <p class="mt-1 text-sm text-muted">
-          Read-only details supplied by your People and ERP records.
+          Read-only details supplied by your Emploi and ERP records.
         </p>
       </div>
       <div

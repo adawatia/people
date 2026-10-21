@@ -64,7 +64,7 @@ test('platform navigation, keyboard search, mobile workspace and logout', async 
   await page.setViewportSize({ width: 1366, height: 900 })
   await openPlatform(page)
   await page.keyboard.press('Control+k')
-  await expect(page.getByRole('dialog', { name: 'Search People' })).toBeVisible()
+  await expect(page.getByRole('dialog', { name: 'Search Emploi' })).toBeVisible()
   await page.getByPlaceholder('Search pages', { exact: true }).fill('Security')
   await page.getByPlaceholder('Search pages', { exact: true }).fill('Settings')
   await page.getByRole('dialog').getByRole('button', { name: 'Settings', exact: true }).click()

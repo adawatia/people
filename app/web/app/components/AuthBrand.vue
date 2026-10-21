@@ -2,7 +2,7 @@
   <NuxtLink
     to="/login"
     class="auth-brand"
-    aria-label="People by Datlabs — sign in"
+    aria-label="Emploi — sign in"
   >
     <img
       src="/branding/people-app-icon-light.svg"
@@ -18,6 +18,6 @@
       height="50"
       class="auth-logo-dark"
     >
-    <span><span class="auth-brand-name">People<sup>™</sup></span><span class="auth-brand-maker">by Datlabs</span></span>
+    <span><span class="auth-brand-name">Emploi<sup>™</sup></span></span>
   </NuxtLink>
 </template>

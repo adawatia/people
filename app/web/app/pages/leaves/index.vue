@@ -180,7 +180,7 @@ async function confirmCancellation() {
       variant="soft"
       icon="i-lucide-user-round-x"
       title="No employee profile is linked"
-      description="Ask your People administrator to link this account before requesting leave."
+      description="Ask your Emploi administrator to link this account before requesting leave."
     />
     <UAlert
       v-if="error"
@@ -278,7 +278,7 @@ async function confirmCancellation() {
             Your leave balance is on its way
           </h4>
           <p class="mt-1 max-w-md text-sm leading-6 text-muted">
-            We’re waiting for this year’s balance from your People system. Once it arrives, it will appear here automatically.
+            We’re waiting for this year’s balance from your Emploi system. Once it arrives, it will appear here automatically.
           </p>
         </div>
       </section>

@@ -13,14 +13,14 @@ useHead({
 })
 
 useSeoMeta({
-  titleTemplate: title => title ? `${title} · People` : 'People · HRMS',
-  description: 'People is the calm, modern workspace for attendance, leave and employee operations.'
+  titleTemplate: title => title ? `${title} · Emploi` : 'Emploi · HRMS',
+  description: 'Emploi is the calm, modern workspace for attendance, leave and employee operations.'
 })
 
 onMounted(() => {
   if ('serviceWorker' in navigator && window.isSecureContext) {
     navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch((error: unknown) => {
-      console.warn('People offline support could not be enabled.', error)
+      console.warn('Emploi offline support could not be enabled.', error)
     })
   }
 })

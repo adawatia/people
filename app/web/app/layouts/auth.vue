@@ -29,7 +29,7 @@ const year = useState('auth-copyright-year', () => new Date().getFullYear())
       <section
         v-if="!technical"
         class="auth-story"
-        aria-label="About People"
+        aria-label="About Emploi"
       >
         <div class="auth-story-copy">
           <h2>A little more clarity. Every workday.</h2>
@@ -37,7 +37,7 @@ const year = useState('auth-copyright-year', () => new Date().getFullYear())
         <AuthWorkdayArt :technical="technical" />
         <div class="auth-story-bottom">
           <span>Made for the everyday</span>
-          <span>People by Datlabs</span>
+          <span>Emploi</span>
         </div>
       </section>
       <section
@@ -53,20 +53,19 @@ const year = useState('auth-copyright-year', () => new Date().getFullYear())
       <span>© {{ year }} Datlabs. All rights reserved.</span>
       <span class="auth-footer-maker">
         <img
-          src="/branding/dat-labs-symbol-dark.svg"
-          alt=""
-          class="auth-datlabs-light"
-          width="30"
-          height="30"
+          src="/brand/lockup-light.svg"
+          alt="Datlabs"
+          class="auth-datlabs-light h-6 w-auto"
+          width="90"
+          height="24"
         >
         <img
-          src="/branding/dat-labs-symbol-light.svg"
-          alt=""
-          class="auth-datlabs-dark"
-          width="30"
-          height="30"
+          src="/brand/lockup-dark.svg"
+          alt="Datlabs"
+          class="auth-datlabs-dark h-6 w-auto"
+          width="90"
+          height="24"
         >
-        Thoughtfully built by Datlabs
       </span>
     </footer>
   </div>

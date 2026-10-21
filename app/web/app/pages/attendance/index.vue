@@ -294,7 +294,7 @@ function hasPendingCorrection(recordId: number) {
       variant="soft"
       icon="i-lucide-user-round-x"
       title="No employee profile is linked"
-      description="Ask your People administrator to link this user account to an employee record before using attendance."
+      description="Ask your Emploi administrator to link this user account to an employee record before using attendance."
     />
     <UAlert
       v-else-if="personalView && error"

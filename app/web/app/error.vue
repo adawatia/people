@@ -12,7 +12,7 @@ const isUnavailable = computed(() => (props.error.statusCode ?? 500) >= 500)
       role="alert"
     >
       <p class="mb-9 text-sm font-bold text-[#287448] dark:text-[#8ad5a4]">
-        People by Datlabs
+        Emploi
       </p>
       <h1 class="mb-4 text-3xl leading-tight font-semibold tracking-tight text-balance sm:text-4xl">
         {{ isUnavailable ? 'This page is temporarily unavailable' : 'We could not open this page' }}

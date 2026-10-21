@@ -207,7 +207,7 @@ onMounted(() => {
         <NuxtLink
           :to="workspace.link('/')"
           class="platform-brand-link"
-          :aria-label="organizationName ? `${organizationName} — People dashboard` : 'People by Datlabs — dashboard'"
+          :aria-label="organizationName ? `${organizationName} — Emploi dashboard` : 'Emploi — dashboard'"
         >
           <BrandMark />
           <span
@@ -347,7 +347,7 @@ onMounted(() => {
         <NuxtLink
           :to="workspace.link('/')"
           class="platform-mobile-brand"
-          aria-label="People by Datlabs — dashboard"
+          aria-label="Emploi — dashboard"
         ><BrandMark /></NuxtLink>
         <div class="platform-header-actions">
           <UButton
@@ -405,7 +405,7 @@ onMounted(() => {
     </div>
     <UModal
       v-model:open="globalSearchOpen"
-      title="Search People"
+      title="Search Emploi"
       description="Open a page available in your current workspace."
     >
       <template #body>

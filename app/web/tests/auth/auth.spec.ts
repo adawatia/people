@@ -87,7 +87,7 @@ test('MFA supports recovery codes, errors and cancellation', async ({ page }) =>
   await page.getByRole('button', { name: 'Verify and sign in' }).click()
   await expect(page.getByRole('alert')).toContainText('That code was not accepted.')
   await page.getByRole('button', { name: 'Back to sign in' }).click()
-  await expect(page.getByRole('heading', { name: 'Sign in to People' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Sign in to Emploi' })).toBeVisible()
 })
 
 test('MFA enrollment remains readable on small screens', async ({ page }) => {

@@ -2,7 +2,7 @@
 import type { MfaChallenge } from '#shared/types/auth'
 
 definePageMeta({ layout: 'auth' })
-useSeoMeta({ title: 'Technical sign-in · People by Datlabs' })
+useSeoMeta({ title: 'Technical sign-in · Emploi' })
 
 /**
  * Super Admin sign-in. Deliberately a different route from /login: the technical
