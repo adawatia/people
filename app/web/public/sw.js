@@ -1,16 +1,19 @@
-const CACHE_NAME = 'people-static-v1'
+const CACHE_NAME = 'emploi-static-v1'
 const OFFLINE_URL = '/offline.html'
-const STATIC_PREFIXES = ['/_nuxt/', '/branding/', '/brand/', '/fonts/']
+const STATIC_PREFIXES = ['/_nuxt/', '/brand/', '/fonts/']
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then(cache => cache.addAll([
         OFFLINE_URL,
-        '/manifest.webmanifest',
-        '/branding/people-app-icon-192.png',
-        '/branding/people-app-icon-512.png',
-        '/branding/people-app-icon-maskable-512.png'
+        '/site.webmanifest',
+        '/icon-192.png',
+        '/icon-512.png',
+        '/icon-maskable-512.png',
+        '/apple-touch-icon.png',
+        '/favicon.svg',
+        '/favicon.ico'
       ]))
       .then(() => self.skipWaiting())
   )
@@ -19,7 +22,7 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
-      .then(keys => Promise.all(keys.filter(key => key.startsWith('people-static-') && key !== CACHE_NAME).map(key => caches.delete(key))))
+      .then(keys => Promise.all(keys.filter(key => (key.startsWith('emploi-static-') || key.startsWith('people-static-')) && key !== CACHE_NAME).map(key => caches.delete(key))))
       .then(() => self.clients.claim())
   )
 })
@@ -38,12 +41,17 @@ self.addEventListener('fetch', (event) => {
   if (STATIC_PREFIXES.some(prefix => url.pathname.startsWith(prefix))) {
     event.respondWith((async () => {
       const cache = await caches.open(CACHE_NAME)
+      const cached = await cache.match(request)
+      if (cached) return cached
+
       try {
         const response = await fetch(request)
-        if (response.ok) await cache.put(request, response.clone()).catch(() => undefined)
+        if (response && response.status === 200) {
+          cache.put(request, response.clone())
+        }
         return response
       } catch {
-        return await cache.match(request) || Response.error()
+        return cached || new Response('', { status: 408, statusText: 'Request timed out' })
       }
     })())
   }
