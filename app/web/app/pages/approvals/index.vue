@@ -45,7 +45,9 @@ const activeError = computed(() => activeTab.value === 'leave' ? leaveQueue.erro
 
 function formatDate(value?: string | null) {
   if (!value) return 'Unknown date'
-  return new Intl.DateTimeFormat('en-IN', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(`${value}T00:00:00`))
+  const date = new Date(value.includes('T') ? value : `${value}T00:00:00`)
+  if (Number.isNaN(date.getTime())) return 'Unknown date'
+  return new Intl.DateTimeFormat('en-IN', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' }).format(date)
 }
 function dateRange(item: LeaveApplication) {
   const start = formatDate(item.from_date)

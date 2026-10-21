@@ -235,7 +235,7 @@ Notes that matter operationally:
 `holiday_lists` (with `weekly_off_day`, `is_default`) and `holidays` (unique `erp_holiday_id`, `is_weekly_off`, `is_organization_wide`).
 
 **Leave**
-`leave_periods`, `leave_types` (`is_paid`, `annual_allocation`, `max_consecutive_days`, `carry_forward`, `include_holidays`), `leave_allocations`, `leave_ledger_entries` (double-entry: positive = credit, negative = debit; types `ALLOCATION` | `APPLICATION` | `REVERSAL` | `EXPIRY`), `leave_balances` (`allocated`, `used`, `pending`), `leave_applications` (status + full cancellation workflow columns + `erp_event_id` / `erp_sync_status` / `erp_synced_at`).
+`leave_periods`, `leave_types` (`is_paid`, `annual_allocation`, `max_consecutive_days`, `carry_forward`, `include_holidays`), `leave_allocations`, `leave_ledger_entries` (double-entry: positive = credit, negative = debit; types `ALLOCATION` | `APPLICATION` | `REVERSAL` | `EXPIRY`), `leave_balances` (`allocated`, `used`, `pending`), `leave_applications` (status + full cancellation workflow columns + `erp_event_id` / `erp_sync_status` / `erp_synced_at`, a read-model mirror of the outbox), `erp_outbox_events` (immutable per-transition outbound events for the ERP feed) and `erp_sync_batches` (durable per-request audit of bulk outcomes).
 
 **Attendance**
 `attendance_records` — unique (`employee_id`, `attendance_date`); status, punch in/out, `worked_minutes`, `overtime_minutes`, `late_minutes`, `early_exit_minutes`, `source`, unique `erp_record_id`, `sync_status`.
@@ -489,7 +489,7 @@ Config: `create_period`, `create_type`, `update_type`, `allocate_leaves` (writes
 6. Paid types: check `allocated - used - pending`; insufficient ⇒ `400 "Insufficient leave balance"`.
 7. Insert `PENDING` application and increment `balance.pending`.
 
-**Approve** (`approve_leave`): blocks **self-approval**; moves `pending → used`; writes an `APPLICATION` **debit** ledger entry; marks every day in range as `ON_LEAVE` / `HALF_DAY` on `attendance_records` (creating rows when absent, skipping holidays when `include_holidays` is false); sets `erp_event_id = LEAVE-{id}-APPROVED` and `erp_sync_status = PENDING`.
+**Approve** (`approve_leave`): blocks **self-approval**; moves `pending → used`; writes an `APPLICATION` **debit** ledger entry; marks every day in range as `ON_LEAVE` / `HALF_DAY` on `attendance_records` (creating rows when absent, skipping holidays when `include_holidays` is false); stages one outbox event `LEAVE-{id}-APPROVED` in the same transaction (and mirrors `erp_event_id` / `erp_sync_status = PENDING`).
 
 **Reject**: releases `pending`, records `rejection_reason`, emits `LEAVE-{id}-REJECTED`.
 
@@ -553,25 +553,30 @@ Config: `create_period`, `create_type`, `update_type`, `allocate_leaves` (writes
 | Method & path | Purpose | Idempotency / notes |
 |---|---|---|
 | `PUT /employees/by-erp-id/{erp_id}` | Create employee and linked login, then sync partial employee updates | First call requires code, name, phone, and strong initial password; retries preserve password; status transitions update login access and sessions. `role` selects the predefined HRMS role; `business_role` is resolved and stored by HRMS, not accepted as a second ERP input. |
+| `PUT /employees/bulk` | Upsert many employees in one call | Same rules as the single upsert, applied per item; each item runs in its own savepoint and is reported in the batch envelope (`status`, `code`, `retryable`). Retries are idempotent by `erp_id`. Max 1000 items per request. |
 | `PATCH /employees/{id}/deactivate` / `/activate` | Lifecycle with optional `exit_date`/`exit_reason` | — |
 | `POST /employees/{id}/password-reset` (in `auth_login.py`) | Set temporary password | revokes all refresh sessions; sets `must_change_password` |
 | `PUT /organization/{erp_id}` | Idempotently upsert the single ERP-owned organization record | — |
 | `PUT /units/by-erp-id/{erp_id}`, `/departments/by-erp-id/{erp_id}`, `/designations/by-erp-id/{erp_id}` | Idempotent master-data upserts | Partial updates preserve omitted fields; `is_active=false` retires a record without deleting history. A department is operational only when both it and its unit are active; new or reactivated departments cannot target an inactive unit. |
+| `PUT /units/bulk`, `/departments/bulk`, `/designations/bulk` | Idempotent master-data upserts in bulk | Same rules as the single upserts, reported through the shared batch envelope; 1000-item cap. Units must be synced before the departments that reference them. |
 | `PUT /shifts/by-erp-id/{erp_id}` | Shift definition upsert | Partial updates preserve omitted fields; an active unit-scoped shift requires an active unit. |
 | `POST /shifts/assignments`, `/assignments/bulk`, `PATCH /assignments/{id}/cancel` | Assign/rotate shifts | overlap prevention; batching added for bulk; new assignments require an active shift/unit, active employee, and active employee unit/department. |
-| `POST /attendance/records/bulk` | Ingest **processed** attendance | `erp_record_id` makes re-sends idempotent; per-item `accepted`/`duplicates`/`failed` result |
-| `POST /holidays/bulk` | Sync holidays per unit | keyed by `erp_holiday_id` |
-| `POST /overtime/records/bulk` | Sync overtime records | keyed by `erp_event_id` |
-| `GET /leaves/changes?since&limit` | **ERP pulls** leave outcomes (`erp_sync_status != ACKNOWLEDGED`) | ordered by `actioned_at`; `has_more` cursor |
-| `POST /leaves/changes/ack` | ERP acknowledges event ids | marks `ACKNOWLEDGED` + `erp_synced_at`; returns `unknown[]` |
-| `POST /leaves/balances/bulk` | Sync leave balances (allocated/used/pending) | per-item `accepted`/`failed`; upserts by employee + leave code + year |
+| `POST /attendance/records/bulk` | Ingest **processed** attendance | `erp_record_id` is the record identity: identical replay → `duplicate`, changed values → audited correction, a different id for an occupied employee/date → permanent `ATTENDANCE_RECORD_CONFLICT`. One commit per chunk of 500. |
+| `POST /holidays/bulk` | Sync holidays per calendar | keyed by `erp_holiday_id`; `is_active=false` removes; two ids on one date → `HOLIDAY_DATE_CONFLICT` |
+| `POST /overtime/records/bulk` | Sync overtime **source** records | keyed by `erp_event_id`; only `PENDING` with zero approved minutes (HRMS owns approval) |
+| `GET /leaves/changes?cursor&limit` | **ERP pulls** unacknowledged leave outcomes | sequence cursor from `erp_outbox_events`; `next_cursor` + `has_more`; duplicate delivery until ack; `since` accepted as a deprecated, tie-safe alias |
+| `POST /leaves/changes/ack` | ERP acknowledges processed event ids | idempotent; returns `acknowledged`, `already_acknowledged`, `unknown`, `pending_remaining`; never hides a newer event |
+| `POST /leaves/balances/bulk` | Sync leave balances (allocated/used/pending) | per-item batch envelope; unchanged replay → `duplicate`; case-insensitive leave code |
 | `POST /leaves/periods`, `/types`, `PATCH /leaves/types/{id}` | Manage ERP-owned leave master data | requires `leave-master:write` |
+| `GET /sync/status` | Integration health | pending-event count/age, last delivery, 24h per-entity batch counts, replay-protection backend |
+| `GET /sync/pending-events` | Pending outbound events | sequence, attempts, last delivery — for operators |
+| `POST /reconciliation/attendance`, `/reconciliation/leave-balances` | Compare an ERP snapshot with the HRMS mirror | **dry run by default**; reports `missing_in_hrms`, `missing_in_erp`, `unlinked_hrms_record`, `mismatched`; `apply=true` routes through the audited sync path |
 
-**Ingestion discipline:** bulk endpoints are intentionally *partial-success* — a bad row lands in `failed[]` with its error string and the rest are committed. Callers must inspect the result, not just the HTTP status.
+**Ingestion discipline:** every bulk endpoint answers with one envelope — `batch_id`, `received_count`, `accepted_count`, `duplicate_count`, `failed_count`, `retryable_failed_count`, and one `items[]` entry per ERP identity (`status`, `id`, `code`, `message`, `retryable`). A bad row is *partial success*: it is isolated in a savepoint and the rest are committed. Error messages are sanitised (no driver text, SQL, or stack traces); the real cause is logged with the batch id. A page where every item failed transiently returns `503` with `Retry-After`, and `X-ERP-Batch-Id` echoes the caller's id. Callers must inspect the body, not just the HTTP status.
 
 **Local database reset:** `app/api/cleanup_db.py` previews by default. Execution requires `--execute` plus the exact confirmation text; remote and non-development targets require additional flags. It preserves `alembic_version` and Super Admin accounts by default, removes workforce accounts, and truncates business data. `--delete-super-admin` is accepted only together with `--reseed-bootstrap`, preventing an inaccessible cleaned database.
 
-**Outbound discipline:** HRMS never calls the ERP. Leave approvals/rejections/cancellations queue an event that the ERP polls. Until the ERP acks, `erp_sync_status` stays `PENDING`; rows are visible in `GET /leaves/changes` indefinitely.
+**Outbound discipline:** HRMS never calls the ERP. Every leave decision writes one immutable `erp_outbox_events` row in the same transaction as the state change (deterministic id `LEAVE-{id}-{EVENT}`, immutable JSON payload snapshot, monotonic `sequence`). The ERP polls by sequence cursor and acknowledges; fetching never acknowledges. Unacknowledged rows are retained indefinitely; acknowledged rows are retained for `ERP_OUTBOX_RETENTION_DAYS` (default 90) and pruned by the maintenance query in `docs/erp-integration.md`. The `leave_applications.erp_event_id`/`erp_sync_status` columns remain as a read-model mirror only.
 
 ### 2.9 Public API index (grouped by tag)
 
@@ -937,14 +942,16 @@ Owner permissions exclude approval and HR operations permissions. The Owner stil
 
 | # | Flow | Calls | Notes |
 |---|---|---|---|
-| 1 | **Provision an employee + login** | `PUT /integrations/erp/employees/by-erp-id/{erp_id}` | First call requires code, name, phone and strong `initial_password`; later partial updates preserve password; status changes reconcile login access |
-| 2 | **Daily attendance ingest** | `POST /integrations/erp/attendance/records/bulk` | one row per employee/date; `erp_record_id` idempotent; inspect `accepted/duplicates/failed` |
+| 1 | **Provision an employee + login** | `PUT /integrations/erp/employees/by-erp-id/{erp_id}`, `PUT /integrations/erp/employees/bulk` | First call requires code, name, phone and strong `initial_password`; later partial updates preserve password; status changes reconcile login access. The bulk form applies the same rules per item (savepoint-isolated) and returns the batch envelope |
+| 1b | **Onboard the hierarchy** | `PUT /integrations/erp/units/bulk`, `/departments/bulk`, `/designations/bulk` | Units before departments (`unit_id` is the local id); each page returns the batch envelope |
+| 2 | **Daily attendance ingest** | `POST /integrations/erp/attendance/records/bulk` | one row per employee/date; `erp_record_id` idempotent; corrections vs conflicts are explicit item codes |
 | 3 | **Shift & roster sync** | `PUT /integrations/erp/shifts/by-erp-id/{erp_id}`, `POST /shifts/assignments/bulk`, `PATCH /shifts/assignments/{id}/cancel` | overlap prevention; dated assignments override `Employee.shift_id` |
 | 4 | **Holiday calendar sync** | `POST /integrations/erp/holidays/bulk` | keyed by `erp_holiday_id`; weekly-off generation lives in `holiday_admin` lists |
 | 5 | **Overtime sync** | `POST /integrations/erp/overtime/records/bulk` | keyed by `erp_event_id`; new rows must be `PENDING` with zero approved minutes because HRMS owns approve/decline |
-| 6 | **Leave outcome pull + ack** | `GET /integrations/erp/leaves/changes?since=&limit=` → `POST /integrations/erp/leaves/changes/ack` | HRMS-produced events (`LEAVE-{id}-APPROVED/REJECTED/CANCELLED`) remain `PENDING` until acked; `has_more` signals another page |
+| 6 | **Leave outcome pull + ack** | `GET /integrations/erp/leaves/changes?cursor=&limit=` → `POST /integrations/erp/leaves/changes/ack` | unacknowledged outbox events in `sequence` order; `next_cursor` + `has_more`; ack is idempotent and partial acks are supported |
 | 7 | **Leave balance sync** | `POST /integrations/erp/leaves/balances/bulk` | ERP is the balance authority; upserts `allocated/used/pending` per employee+code+year |
 | 8 | **Password reset from ERP** | `POST /integrations/erp/employees/{id}/password-reset` | revokes sessions, forces change |
+| 9 | **Health + reconciliation** | `GET /integrations/erp/sync/status`, `GET /sync/pending-events`, `POST /reconciliation/attendance`, `POST /reconciliation/leave-balances` | backlog age and per-entity batch history; dry-run discrepancy report, `apply=true` to repair through the audited sync path |
 
 ---
 
@@ -1141,7 +1148,7 @@ These are verified against the current code and are the highest-value item in th
 
 ### C. Environment variables (backend)
 
-`DATABASE_URL`, `POSTGRES_HOST/PORT/USER/PASSWORD/DB`, `DB_POOL_SIZE` (default 10), `DB_MAX_OVERFLOW` (default 10), `DB_POOL_TIMEOUT_SECONDS` (default 30), `JWT_SECRET`, `ENVIRONMENT`, `EXPOSE_API_DOCS`, `ERP_API_CLIENTS`, `ERP_SIGNATURE_MAX_AGE_SECONDS`, `ERP_API_KEY` (development only), `BOOTSTRAP_SEED_DATA`, `CORS_ORIGINS`, `SUPER_ADMIN_*`, `AUTH_THROTTLE_BACKEND`, `REDIS_URL`, `MFA_*`, `PASSWORD_*`, mail and logging settings. The synchronous health-check engine keeps its own 1+1 pool. Frontend: `NUXT_HRMS_API_BASE` (default `http://127.0.0.1:8000`).
+`DATABASE_URL`, `POSTGRES_HOST/PORT/USER/PASSWORD/DB`, `DB_POOL_SIZE` (default 10), `DB_MAX_OVERFLOW` (default 10), `DB_POOL_TIMEOUT_SECONDS` (default 30), `JWT_SECRET`, `ENVIRONMENT`, `EXPOSE_API_DOCS`, `ERP_API_CLIENTS`, `ERP_SIGNATURE_MAX_AGE_SECONDS`, `ERP_SYNC_STALE_AFTER_SECONDS` (backlog alarm threshold, default 86400), `ERP_OUTBOX_RETENTION_DAYS` (default 90), `ERP_API_KEY` (development only), `BOOTSTRAP_SEED_DATA`, `CORS_ORIGINS`, `SUPER_ADMIN_*`, `AUTH_THROTTLE_BACKEND`, `REDIS_URL`, `MFA_*`, `PASSWORD_*`, mail and logging settings. The synchronous health-check engine keeps its own 1+1 pool. Frontend: `NUXT_HRMS_API_BASE` (default `http://127.0.0.1:8000`).
 
 ### D. Glossary
 
@@ -1154,5 +1161,7 @@ These are verified against the current code and are the highest-value item in th
 | **Permission** | Coarse capability code checked by `require_permission` |
 | **Ledger** | Double-entry leave transaction log (credit = allocation/reversal, debit = application) |
 | **Early return** | Cancelling the remaining days of an already-started approved leave (`CANCELLATION_PENDING`) |
-| **Ack loop** | ERP pulls `/leaves/changes` then `POST /leaves/changes/ack`; unacked events stay `PENDING` |
+| **Ack loop** | ERP pulls `/leaves/changes` by `sequence` cursor then `POST /leaves/changes/ack`; unacked `erp_outbox_events` stay pending until acknowledged |
+| **Outbox** | `erp_outbox_events`: immutable per-transition events written in the decision's transaction and consumed by the ERP pull feed |
+| **Batch envelope** | Shared bulk response (`batch_id`, counts, per-item `status`/`code`/`retryable`) used by every ERP bulk endpoint |
 | **Cross-midnight shift** | Shift whose end time is before its start time (window rolls into the next day) |

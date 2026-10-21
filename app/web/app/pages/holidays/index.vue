@@ -35,11 +35,27 @@ const dateFormat = new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'sh
 const weekdayFormat = new Intl.DateTimeFormat('en-IN', { weekday: 'long' })
 const monthFormat = new Intl.DateTimeFormat('en-IN', { month: 'long', year: 'numeric' })
 const shortDateFormat = new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short' })
-const formatDate = (value: string) => dateFormat.format(new Date(`${value}T00:00:00`))
-const formatWeekday = (value: string) => weekdayFormat.format(new Date(`${value}T00:00:00`))
-const formatMonth = (value: string) => monthFormat.format(new Date(`${value}T00:00:00`))
-const formatShort = (value: string) => shortDateFormat.format(new Date(`${value}T00:00:00`))
-const weeklyOffLabel = (value: string) => value.charAt(0) + value.slice(1).toLowerCase().replace(/_/g, ' ')
+const formatDate = (value?: string | null) => {
+  if (!value) return '—'
+  const date = new Date(value.includes('T') ? value : `${value}T00:00:00`)
+  return Number.isNaN(date.getTime()) ? '—' : dateFormat.format(date)
+}
+const formatWeekday = (value?: string | null) => {
+  if (!value) return '—'
+  const date = new Date(value.includes('T') ? value : `${value}T00:00:00`)
+  return Number.isNaN(date.getTime()) ? '—' : weekdayFormat.format(date)
+}
+const formatMonth = (value?: string | null) => {
+  if (!value) return '—'
+  const date = new Date(value.includes('T') ? value : `${value}T00:00:00`)
+  return Number.isNaN(date.getTime()) ? '—' : monthFormat.format(date)
+}
+const formatShort = (value?: string | null) => {
+  if (!value) return '—'
+  const date = new Date(value.includes('T') ? value : `${value}T00:00:00`)
+  return Number.isNaN(date.getTime()) ? '—' : shortDateFormat.format(date)
+}
+const weeklyOffLabel = (value?: string | null) => value ? value.charAt(0) + value.slice(1).toLowerCase().replace(/_/g, ' ') : '—'
 
 const holidays = computed(() => [...(selected.value?.holidays || [])].sort((a, b) => a.holiday_date.localeCompare(b.holiday_date)))
 const holidayCount = computed(() => holidays.value.filter(item => !item.is_weekly_off).length)

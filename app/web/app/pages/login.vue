@@ -17,8 +17,9 @@ const notice = computed(() => (typeof route.query.notice === 'string' ? route.qu
  * authentication, so the login form never asks what someone is.
  */
 function destination() {
-  const redirect = typeof route.query.redirect === 'string' && route.query.redirect.startsWith('/') ? route.query.redirect : '/'
-  return redirect
+  // The value comes from the URL, so it is only accepted when it is a path on
+  // this origin (`//evil.example` is protocol-relative, not a local path).
+  return safeInternalPath(route.query.redirect)
 }
 
 async function submit() {

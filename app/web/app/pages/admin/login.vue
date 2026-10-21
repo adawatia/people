@@ -10,8 +10,13 @@ useSeoMeta({ title: 'Technical sign-in · People by Datlabs' })
  * session policy and (once enrolled) a mandatory second factor. Business users
  * never see this page, and a business account cannot authenticate here.
  */
+const route = useRoute()
 const auth = useAuth()
 const form = reactive({ identity: '', password: '' })
+
+function destination() {
+  return safeInternalPath(route.query.redirect)
+}
 const errorMessage = ref('')
 const challenge = ref<MfaChallenge | null>(null)
 
@@ -28,7 +33,7 @@ async function submit() {
       challenge.value = result
       return
     }
-    await navigateTo(result.must_change_password ? '/settings?change-password=1' : '/')
+    await navigateTo(result.must_change_password ? '/settings?change-password=1' : destination())
   } catch (error) {
     const candidate = error as { data?: { statusMessage?: string, message?: string }, statusMessage?: string }
     errorMessage.value = candidate.data?.statusMessage || candidate.data?.message || candidate.statusMessage || 'Those credentials were not accepted.'
@@ -36,7 +41,7 @@ async function submit() {
 }
 
 async function afterMfa() {
-  await navigateTo(auth.mustChangePassword.value ? '/settings?change-password=1' : '/')
+  await navigateTo(auth.mustChangePassword.value ? '/settings?change-password=1' : destination())
 }
 </script>
 

@@ -200,7 +200,7 @@ async def verify_mfa(
 def _status_payload(user: User) -> MfaStatusResponse:
     try:
         hashes = json.loads(user.mfa_recovery_code_hashes) if user.mfa_recovery_code_hashes else []
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         hashes = []
     return MfaStatusResponse(
         enabled=bool(user.mfa_enabled),

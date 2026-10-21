@@ -66,7 +66,7 @@ function openApplication() {
   applyOpen.value = true
 }
 
-function statusConfig(status: string) {
+function statusConfig(status?: string | null) {
   const values: Record<string, { color: 'warning' | 'success' | 'error' | 'neutral', icon: string }> = {
     PENDING: { color: 'warning', icon: 'i-lucide-clock-3' },
     CANCELLATION_PENDING: { color: 'warning', icon: 'i-lucide-rotate-ccw' },
@@ -74,11 +74,14 @@ function statusConfig(status: string) {
     REJECTED: { color: 'error', icon: 'i-lucide-circle-x' },
     CANCELLED: { color: 'neutral', icon: 'i-lucide-ban' }
   }
-  return values[status] || values.CANCELLED!
+  return values[status?.toUpperCase() || ''] || values.CANCELLED!
 }
 
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(`${value}T00:00:00`))
+function formatDate(value?: string | null) {
+  if (!value) return '—'
+  const date = new Date(value.includes('T') ? value : `${value}T00:00:00`)
+  if (Number.isNaN(date.getTime())) return '—'
+  return new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }).format(date)
 }
 
 async function submitApplication() {

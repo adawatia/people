@@ -94,11 +94,35 @@ export interface RefreshedSession {
  * token concurrently: the backend correctly treats the second use as replay and
  * revokes the whole session chain. So concurrent callers share one rotation and
  * all apply the same resulting cookies.
+ *
+ * LIMITATION: these Maps are process-local. Each Nitro process keeps its own
+ * in-flight and recent-refresh state. Under multiple Nitro instances the grace
+ * window does not cover refreshes that happened in another instance, so a
+ * request carrying a recently-rotated token from instance A can still trip the
+ * backend's replay detection on instance B and force a global sign-out.
+ *
+ * The backend's replay protection is authoritative and must stay enabled —
+ * disabling it would let a stolen refresh token be reused an arbitrary number of
+ * times. The real fix is one of:
+ *   - run the BFF as a single Nitro process per datacenter (simple, but limits
+ *     scale), or
+ *   - route all requests for one browser session to the same instance (session
+ *     affinity at the load balancer), or
+ *   - share the in-flight + grace maps through a small shared store (Redis, or
+ *     the already-required throttle Redis) so every instance sees the same
+ *     rotation in flight.
+ *
+ * Until that is in place, the recommended mitigation is to keep the BFF as a
+ * single instance in deployments that do not already run a session-aware load
+ * balancer. The backend's own in-DB refresh rotation (auth_session_repo.rotate(),
+ * a conditional UPDATE ... WHERE revoked_at IS NULL) remains correct regardless
+ * of how many API workers exist.
  */
 const inFlightRefreshes = new Map<string, Promise<RefreshedSession>>()
 // SSR subrequests can arrive just after a fast rotation has finished, while
 // still carrying the original request's cookies. Keep the result briefly so
 // those requests do not present a spent token to the replay-protected API.
+// LIMITATION: process-local — a different Nitro instance does not see this.
 const recentRefreshes = new Map<string, { session: RefreshedSession, expiresAt: number }>()
 const REFRESH_GRACE_MS = 2000
 const MAX_RECENT_REFRESHES = 512

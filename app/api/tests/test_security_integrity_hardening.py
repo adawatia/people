@@ -17,6 +17,7 @@ from core.auth import TECHNICAL_ADMIN_PERMISSIONS, current_business_user, get_us
 from core.database import async_session_maker
 from core.employee_access import EmployeeAccessScope
 from core.erp_auth import ErpPrincipal, authenticate_erp_client, require_erp_scope
+from core.erp_nonce_store import NonceStore, set_global_nonce_store
 from db.models import Notification, NotificationReceipt, Shift, User
 from repositories.notification_repo import NotificationRepository
 from schemas.shifts import ShiftCreate
@@ -69,7 +70,9 @@ async def test_erp_hmac_authentication_enforces_scope_and_nonce_replay(monkeypat
     )
     monkeypatch.setattr(erp_auth, "get_settings", lambda: settings)
     monkeypatch.setattr(erp_auth, "record_audit_event", AsyncMock())
-    erp_auth._memory_nonces.clear()
+    # Nonces moved out of erp_auth into core.erp_nonce_store; reset the global
+    # store so a nonce from another test cannot look like a replay here.
+    set_global_nonce_store(NonceStore())
     timestamp = str(int(time.time()))
     nonce = "unique-nonce-12345"
     path = "/api/v1/integrations/erp/attendance"

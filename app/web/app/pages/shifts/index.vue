@@ -59,6 +59,8 @@ const scopeDescription = computed(() => workspace.current.value === 'MY'
       </div>
     </div><div
       data-page-tabs
+      role="tablist"
+      aria-label="Shift management sections"
       class="mt-7 flex gap-2 border-b border-[var(--people-border)]"
     >
       <button
@@ -66,7 +68,8 @@ const scopeDescription = computed(() => workspace.current.value === 'MY'
         :key="item.key"
         class="flex min-h-11 items-center gap-2 border-b-2 px-3 text-sm font-semibold"
         :class="tab === item.key ? 'border-primary text-primary' : 'border-transparent text-muted'"
-        :aria-pressed="tab === item.key"
+        role="tab"
+        :aria-selected="tab === item.key"
         @click="tab = item.key as typeof tab"
       >
         <UIcon :name="item.icon" />{{ item.label }}

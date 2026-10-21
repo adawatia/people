@@ -31,6 +31,7 @@ from schemas.leaves import (
     LeaveTypeRead,
     LeaveTypeUpdate,
 )
+from services.erp_outbox import enqueue_leave_event
 from services.holiday_service import HolidayService
 
 
@@ -331,7 +332,12 @@ class LeaveService:
 
         balance = None
         if leave_type.is_paid:
-            balance = await self._get_leave_balance(data.employee_id, data.leave_type_id, data.from_date.year)
+            # Lock the balance row before checking availability so concurrent
+            # applications cannot overdraw the same leave balance. The row is
+            # locked for the duration of this transaction only.
+            balance = await self._get_leave_balance(
+                data.employee_id, data.leave_type_id, data.from_date.year, for_update=True
+            )
             available = float(balance.allocated - balance.used - balance.pending) if balance else 0.0
             if days_count > available:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Insufficient leave balance")
@@ -406,10 +412,11 @@ class LeaveService:
         app_id = app.id
 
         app.status = "APPROVED"
-        app.erp_event_id = f"LEAVE-{app.id}-APPROVED"
-        app.erp_sync_status = "PENDING"
         app.actioned_by = actioned_by_user_id
         app.actioned_at = now_ist()
+        # Outboxed in this same transaction: the ERP never sees an approval
+        # whose balance/ledger writes were rolled back, and vice versa.
+        await enqueue_leave_event(self.session, app, "APPROVED")
 
         if app.leave_type and app.leave_type.is_paid:
             balance = await self._get_leave_balance(
@@ -496,11 +503,10 @@ class LeaveService:
         is_paid = bool(app.leave_type and app.leave_type.is_paid)
 
         app.status = "REJECTED"
-        app.erp_event_id = f"LEAVE-{app.id}-REJECTED"
-        app.erp_sync_status = "PENDING"
         app.actioned_by = actioned_by_user_id
         app.actioned_at = now_ist()
         app.rejection_reason = rejection_reason
+        await enqueue_leave_event(self.session, app, "REJECTED")
         if is_paid:
             balance = await self._get_leave_balance(
                 app_employee_id, app_leave_type_id, app_from_date.year, for_update=True
@@ -547,10 +553,9 @@ class LeaveService:
 
         was_approved = app.status == "APPROVED"
         app.status = "CANCELLED"
-        app.erp_event_id = f"LEAVE-{app.id}-CANCELLED"
-        app.erp_sync_status = "PENDING"
         app.actioned_by = cancelled_by_user_id
         app.actioned_at = now_ist()
+        await enqueue_leave_event(self.session, app, "CANCELLED")
 
         if app.leave_type and app.leave_type.is_paid:
             balance = await self._get_leave_balance(
@@ -699,14 +704,14 @@ class LeaveService:
 
         app.cancellation_actioned_by = actioned_by_user_id
         app.cancellation_actioned_at = now_ist()
-        app.erp_event_id = f"LEAVE-{app.id}-CANCELLATION-APPROVED"
-        app.erp_sync_status = "PENDING"
         if effective_date <= original_from_date:
             app.status = "CANCELLED"
         else:
             app.status = "APPROVED"
             app.to_date = effective_date - timedelta(days=1)
             app.days_count = original_days - refundable_days
+        # After the status/date mutation so the snapshot matches what ERP reads.
+        await enqueue_leave_event(self.session, app, "CANCELLATION_APPROVED")
         await self.session.commit()
         return await self.get_application(application_id)
 

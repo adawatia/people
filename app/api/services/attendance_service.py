@@ -241,14 +241,14 @@ class AttendanceService:
 
             if first_in:
                 if first_in.tzinfo is not None:
-                    # Punches may arrive tz-aware; strip to naive local time so
-                    # they compare cleanly against the shift's naive window.
-                    first_in = first_in.replace(tzinfo=None)
+                    # Convert to India wall-clock, then drop the tzinfo so the
+                    # result compares cleanly against the shift's naive window.
+                    first_in = ShiftService._local_naive(first_in)
                 punch_in_val = first_in.time()
 
             if last_out:
                 if last_out.tzinfo is not None:
-                    last_out = last_out.replace(tzinfo=None)
+                    last_out = ShiftService._local_naive(last_out)
 
             if last_out and first_in and last_out > first_in:
                 punch_out_val = last_out.time()

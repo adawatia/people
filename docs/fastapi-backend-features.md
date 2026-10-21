@@ -223,6 +223,7 @@ Biometric punch ingestion, daily batch processor, calendar views, and attendance
 
 ### Key Features
 - **ERP attendance synchronization**: processed daily records enter through `POST /api/v1/integrations/erp/attendance/records/bulk`; browser punch writes are not supported.
+- **ERP bulk master data**: employees, units, departments and designations can be upserted in bulk through `PUT /api/v1/integrations/erp/employees/bulk`, `/units/bulk`, `/departments/bulk` and `/designations/bulk`, each returning `accepted[]`/`failed[]`.
 - **Remote Work Recognition**: The batch attendance processor queries approved Work Arrangements (WFH/OD) and marks employees `WORK_FROM_HOME` instead of falsely penalizing them as `ABSENT`.
 - **Self-Approval Prevention**: Approvers cannot approve their own regularization requests.
 

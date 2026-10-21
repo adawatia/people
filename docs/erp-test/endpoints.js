@@ -203,6 +203,29 @@ window.ENDPOINTS = [
 
 
   {
+    id: "units-bulk",
+    group: "Organization & master data",
+    label: "Bulk upsert units",
+    method: "PUT",
+    path: "/api/v1/integrations/erp/units/bulk",
+    scope: "master-data:write",
+    pathParams: [],
+    body: {
+      shape: "object-array",
+      arrayKey: "units",
+      arrayLabel: "Units",
+      itemFields: [
+        { name: "erp_id", type: "text", required: true, placeholder: "YOUR-ERP-UNIT-ID", help: "Stable unit key from your ERP." },
+        { name: "name", type: "text", section: "Unit", help: "Required when this ERP ID is first created." },
+        { name: "code", type: "text", section: "Unit" },
+        { name: "city", type: "text", section: "Unit" },
+        { name: "is_active", type: "bool", section: "Unit" },
+      ],
+    },
+    notes: "Returns the batch envelope: batch_id, counts, and items[] with status (accepted/duplicate/failed), code, message and retryable. One invalid unit does not reject the page.",
+  },
+
+  {
     id: "department-upsert",
     group: "Organization & master data",
     label: "Upsert department",
@@ -219,6 +242,29 @@ window.ENDPOINTS = [
         { name: "is_active", type: "bool", section: "Department", help: "Set false to retire; true reactivates. Omit to preserve the current state." },
       ],
     },
+  },
+
+  {
+    id: "departments-bulk",
+    group: "Organization & master data",
+    label: "Bulk upsert departments",
+    method: "PUT",
+    path: "/api/v1/integrations/erp/departments/bulk",
+    scope: "master-data:write",
+    pathParams: [],
+    body: {
+      shape: "object-array",
+      arrayKey: "departments",
+      arrayLabel: "Departments",
+      itemFields: [
+        { name: "erp_id", type: "text", required: true, placeholder: "YOUR-ERP-DEPARTMENT-ID" },
+        { name: "name", type: "text", section: "Department", help: "Required when this ERP ID is first created." },
+        { name: "code", type: "text", section: "Department" },
+        { name: "unit_id", type: "lookup", lookup: "units", section: "Department", help: "Required when first created; sync units first." },
+        { name: "is_active", type: "bool", section: "Department" },
+      ],
+    },
+    notes: "Sync units before departments; unit_id is the HRMS numeric id returned by the unit upsert.",
   },
 
   {
@@ -242,6 +288,29 @@ window.ENDPOINTS = [
 
 
   {
+    id: "designations-bulk",
+    group: "Organization & master data",
+    label: "Bulk upsert designations",
+    method: "PUT",
+    path: "/api/v1/integrations/erp/designations/bulk",
+    scope: "master-data:write",
+    pathParams: [],
+    body: {
+      shape: "object-array",
+      arrayKey: "designations",
+      arrayLabel: "Designations",
+      itemFields: [
+        { name: "erp_id", type: "text", required: true, placeholder: "YOUR-ERP-DESIGNATION-ID" },
+        { name: "name", type: "text", section: "Designation", help: "Required when this ERP ID is first created." },
+        { name: "code", type: "text", section: "Designation" },
+        { name: "description", type: "text", section: "Designation" },
+        { name: "is_active", type: "bool", section: "Designation" },
+      ],
+    },
+    notes: "Returns the batch envelope with a per-item status, code and retryable flag.",
+  },
+
+  {
     id: "employee-upsert",
     group: "Employees",
     label: "Upsert employee (by ERP id)",
@@ -251,6 +320,26 @@ window.ENDPOINTS = [
     pathParams: [{ name: "erp_id", placeholder: "YOUR-ERP-EMPLOYEE-ID", help: "Stable employee key from your ERP (for example, its source person ID). Keep it unchanged; employee_code is a separate immutable business code." }],
     body: { shape: "object", fields: employeeFields({ upsert: true, account: true }) },
     notes: "First create requires employee_code, first_name, phone_number, and initial_password to provision the account. Later calls may send only changed fields; initial_password is ignored for an existing ERP ID. Use role to select an HRMS role; business_role is no longer accepted. New employees must start ACTIVE.",
+  },
+
+  {
+    id: "employees-bulk",
+    group: "Employees",
+    label: "Bulk upsert employees",
+    method: "PUT",
+    path: "/api/v1/integrations/erp/employees/bulk",
+    scope: "employees:write",
+    pathParams: [],
+    body: {
+      shape: "object-array",
+      arrayKey: "employees",
+      arrayLabel: "Employees",
+      itemFields: [
+        { name: "erp_id", type: "text", required: true, placeholder: "YOUR-ERP-EMPLOYEE-ID", help: "Stable ERP employee key; each item is upserted by this value." },
+        ...employeeFields({ upsert: true, account: true }),
+      ],
+    },
+    notes: "Same rules as the single upsert, applied per item. Returns the batch envelope (items[] with status/code/retryable); each item is isolated, so one invalid employee does not reject the page.",
   },
 
   {
@@ -466,11 +555,12 @@ window.ENDPOINTS = [
     scope: "leaves:read",
     pathParams: [],
     queryParams: [
-      { name: "since", value: "" },
+      { name: "cursor", value: "", help: "Pass the previous response's next_cursor." },
       { name: "limit", value: "100" },
+      { name: "since", value: "", help: "Deprecated legacy timestamp cursor; prefer cursor." },
     ],
     body: { shape: "none" },
-    notes: "Optional since is an ISO timestamp; leave blank to fetch all unacknowledged changes.",
+    notes: "Returns unacknowledged events in sequence order with has_more, next_cursor and pending_count. Fetching does not acknowledge; events redeliver until acked.",
   },
   {
     id: "leave-changes-ack",
@@ -480,8 +570,8 @@ window.ENDPOINTS = [
     path: "/api/v1/integrations/erp/leaves/changes/ack",
     scope: "leaves:write",
     pathParams: [],
-    body: { shape: "string-array", arrayLabel: "ERP event IDs", placeholder: "ERP-LEAVE-EVENT-ID" },
-    notes: "Event IDs come from the changes feed above.",
+    body: { shape: "string-array", arrayLabel: "ERP event IDs", placeholder: "LEAVE-42-APPROVED" },
+    notes: "Ack only after the ERP applied the event. Idempotent: returns acknowledged, already_acknowledged, unknown and pending_remaining. The canonical body is {\"event_ids\": [...], \"batch_id\": \"...\"}; this tool sends the equivalent bare array.",
   },
   {
     id: "leave-balances-bulk",

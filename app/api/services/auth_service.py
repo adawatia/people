@@ -946,6 +946,6 @@ def _encode_recovery_hashes(codes: list[str], *, already_hashed: list[str] | Non
 def _decode_recovery_hashes(payload: str) -> list[str]:
     try:
         value = json.loads(payload)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return []
     return [str(item) for item in value] if isinstance(value, list) else []

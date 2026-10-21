@@ -54,7 +54,21 @@ def test_erp_master_data_has_one_write_route_per_external_identity():
     )
     assert all(prefix + path in paths for path in retained)
     assert "/api/v1/auth/integrations/erp/employees/{employee_id}/password-reset" not in paths
-    assert len([path for path in paths if path.startswith(prefix)]) == 21
+
+    # Bulk upserts are additive page endpoints, not a second identity-keyed write
+    # route: they carry many erp_ids in the body instead of one in the path.
+    bulk = (
+        "/units/bulk",
+        "/departments/bulk",
+        "/designations/bulk",
+        "/employees/bulk",
+    )
+    for path in bulk:
+        assert set(paths[prefix + path]) == {"put"}
+
+    # 25 write/read integration routes plus four operational endpoints:
+    # sync/status, sync/pending-events, and the two reconciliation reports.
+    assert len([path for path in paths if path.startswith(prefix)]) == 29
 
 
 def test_employee_onboarding_is_exposed_only_through_erp_upsert():

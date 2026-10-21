@@ -23,6 +23,7 @@ from core.auth import (
     setup_rate_limits,
 )
 from core.database import auth_engine, check_database_connection, get_engine
+from core.erp_nonce_store import NonceStore, set_global_nonce_store
 from core.logging import setup_logging
 from core.settings import get_settings
 from routers import auth_mfa, auth_sessions
@@ -46,13 +47,39 @@ async def lifespan(_: FastAPI):
     logger.info("Starting HRMS API")
     # Schema changes are applied by Alembic in the release process.  ``create_all``
     # remains a development convenience only; it cannot safely evolve a live DB.
-    is_development = settings.environment.lower() in {"development", "dev", "test"}
+    # Use the single ``is_development`` definition so ``ENVIRONMENT=local`` behaves
+    # like every other development profile (it already bypasses the production
+    # secret checks and exposes the API docs).
+    is_development = settings.is_development
     if is_development:
         await create_db_and_tables()
     # A production release must run Alembic first. Seeding is opt-in there so
     # an API worker cannot unexpectedly create a privileged account.
     if is_development or settings.bootstrap_seed_data:
         await ensure_seed_data()
+
+    # ERP nonce store shared Redis client.
+    # In production AUTH_THROTTLE_BACKEND=redis means the auth throttle and the
+    # ERP nonce store both rely on Redis.  The nonce store does not open its own
+    # connection per request; instead the lifespan creates one shared client and
+    # wires it in.  When Redis is unavailable in production the store raises on
+    # first use (fail closed) rather than silently accepting replays.
+    nonce_store: NonceStore | None = None
+    if settings.auth_throttle_backend == "redis" and settings.redis_url:
+        import redis.asyncio as redis_mod
+
+        redis_client = redis_mod.Redis.from_url(
+            settings.redis_url, encoding="utf-8", decode_responses=True
+        )
+        nonce_store = NonceStore(redis=redis_client)
+        nonce_store.configure_production(redis_client)
+        logger.info("ERP nonce store wired to shared Redis client")
+    else:
+        nonce_store = NonceStore()
+    # Publish the store the request path uses; otherwise ``get_global_nonce_store``
+    # hands out a separate in-memory instance and Redis replay protection is
+    # never actually consulted.
+    set_global_nonce_store(nonce_store)
 
     # Start the background task for cleaning up notifications
     cleanup_task = asyncio.create_task(notification_cleanup_loop())
@@ -65,6 +92,8 @@ async def lifespan(_: FastAPI):
         await cleanup_task
     except asyncio.CancelledError:
         pass
+    if nonce_store is not None:
+        await nonce_store.close()
     await auth_engine.dispose()
     # The sync health-check pool is lazy; avoid creating it merely to close it.
     if get_engine.cache_info().currsize:
@@ -192,6 +221,7 @@ from routers import (
     erp_holidays,
     erp_leaves,
     erp_master_data,
+    erp_operations,
     erp_overtime,
     erp_shifts,
     holidays,
@@ -228,6 +258,7 @@ api_router.include_router(erp_holidays.router)
 api_router.include_router(erp_overtime.router)
 api_router.include_router(erp_employees.router)
 api_router.include_router(erp_master_data.router)
+api_router.include_router(erp_operations.router)
 api_router.include_router(leaves.router)
 api_router.include_router(overtime.router)
 api_router.include_router(work_arrangements.router)

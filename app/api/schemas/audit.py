@@ -22,7 +22,7 @@ class AuditLogRead(BaseModel):
     def from_record(cls, record) -> AuditLogRead:
         try:
             filters = json.loads(record.filters_json) if record.filters_json else {}
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             filters = {}
         return cls(
             id=record.id,

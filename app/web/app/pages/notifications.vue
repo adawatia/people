@@ -27,7 +27,9 @@ async function openNotification(item: HrmsNotification) {
       await Promise.all([refresh(), refreshCounts()])
     }
     // Notification links are application paths, never arbitrary external URLs.
-    if (item.link?.startsWith('/') && !item.link.startsWith('//')) await navigateTo(item.link)
+    // The link is stored server-side but is still treated as untrusted input.
+    const target = safeInternalPath(item.link, '')
+    if (target) await navigateTo(target)
   } catch {
     toast.add({ title: 'Could not update notification', description: 'Please try again.', color: 'error' })
   } finally {

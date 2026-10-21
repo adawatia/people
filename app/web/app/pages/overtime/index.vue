@@ -35,8 +35,8 @@ const { data: rawData, pending, error, refresh } = useLazyAsyncData('my-overtime
 }, { watch: [employeeId, selectedMonth, selfService, statusFilter, list.query] })
 const data = useRetainedData(rawData)
 const filtered = computed(() => data.value?.records.items || [])
-const hours = (minutes: number) => `${Math.floor(minutes / 60)}h ${minutes % 60}m`
-const statusColor = (value: string) => ({ PENDING: 'warning', APPROVED: 'success', REJECTED: 'error' }[value] || 'neutral') as 'warning' | 'success' | 'error' | 'neutral'
+const hours = (minutes?: number | null) => typeof minutes === 'number' && !Number.isNaN(minutes) ? `${Math.floor(minutes / 60)}h ${minutes % 60}m` : '0h 0m'
+const statusColor = (value?: string | null) => ({ PENDING: 'warning', APPROVED: 'success', REJECTED: 'error' }[value?.toUpperCase() || ''] || 'neutral') as 'warning' | 'success' | 'error' | 'neutral'
 const overtimeChartOption = computed<ECOption>(() => ({
   backgroundColor: 'transparent',
   animation: false,

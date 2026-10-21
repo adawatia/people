@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from core.pagination import PaginatedResponse
 
@@ -228,6 +228,23 @@ class EmployeeUpsert(EmployeeUpdate):
     # Catch stale ERP payloads (notably the retired ``business_role`` input)
     # instead of silently accepting a role assignment that HRMS ignores.
     model_config = ConfigDict(extra="forbid")
+
+
+class EmployeeBulkUpsertItem(EmployeeUpsert):
+    """One ERP employee in a bulk upsert.
+
+    ``erp_id`` is the identity: it is required here because a bulk request has
+    no per-item URL to carry it, and every item is matched against
+    ``Employee.erp_id`` exactly the way the single upsert endpoint does.
+    """
+
+    erp_id: str
+
+
+class EmployeeBulkUpsert(BaseModel):
+    """A page of ERP employee upserts for a single bulk call."""
+
+    employees: list[EmployeeBulkUpsertItem] = Field(..., min_length=1, max_length=1000)
 
 
 class EmployeeDeactivateRequest(BaseModel):

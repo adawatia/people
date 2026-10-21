@@ -46,11 +46,15 @@ watch(selfService, (isSelfService) => {
   if (isSelfService && !employeeId.value) requests.value = null
 })
 
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(`${value}T00:00:00`))
+function formatDate(value?: string | null) {
+  if (!value) return '—'
+  const date = new Date(value.includes('T') ? value : `${value}T00:00:00`)
+  if (Number.isNaN(date.getTime())) return '—'
+  return new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }).format(date)
 }
-function statusColor(status: string): 'warning' | 'success' | 'error' | 'neutral' {
-  return status === 'PENDING' ? 'warning' : status === 'APPROVED' ? 'success' : status === 'REJECTED' ? 'error' : 'neutral'
+function statusColor(status?: string | null): 'warning' | 'success' | 'error' | 'neutral' {
+  const norm = status?.toUpperCase() || ''
+  return norm === 'PENDING' ? 'warning' : norm === 'APPROVED' ? 'success' : norm === 'REJECTED' ? 'error' : 'neutral'
 }
 function openRequest() {
   Object.assign(form, { arrangement_type: 'WORK_FROM_HOME', from_date: today, to_date: today, reason: '', destination_location: '', contact_phone: '' })

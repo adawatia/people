@@ -113,7 +113,14 @@ export function useAuth() {
 
   async function logout() {
     const destination = user.value?.is_superuser || user.value?.role === 'SUPER_ADMIN' ? '/admin/login' : '/login'
-    await requestFetch('/api/session', { method: 'DELETE' })
+    try {
+      await requestFetch('/api/session', { method: 'DELETE' })
+    } catch {
+      // A failed revocation request must not trap the user in a signed-in UI:
+      // clear the client state regardless and let the server-side cookie
+      // expire. (The API also revokes on password change, so this is recovery,
+      // not the primary revocation path.)
+    }
     user.value = null
     initialized.value = true
     await navigateTo(destination)

@@ -3,6 +3,7 @@ from functools import lru_cache
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import URL
 
 from core.secret_box import DEVELOPMENT_KEY as DEVELOPMENT_MFA_KEY
 
@@ -14,10 +15,7 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    database_url: str = Field(
-        default="postgresql+psycopg://dev:SuperAdmin@localhost:5432/hrms",
-        alias="DATABASE_URL",
-    )
+    database_url: str = Field(default="", alias="DATABASE_URL")
     jwt_secret: str = Field(default="hrms-jwt-secret-key-32chars-min-2026-auth", alias="JWT_SECRET")
     environment: str = Field(default="development", alias="ENVIRONMENT")
     expose_api_docs: bool = Field(default=False, alias="EXPOSE_API_DOCS")
@@ -38,6 +36,11 @@ class Settings(BaseSettings):
     db_pool_size: int = Field(default=10, ge=1, le=50, alias="DB_POOL_SIZE")
     db_max_overflow: int = Field(default=10, ge=0, le=50, alias="DB_MAX_OVERFLOW")
     db_pool_timeout_seconds: int = Field(default=30, ge=1, le=120, alias="DB_POOL_TIMEOUT_SECONDS")
+    # Test/CI only. The regression suite runs every test on its own event loop,
+    # and a pooled asyncpg connection outlives that loop, so the next test hits
+    # "Event loop is closed" when the pool hands the stale connection back.
+    # Disabling the pool makes each session open and close its own connection.
+    db_disable_pool: bool = Field(default=False, alias="DB_DISABLE_POOL")
     super_admin_email: str = Field(default="admin@hrms.com", alias="SUPER_ADMIN_EMAIL")
     super_admin_username: str = Field(default="superadmin", alias="SUPER_ADMIN_USERNAME")
     super_admin_password: str = Field(default="SuperAdmin@123", alias="SUPER_ADMIN_PASSWORD")
@@ -63,6 +66,13 @@ class Settings(BaseSettings):
     erp_api_key: str = Field(default="", alias="ERP_API_KEY")
     erp_api_clients: str = Field(default="", alias="ERP_API_CLIENTS")
     erp_signature_max_age_seconds: int = Field(default=300, ge=30, le=900, alias="ERP_SIGNATURE_MAX_AGE_SECONDS")
+    # A pending outbound event older than this means ERP polling has stalled.
+    erp_sync_stale_after_seconds: int = Field(
+        default=24 * 3600, ge=300, alias="ERP_SYNC_STALE_AFTER_SECONDS"
+    )
+    # Acknowledged outbox rows are kept this long for audit, then pruned by the
+    # documented maintenance query (docs/erp-integration.md).
+    erp_outbox_retention_days: int = Field(default=90, ge=1, alias="ERP_OUTBOX_RETENTION_DAYS")
     bootstrap_seed_data: bool = Field(default=False, alias="BOOTSTRAP_SEED_DATA")
 
     # ── Authentication: token and session policy ───────────────────────────────
@@ -173,12 +183,15 @@ class Settings(BaseSettings):
                     for client_id, config in erp_clients.items()
                 )
             )
-        except json.JSONDecodeError, TypeError:
+        except (json.JSONDecodeError, TypeError):
             erp_clients_valid = False
 
         insecure = {
             "JWT_SECRET": self.jwt_secret == "hrms-jwt-secret-key-32chars-min-2026-auth",
-            "DATABASE_URL": self.database_url == "postgresql+psycopg://dev:SuperAdmin@localhost:5432/hrms",
+            # Either an explicit DATABASE_URL or a POSTGRES_PASSWORD must be
+            # supplied: without one the app silently connects to the built-in
+            # localhost/postgres fallback.
+            "DATABASE_URL": not self.database_url.strip() and not self.postgres_password,
             "SUPER_ADMIN_PASSWORD": self.super_admin_password == "SuperAdmin@123",
             "ERP_API_CLIENTS": not erp_clients_valid,
             "AUTH_THROTTLE_BACKEND": self.auth_throttle_backend != "redis",
@@ -233,9 +246,20 @@ class Settings(BaseSettings):
         if configured_database_url:
             return configured_database_url
 
-        password = self.postgres_password
-        auth = self.postgres_user if not password else f"{self.postgres_user}:{password}"
-        return f"postgresql+asyncpg://{auth}@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
+        # Build the URL through SQLAlchemy rather than string formatting so the
+        # username, password and database name are escaped. Interpolating them
+        # produced a broken URL whenever a password contained a URL delimiter:
+        # a password like ``Admin@123`` turned ``@`` into the user/host
+        # separator and psycopg tried to connect to host ``123@localhost``.
+        url = URL.create(
+            drivername="postgresql+asyncpg",
+            username=self.postgres_user or None,
+            password=self.postgres_password or None,
+            host=self.postgres_host or None,
+            port=self.postgres_port or None,
+            database=self.postgres_db or None,
+        )
+        return url.render_as_string(hide_password=False)
 
     def resolved_database_url_sync(self) -> str:
         url = self.resolved_database_url()

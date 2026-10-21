@@ -201,3 +201,6 @@ app/web/playwright-report/
 
 # Local design review captures
 .impeccable/review/
+
+skills-lock.json
+.agents

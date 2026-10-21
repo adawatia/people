@@ -23,6 +23,7 @@ import asyncio
 import selectors
 import sys
 import uuid
+from datetime import date, time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -140,28 +141,32 @@ async def _seed(suffix: str) -> dict[str, object]:
         session.add_all([hr_employee, org_hr_employee, member_employee, outsider_employee])
         await session.flush()
 
-        record = AttendanceRecord(employee_id=member_employee.id, attendance_date="2026-03-02", status="MISSED_PUNCH")
+        # attendance_date is a date column: asyncpg rejects a string here, and a
+        # string would compare incorrectly against the date-scoped queries too.
+        record = AttendanceRecord(employee_id=member_employee.id, attendance_date=date(2026, 3, 2), status="MISSED_PUNCH")
         # A second record without a pending correction, for the submission test.
-        free_record = AttendanceRecord(employee_id=member_employee.id, attendance_date="2026-03-03", status="MISSED_PUNCH")
+        free_record = AttendanceRecord(employee_id=member_employee.id, attendance_date=date(2026, 3, 3), status="MISSED_PUNCH")
         # The other unit needs its own correction and free record, so a scoped
         # caller can be shown to reach exactly one of the two units.
-        other_record = AttendanceRecord(employee_id=outsider_employee.id, attendance_date="2026-03-02", status="MISSED_PUNCH")
-        other_free_record = AttendanceRecord(employee_id=outsider_employee.id, attendance_date="2026-03-03", status="MISSED_PUNCH")
+        other_record = AttendanceRecord(employee_id=outsider_employee.id, attendance_date=date(2026, 3, 2), status="MISSED_PUNCH")
+        other_free_record = AttendanceRecord(employee_id=outsider_employee.id, attendance_date=date(2026, 3, 3), status="MISSED_PUNCH")
         session.add_all([record, free_record, other_record, other_free_record])
         await session.flush()
 
+        # The punch columns are TIME: the service stores what parse_str_time
+        # produced, so a fixture must insert the same time objects asyncpg expects.
         correction = AttendanceCorrectionRequest(
             attendance_record_id=record.id,
-            requested_punch_in="09:15",
-            requested_punch_out="18:05",
+            requested_punch_in=time(9, 15),
+            requested_punch_out=time(18, 5),
             reason=f"Forgot to punch out {suffix}",
             status="PENDING",
         )
         session.add(correction)
         other_correction = AttendanceCorrectionRequest(
             attendance_record_id=other_record.id,
-            requested_punch_in="09:20",
-            requested_punch_out="18:00",
+            requested_punch_in=time(9, 20),
+            requested_punch_out=time(18, 0),
             reason=f"Forgot to punch in {suffix}",
             status="PENDING",
         )

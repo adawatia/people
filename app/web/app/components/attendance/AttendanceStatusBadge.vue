@@ -1,5 +1,5 @@
 <script setup lang="ts">
-const props = defineProps<{ status: string }>()
+const props = defineProps<{ status?: string | null }>()
 
 const config = computed(() => {
   const values: Record<string, { label: string, icon: string, class: string }> = {
@@ -12,7 +12,8 @@ const config = computed(() => {
     MISSED_PUNCH: { label: 'Missed punch', icon: 'i-lucide-triangle-alert', class: 'bg-amber-100 text-amber-900 dark:bg-amber-950/60 dark:text-amber-200' },
     WORK_FROM_HOME: { label: 'Remote', icon: 'i-lucide-house-wifi', class: 'bg-cyan-100 text-cyan-800 dark:bg-cyan-950/60 dark:text-cyan-200' }
   }
-  return values[props.status] || { label: props.status.replaceAll('_', ' '), icon: 'i-lucide-circle', class: 'bg-muted/10 text-muted' }
+  const normalized = props.status ? props.status.toUpperCase() : ''
+  return values[normalized] || { label: normalized ? normalized.replaceAll('_', ' ') : '—', icon: 'i-lucide-circle', class: 'bg-muted/10 text-muted' }
 })
 </script>
 

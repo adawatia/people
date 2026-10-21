@@ -36,13 +36,20 @@ async def test_attendance_bulk_preserves_retries_failures_and_chunk_lookup_count
             ErpAttendanceRecordCreate(employee_code=employee_code, erp_record_id=second,
                                       attendance_date=day, status="ABSENT"),
         ], session)
-        assert [row["erp_record_id"] for row in result.accepted] == [first, second]
-        assert [row["erp_record_id"] for row in result.duplicates] == [first]
-        assert len(result.failed) == 1
+        accepted = [item for item in result.items if item.status == "accepted"]
+        duplicates = [item for item in result.items if item.status == "duplicate"]
+        failed = [item for item in result.items if item.status == "failed"]
+        assert [item.key for item in accepted] == [first]
+        assert [item.key for item in duplicates] == [first]
+        assert len(failed) == 2
+        # A second ERP record id may not silently take over an occupied date.
+        conflict = next(item for item in failed if item.key == second)
+        assert conflict.code == "ATTENDANCE_RECORD_CONFLICT" and conflict.retryable is False
+        assert next(item for item in failed if item.key.endswith("bad")).code == "SHIFT_NOT_FOUND"
         record = await session.scalar(select(AttendanceRecord).where(
             AttendanceRecord.employee_id == employee_id, AttendanceRecord.attendance_date == day
         ))
-        assert record is not None and record.erp_record_id == second and record.status == "ABSENT"
+        assert record is not None and record.erp_record_id == first and record.status == "PRESENT"
 
         selects = 0
 
@@ -54,8 +61,8 @@ async def test_attendance_bulk_preserves_retries_failures_and_chunk_lookup_count
         event.listen(auth_engine.sync_engine, "before_cursor_execute", count_select)
         try:
             retry = await sync_records([
-                ErpAttendanceRecordCreate(employee_id=employee_id, erp_record_id=second,
-                                          attendance_date=day, status="ABSENT")
+                ErpAttendanceRecordCreate(employee_id=employee_id, erp_record_id=first,
+                                          attendance_date=day, status="PRESENT")
                 for _ in range(500)
             ] + [
                 ErpAttendanceRecordCreate(employee_id=employee_id, erp_record_id=f"att-{suffix}-next",
@@ -63,7 +70,10 @@ async def test_attendance_bulk_preserves_retries_failures_and_chunk_lookup_count
             ], session)
         finally:
             event.remove(auth_engine.sync_engine, "before_cursor_execute", count_select)
-        assert len(retry.duplicates) == 500 and len(retry.accepted) == 1 and not retry.failed
+        retry_duplicates = [item for item in retry.items if item.status == "duplicate"]
+        retry_accepted = [item for item in retry.items if item.status == "accepted"]
+        assert len(retry_duplicates) == 500 and len(retry_accepted) == 1
+        assert not [item for item in retry.items if item.status == "failed"]
         assert selects <= 12
 
 
@@ -87,7 +97,9 @@ async def test_overtime_bulk_preserves_savepoints_and_chunk_lookup_count():
             ErpOvertimeRecord(employee_code=employee.employee_code, attendance_record_id=attendance.id,
                               erp_event_id=f"ot-{suffix}-second", calculated_minutes=30),
         ], session)
-        assert len(result["accepted"]) == 2 and len(result["duplicates"]) == 1 and len(result["failed"]) == 1
+        assert len([i for i in result.items if i.status == "accepted"]) == 2
+        assert len([i for i in result.items if i.status == "duplicate"]) == 1
+        assert len([i for i in result.items if i.status == "failed"]) == 1
 
         selects = 0
 
@@ -108,5 +120,8 @@ async def test_overtime_bulk_preserves_savepoints_and_chunk_lookup_count():
             ], session)
         finally:
             event.remove(auth_engine.sync_engine, "before_cursor_execute", count_select)
-        assert len(retry["duplicates"]) == 500 and len(retry["accepted"]) == 1 and not retry["failed"]
+        retry_duplicates = [item for item in retry.items if item.status == "duplicate"]
+        retry_accepted = [item for item in retry.items if item.status == "accepted"]
+        assert len(retry_duplicates) == 500 and len(retry_accepted) == 1
+        assert not [item for item in retry.items if item.status == "failed"]
         assert selects <= 10

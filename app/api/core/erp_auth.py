@@ -1,8 +1,16 @@
-"""Scoped, replay-protected authentication for ERP integration clients."""
+"""Scoped, replay-protected authentication for ERP integration clients.
+
+Nonce replay protection is provided by ``core.erp_nonce_store``.  In production
+that module uses a shared Redis client (SET NX EX) so a signed request can be
+accepted exactly once across every API worker.  In development or when no Redis
+is configured it falls back to a process-local memory store.
+
+Production failure mode: if Redis is unavailable the nonce store raises
+``NonceStoreError``, which is mapped to 503 here so a transient Redis outage
+does not silently allow replays."""
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import hmac
 import json
@@ -14,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.audit import record_audit_event
 from core.database import get_async_session
+from core.erp_nonce_store import NonceStoreError, get_global_nonce_store
 from core.settings import get_settings
 
 
@@ -21,10 +30,6 @@ from core.settings import get_settings
 class ErpPrincipal:
     client_id: str
     scopes: frozenset[str]
-
-
-_nonce_lock = asyncio.Lock()
-_memory_nonces: dict[str, float] = {}
 
 
 def _clients() -> dict[str, dict]:
@@ -40,31 +45,21 @@ def _clients() -> dict[str, dict]:
     return value
 
 
-async def _consume_nonce(client_id: str, nonce: str, ttl_seconds: int) -> bool:
-    settings = get_settings()
-    key = f"hrms:erp:nonce:{client_id}:{nonce}"
-    if settings.auth_throttle_backend == "redis":
-        from redis.asyncio import Redis
-
-        redis = Redis.from_url(settings.redis_url, encoding="utf-8", decode_responses=True)
-        try:
-            return bool(await redis.set(key, "1", ex=ttl_seconds, nx=True))
-        finally:
-            await redis.aclose()
-
-    now = time.monotonic()
-    async with _nonce_lock:
-        for saved_key, expires_at in list(_memory_nonces.items()):
-            if expires_at <= now:
-                del _memory_nonces[saved_key]
-        if key in _memory_nonces:
-            return False
-        _memory_nonces[key] = now + ttl_seconds
-        return True
-
-
 def _deny(detail: str = "Could not validate ERP credentials") -> HTTPException:
     return HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
+
+
+def _nonce_consume_failure_status(reason: str) -> int:
+    """Map a nonce-store failure to an HTTP status for the ERP auth layer.
+
+    * A clean replay (nonce already used) → 409 so the caller can distinguish
+      it from a bad signature.
+    * A store outage or misconfiguration in production → 503 so operators see
+      that the request was not authenticated rather than silently accepted.
+    """
+    if reason == "replay":
+        return status.HTTP_409_CONFLICT
+    return status.HTTP_503_SERVICE_UNAVAILABLE
 
 
 async def authenticate_erp_client(
@@ -106,8 +101,22 @@ async def authenticate_erp_client(
     expected = hmac.new(secret.encode(), canonical.encode(), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(signature.lower(), expected):
         raise _deny()
-    if not await _consume_nonce(client_id, nonce, settings.erp_signature_max_age_seconds):
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="ERP request nonce was already used")
+    store = get_global_nonce_store()
+    try:
+        consumed = await store.consume(client_id, nonce, settings.erp_signature_max_age_seconds)
+    except NonceStoreError as exc:
+        # Production store cannot operate: do not accept the request and do not
+        # pretend it is a clean replay.
+        raise HTTPException(
+            status_code=_nonce_consume_failure_status("store_unavailable"),
+            detail="ERP nonce store unavailable",
+        ) from exc
+
+    if not consumed:
+        raise HTTPException(
+            status_code=_nonce_consume_failure_status("replay"),
+            detail="ERP request nonce was already used",
+        )
 
     principal = ErpPrincipal(client_id=client_id, scopes=frozenset(str(scope) for scope in scopes))
     await record_audit_event(

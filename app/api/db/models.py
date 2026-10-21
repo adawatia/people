@@ -18,7 +18,9 @@ from sqlalchemy import (
     Text,
     Time,
     UniqueConstraint,
+    text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -794,3 +796,72 @@ Index(
     AuthSession.id.desc(),
     postgresql_where=AuthSession.revoked_at.is_(None),
 )
+
+
+# -----------------------------------------------------------------------------
+# ERP integration: transactional outbox and batch audit
+# -----------------------------------------------------------------------------
+
+
+class ErpOutboxEvent(Base):
+    """Immutable outbound change event for the ERP pull feed.
+
+    One row per *business transition* (not per entity), written in the same
+    transaction as the transition itself. ``sequence`` is the only ordering and
+    cursor source: it is monotonic, gap-tolerant and stable across restarts.
+
+    ``event_id`` is deterministic (``LEAVE-{id}-{EVENT_TYPE}``) so a retried
+    transition cannot enqueue a duplicate event, while a later transition on the
+    same entity (approve → cancel) stays a separate, independently acknowledged
+    event. The payload is a snapshot taken at transition time, so a rename of a
+    leave type cannot rewrite the history ERP already received.
+    """
+
+    __tablename__ = "erp_outbox_events"
+    __table_args__ = (
+        Index(
+            "ix_erp_outbox_events_pending",
+            "entity_type",
+            "sequence",
+            postgresql_where=text("acknowledged_at IS NULL"),
+        ),
+        Index("ix_erp_outbox_events_entity", "entity_type", "entity_id"),
+    )
+
+    sequence: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    event_id: Mapped[str] = mapped_column(String(120), unique=True, nullable=False, index=True)
+    entity_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    entity_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    event_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_ist, nullable=False)
+    last_delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    delivery_attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    acknowledged_by: Mapped[str | None] = mapped_column(String(120), nullable=True)
+
+
+class ErpSyncBatch(Base):
+    """Durable audit row for one ERP bulk request.
+
+    Every bulk endpoint records the correlation id it returned together with the
+    per-outcome counts, so a failure reported to the ERP can be reconciled later
+    from this table instead of from application logs.
+    """
+
+    __tablename__ = "erp_sync_batches"
+    __table_args__ = (Index("ix_erp_sync_batches_endpoint_created", "endpoint", "created_at"),)
+
+    batch_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    endpoint: Mapped[str] = mapped_column(String(80), nullable=False)
+    client_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    received_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    accepted_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    duplicate_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    failed_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    retryable_failed_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="COMPLETED", nullable=False)
+    http_status: Mapped[int] = mapped_column(Integer, default=200, nullable=False)
+    last_error_code: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_ist, nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

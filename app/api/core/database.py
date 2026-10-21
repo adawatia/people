@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+from sqlalchemy.pool import NullPool
 
 from core.settings import get_settings
 
@@ -35,8 +36,13 @@ def get_engine() -> Engine:
 
 def get_async_engine() -> AsyncEngine:
     """Build the async engine used by all request-scoped work."""
+    url = settings.resolved_database_url()
+    if settings.db_disable_pool:
+        # Used by the regression suite: one connection per session, closed when
+        # the session ends, so nothing is reused across event loops.
+        return create_async_engine(url, pool_pre_ping=True, poolclass=NullPool)
     return create_async_engine(
-        settings.resolved_database_url(),
+        url,
         pool_pre_ping=True,
         pool_size=settings.db_pool_size,
         max_overflow=settings.db_max_overflow,

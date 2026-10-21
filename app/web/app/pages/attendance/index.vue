@@ -158,8 +158,12 @@ function formatDuration(minutes: number) {
 
 function formatTime(value?: string | null) {
   if (!value) return '—'
-  const [hours, minutes] = value.split(':')
-  const date = new Date(2000, 0, 1, Number(hours), Number(minutes))
+  const timePart = value.includes('T') ? (value.split('T')[1] || '') : value
+  const [hours, minutes] = timePart.split(':')
+  const h = Number(hours)
+  const m = Number(minutes)
+  if (Number.isNaN(h) || Number.isNaN(m)) return '—'
+  const date = new Date(2000, 0, 1, h, m)
   return new Intl.DateTimeFormat('en-IN', { hour: '2-digit', minute: '2-digit' }).format(date)
 }
 

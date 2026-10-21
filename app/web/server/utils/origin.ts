@@ -56,7 +56,15 @@ function normaliseHost(value: string | null | undefined): string | null {
   const trimmed = value.trim().toLowerCase().replace(/\/$/, '')
   if (!trimmed) return null
   // A bare host header (or a value that fails URL parsing) is already a host.
-  return hostOf(trimmed) ?? (trimmed.split('/')[0] || null)
+  //
+  // `new URL('localhost:3000')` does not throw: it parses `localhost:` as a
+  // scheme and returns an *empty* host, so the parsed host must be checked for
+  // emptiness rather than for null. Without this, a development request on
+  // `localhost:3000` has no own-host to compare against and the CSRF guard
+  // rejects same-origin sign-ins with 403.
+  const parsed = hostOf(trimmed)
+  if (parsed) return parsed
+  return trimmed.split('/')[0] || null
 }
 
 export function checkRequestOrigin(input: OriginCheckInput): OriginCheckResult {

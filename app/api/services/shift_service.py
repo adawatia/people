@@ -298,6 +298,12 @@ class ShiftService:
                 detail=f"Employee with ID {data.employee_id} not found",
             )
         await self._ensure_employee_operational(emp)
+        if data.effective_to and data.effective_to < data.effective_from:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="effective_to date must be greater than or equal to effective_from",
+            )
+
         shift = await self.get_shift(data.shift_id)
         await self._ensure_active_shift_unit(shift)
         if shift.unit_id is not None and emp.unit_id != shift.unit_id:
@@ -341,11 +347,17 @@ class ShiftService:
         refreshed = await self.repo.get_assignment_by_id(created.id)
         return self.to_assignment_read(refreshed)
 
-    async def bulk_assign_shifts(
-        self,
-        data: BulkShiftAssignmentCreate,
-        assigned_by_user_id: int | None = None,
-    ) -> list[ShiftAssignmentRead]:
+    async def resolve_bulk_assignment_targets(
+        self, data: BulkShiftAssignmentCreate
+    ) -> tuple[Shift, list[Employee]]:
+        """Validate request-level inputs and resolve the employees to assign.
+
+        Everything here is a property of the request (shift exists and is
+        assignable, unit/department consistent, the selection is non-empty and
+        resolvable), so a failure rejects the page before any employee is
+        touched. Per-employee problems are raised later by
+        ``stage_bulk_assignment`` and reported item by item.
+        """
         shift = await self.get_shift(data.shift_id)
         await self._ensure_active_shift_unit(shift)
 
@@ -356,7 +368,6 @@ class ShiftService:
             if data.unit_id is not None and department.unit_id != data.unit_id:
                 raise HTTPException(status_code=400, detail="Department does not belong to the selected unit")
 
-        # Resolve employee IDs
         emp_ids = set(data.employee_ids)
         if data.department_id is not None or data.unit_id is not None:
             stmt = (
@@ -387,48 +398,88 @@ class ShiftService:
         missing_ids = sorted(emp_ids - found_ids)
         if missing_ids:
             raise HTTPException(status_code=404, detail=f"Employees not found: {missing_ids}")
-        for employee in employees:
-            await self._ensure_employee_operational(employee)
-            if shift.unit_id is not None and employee.unit_id != shift.unit_id:
-                raise HTTPException(status_code=400, detail="Shift unit does not match every selected employee")
+        return shift, employees
 
-        results = []
-        for emp_id in emp_ids:
-            # Bulk assignment closes overlapping assignments instead of
-            # failing: HR reassigning a whole department should succeed.
-            overlap = await self.repo.find_overlapping_assignment(
-                employee_id=emp_id,
-                effective_from=data.effective_from,
-                effective_to=data.effective_to,
-            )
-            if overlap:
-                if overlap.effective_from < data.effective_from:
-                    # Existing assignment started earlier: end it the day
-                    # before the new one begins, preserving its history.
-                    overlap.effective_to = data.effective_from - timedelta(days=1)
-                else:
-                    # Existing assignment starts inside the new period:
-                    # deactivate it entirely in favour of the new shift.
-                    overlap.status = "INACTIVE"
+    async def stage_bulk_assignment(
+        self,
+        employee: Employee,
+        shift: Shift,
+        data: BulkShiftAssignmentCreate,
+        assigned_by_user_id: int | None = None,
+    ) -> ShiftAssignmentRead:
+        """Stage one bulk assignment in the caller's transaction (no commit).
 
-            assignment = ShiftAssignment(
-                employee_id=emp_id,
-                shift_id=data.shift_id,
-                effective_from=data.effective_from,
-                effective_to=data.effective_to,
-                assigned_by=assigned_by_user_id,
-                status="ACTIVE",
-            )
-            created = await self.repo.create_assignment(assignment)
-            results.append(created)
+        Bulk assignment closes overlapping assignments instead of failing: HR
+        reassigning a whole department should succeed even when people already
+        hold a shift.
+        """
+        await self._ensure_employee_operational(employee)
+        if shift.unit_id is not None and employee.unit_id != shift.unit_id:
+            raise HTTPException(status_code=400, detail="Shift unit does not match every selected employee")
 
+        overlap = await self.repo.find_overlapping_assignment(
+            employee_id=employee.id,
+            effective_from=data.effective_from,
+            effective_to=data.effective_to,
+        )
+        if overlap:
+            if overlap.effective_from < data.effective_from:
+                # Existing assignment started earlier: end it the day before
+                # the new one begins, preserving its history.
+                overlap.effective_to = data.effective_from - timedelta(days=1)
+            else:
+                # Existing assignment starts inside the new period: deactivate
+                # it entirely in favour of the new shift.
+                overlap.status = "INACTIVE"
+
+        assignment = ShiftAssignment(
+            employee_id=employee.id,
+            shift_id=data.shift_id,
+            effective_from=data.effective_from,
+            effective_to=data.effective_to,
+            assigned_by=assigned_by_user_id,
+            status="ACTIVE",
+        )
+        created = await self.repo.create_assignment(assignment)
+        # Backfill the employee's default shift so punches outside any
+        # assignment window still have a sensible fallback.
+        if employee.shift_id is None:
+            employee.shift_id = data.shift_id
+        return self.assignment_read_for(created, employee, shift)
+
+    @staticmethod
+    def assignment_read_for(
+        assignment: ShiftAssignment, employee: Employee, shift: Shift
+    ) -> ShiftAssignmentRead:
+        """Read model for an assignment whose relationships may not be loaded."""
+        return ShiftAssignmentRead(
+            id=assignment.id,
+            employee_id=assignment.employee_id,
+            shift_id=assignment.shift_id,
+            effective_from=assignment.effective_from,
+            effective_to=assignment.effective_to,
+            status=assignment.status,
+            created_at=assignment.created_at,
+            shift_name=shift.name,
+            shift_code=shift.code,
+            start_time=shift.start_time.strftime("%H:%M") if hasattr(shift.start_time, "strftime") else str(shift.start_time),
+            end_time=shift.end_time.strftime("%H:%M") if hasattr(shift.end_time, "strftime") else str(shift.end_time),
+            employee_name=f"{employee.first_name} {employee.last_name or ''}".strip(),
+            employee_code=employee.employee_code,
+        )
+
+    async def bulk_assign_shifts(
+        self,
+        data: BulkShiftAssignmentCreate,
+        assigned_by_user_id: int | None = None,
+    ) -> list[ShiftAssignmentRead]:
+        shift, employees = await self.resolve_bulk_assignment_targets(data)
+        reads = [
+            await self.stage_bulk_assignment(employee, shift, data, assigned_by_user_id)
+            for employee in employees
+        ]
         await self.session.commit()
-        assigned_reads = []
-        for a in results:
-            refreshed = await self.repo.get_assignment_by_id(a.id)
-            if refreshed:
-                assigned_reads.append(self.to_assignment_read(refreshed))
-        return assigned_reads
+        return reads
 
     async def list_assignments(
         self,
