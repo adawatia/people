@@ -64,8 +64,9 @@ A modern, high-performance Human Resource Management System (HRMS) built for ent
 │       └── tests/       # Frontend unit and integration tests
 ├── docs/                # Comprehensive architecture and integration references
 │   ├── system-architecture-and-flows.md # Canonical 10-chapter reference specification
-│   ├── erp-integration.md               # Detailed ERP HMAC, outbox, and sync guide
-│   └── erp-test/                        # Interactive browser-based ERP test harness
+│   └── erp-integration.md               # Detailed ERP HMAC, outbox, and sync guide
+├── tools/               # Developer tooling and test harnesses
+│   └── erp-simulator/   # Interactive browser-based ERP test harness
 ├── AGENTS.md            # Repository guidelines and engineering rules
 ├── DESIGN.md            # Editorial violet design tokens and style specifications
 └── PRODUCT.md           # Product specification and platform commitments
@@ -183,10 +184,10 @@ pnpm build
 
 ---
 
-## Documentation Index
+## Documentation & Tools Index
 
 - **[System Architecture & Workflows](file:///docs/system-architecture-and-flows.md)**: The end-to-end reference covering layering rules, permissions, access scopes, state machines, and ERP boundaries.
 - **[ERP Integration Specification](file:///docs/erp-integration.md)**: In-depth guide on HMAC SHA-256 signatures, replay prevention, outbox change feeds, and bulk upsert envelopes.
-- **[ERP Test Simulator Harness](file:///docs/erp-test/README.md)**: Interactive testing tool to generate mock ERP events, sync attendance, and test outbox flows.
+- **[ERP Test Simulator Harness](file:///tools/erp-simulator/README.md)**: Interactive testing tool to generate mock ERP events, sync attendance, and test outbox flows.
 - **[Design & Tokens Reference](file:///DESIGN.md)**: Editorial violet design system tokens, color palettes, and responsive layouts.
 - **[Repository Rules & Guidelines](file:///AGENTS.md)**: Module organization, coding style, and pull request rules.

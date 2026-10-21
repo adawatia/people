@@ -53,7 +53,7 @@ Serve the folder over HTTP on localhost. `file://` does not provide the Web
 Crypto and CORS support this console needs.
 
 ```bash
-cd docs/erp-test
+cd tools/erp-simulator
 python3 -m http.server 5500
 ```
 
