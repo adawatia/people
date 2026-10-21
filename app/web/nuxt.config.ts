@@ -1,5 +1,5 @@
 const securityHeaders = {
-  'content-security-policy': `default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'`,
+  'content-security-policy': `default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'`,
   'referrer-policy': 'strict-origin-when-cross-origin',
   'x-content-type-options': 'nosniff',
   'x-frame-options': 'DENY',
@@ -12,7 +12,8 @@ export default defineNuxtConfig({
     '@nuxt/ui',
     '@nuxt/icon',
     '@nuxt/image',
-    'nuxt-echarts'
+    'nuxt-echarts',
+    '@vite-pwa/nuxt'
   ],
 
   devtools: {
@@ -68,6 +69,71 @@ export default defineNuxtConfig({
         commaDangle: 'never',
         braceStyle: '1tbs'
       }
+    }
+  },
+
+  pwa: {
+    registerType: 'prompt',
+    manifest: {
+      name: 'Emploi',
+      short_name: 'Emploi',
+      description: 'Calm clarity for everyday work.',
+      theme_color: '#1d613a',
+      background_color: '#f7f9f7',
+      display: 'standalone',
+      orientation: 'any',
+      start_url: '/',
+      scope: '/',
+      icons: [
+        {
+          src: '/icon-192.png',
+          sizes: '192x192',
+          type: 'image/png',
+          purpose: 'any'
+        },
+        {
+          src: '/icon-512.png',
+          sizes: '512x512',
+          type: 'image/png',
+          purpose: 'any'
+        },
+        {
+          src: '/icon-maskable-512.png',
+          sizes: '512x512',
+          type: 'image/png',
+          purpose: 'maskable'
+        }
+      ]
+    },
+    workbox: {
+      navigateFallback: '/offline.html',
+      navigateFallbackDenylist: [/^\/api\//],
+      globPatterns: ['**/*.{js,css,html,png,svg,ico,woff2}'],
+      runtimeCaching: [
+        {
+          urlPattern: /^\/api\//,
+          handler: 'NetworkOnly'
+        },
+        {
+          urlPattern: /\.(?:png|jpg|jpeg|svg|gif|webp)$/,
+          handler: 'StaleWhileRevalidate',
+          options: {
+            cacheName: 'emploi-media-cache',
+            expiration: {
+              maxEntries: 60,
+              maxAgeSeconds: 30 * 24 * 60 * 60
+            }
+          }
+        }
+      ]
+    },
+    client: {
+      installPrompt: true,
+      periodicSyncForUpdates: 3600
+    },
+    devOptions: {
+      enabled: false,
+      suppressWarnings: true
     }
   }
 })
