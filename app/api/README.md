@@ -1,312 +1,139 @@
-# HRMS API
+# HRMS API Backend
 
-This backend provides the core API for the Human Resource Management System. It is built with FastAPI, SQLAlchemy, PostgreSQL, and JWT-based authentication using FastAPI Users.
+The core application backend for the Human Resource Management System, built with **FastAPI**, **SQLAlchemy 2.0 (Async)**, **PostgreSQL (psycopg3)**, and **Pydantic v2**.
 
-The service is responsible for:
+---
 
-- user authentication and authorization
-- role-based access control
-- user and role administration
-- health monitoring for deployment and debugging
-- structured logging for request and error tracking
-- database bootstrap and default seed data setup
+## Directory Organization
 
-## Base URL
-
-When the app is running locally:
-
-- http://localhost:8000
-
-Swagger UI is available at:
-
-- http://localhost:8000/docs
-- http://localhost:8000/redoc
-- http://localhost:8000/openapi.json
-
-## Reset the local development database
-
-Use this only when intentionally wiping the local PostgreSQL database. It
-deletes every table and all HRMS data in the `public` schema. Never run it
-against a shared, staging, or production database.
-
-From `psql` while connected to the `hrms` database, run:
-
-```sql
-DROP SCHEMA public CASCADE;
-CREATE SCHEMA public AUTHORIZATION dev;
+```
+app/api/
+├── core/               # Cross-cutting foundational modules
+│   ├── audit.py        # Append-only security audit event helpers
+│   ├── auth.py         # Dependencies, user manager, role resolution, JWT
+│   ├── auth_throttle.py# Redis / in-memory brute force protection
+│   ├── database.py     # Async engine, connection pooling, session maker
+│   ├── mobile.py       # Indian E.164 mobile phone normalizer
+│   ├── settings.py     # Pydantic BaseSettings environment configuration
+│   └── totp.py         # RFC 6238 TOTP verification & recovery codes
+├── db/                 # Database models and bootstrap lifecycle
+│   ├── models.py       # SQLAlchemy declarative ORM models
+│   └── seed.py         # Schema creation and initial bootstrap seeder
+├── migrations/         # Alembic migration revisions
+├── repositories/       # Persistence queries and atomic database primitives
+├── routers/            # HTTP route controllers
+│   ├── auth_login.py   # Workforce & technical sign-in, password recovery
+│   ├── auth_mfa.py     # TOTP MFA challenges, enrollment, verification
+│   ├── auth_sessions.py# Device sessions, refresh token rotation
+│   ├── employees.py    # Workforce records and profile queries
+│   ├── erp_*.py        # HMAC-authenticated machine integration routes
+│   └── leaves.py       # Leave applications, approvals, balances
+├── schemas/            # Pydantic v2 request/response contracts
+├── services/           # Business domain logic and state machines
+│   ├── auth_service.py # Session lifecycle, token minting, MFA machine
+│   └── leave_service.py# Leave workflow transitions and outbox dispatch
+└── tests/              # Pytest suite with 280+ test cases
 ```
 
-Then restart the API from this directory so the development startup creates
-the tables and seeds the Super Admin and organization from `.env`:
+---
+
+## Environment Configuration
+
+Copy `.env.example` to `.env` in `app/api/`:
 
 ```bash
-uv run fastapi dev main.py
+cp .env.example .env
 ```
 
-The seed uses `SUPER_ADMIN_*`, `ORGANIZATION_NAME`, and `ORGANIZATION_CODE`
-only when the corresponding records do not already exist. Restarting the API
-does not overwrite existing credentials.
+Key configuration variables:
+- `ENVIRONMENT`: Set to `development` locally (accepts weak dev secrets); `production` enforces strict security validations.
+- `DATABASE_URL`: Connection string (e.g. `postgresql+psycopg://user:password@localhost:5432/hrms_db`).
+- `JWT_SECRET`: 32+ character random secret for signing access and MFA challenge tokens.
+- `SUPER_ADMIN_USERNAME` / `SUPER_ADMIN_PASSWORD` / `SUPER_ADMIN_EMAIL`: Initial bootstrap credentials.
+- `AUTH_THROTTLE_BACKEND`: `memory` for single-process local dev, `redis` for multi-worker production.
+- `ERP_API_CLIENTS`: JSON map of HMAC keys and scopes for ERP machine clients.
 
-## API Overview
+---
 
-### Public endpoints
+## Database Management & Utilities
 
-#### GET /
-Returns a simple app welcome message.
+### 1. Automatic Development Setup
+When running locally with `ENVIRONMENT=development`, the API automatically creates missing tables (`Base.metadata.create_all`) and seeds the initial Organization and Super Admin account upon server boot (`lifespan` handler in `main.py`).
 
-Response type:
+### 2. Database Cleanup (`cleanup_db.py`)
+Clears all application rows while preserving schema and migrations:
 
-- object
-- shape: { "message": "BSL Vendor Portal API" }
+```bash
+# Preview tables to be emptied (safe, read-only)
+uv run python cleanup_db.py
 
-Example response:
+# Execute cleanup and re-create initial bootstrap account
+uv run python cleanup_db.py --execute --confirm "DELETE ALL HRMS DATA" --reseed-bootstrap
 
-```json
-{
-  "message": "HRMS API"
-}
+# Execute cleanup with custom Super Admin credentials
+uv run python cleanup_db.py --execute --confirm "DELETE ALL HRMS DATA" --reseed-bootstrap \
+  --admin-username "newadmin" \
+  --admin-password "StrongPass123!" \
+  --admin-email "admin@company.com"
 ```
 
-#### GET /health
-Returns service health information, including uptime, response timing, and database status.
+### 3. Super Admin Password Recovery (`reset_super_admin_password.py`)
+Host-side utility to reset the Super Admin password directly without touching application data:
 
-Response type:
-
-- object
-- shape:
-
-```json
-{
-  "status": "ok",
-  "service": "bsl-vendor-portal-api",
-  "timestamp": "2026-08-13T10:04:42+00:00",
-  "uptime_seconds": 12.34,
-  "response_time_ms": 12.34,
-  "database": {
-    "status": "connected",
-    "detail": "database reachable"
-  }
-}
+```bash
+uv run python reset_super_admin_password.py --identity superadmin
 ```
 
-Possible status values:
+### 4. Alembic Migrations
+```bash
+# Generate a new migration revision
+uv run alembic revision --autogenerate -m "describe_changes"
 
-- "ok" when database is reachable
-- "degraded" when database is unavailable
-
-#### GET /db-health
-Checks whether the database is reachable.
-
-Response type:
-
-- object
-- shape: { "database": "connected" }
-
-If the database is unavailable, the endpoint returns HTTP 503 with a detail error message.
-
-### Authentication endpoints
-
-These are generated by FastAPI Users and mounted under /auth.
-
-#### POST /users
-Creates a new user account. **Public registration is disabled.** This endpoint requires authentication.
-
-**Authorization Rules:**
-- `SUPER_ADMIN`: Can create any role.
-- `VENDOR_ADMIN`: Can only create `VENDOR_USER` roles. The new user's `vendor_id` is automatically linked to the Admin's `vendor_id`.
-- Other roles are forbidden from creating users.
-
-**Password Requirements:**
-- Minimum 8 characters; passwords are screened for strength, compromised values, and personal information rather than composition rules.
-- Cannot contain the user's name, username, or email.
-- Must score >= 3 on the `zxcvbn` strength checker.
-
-Body type:
-
-- user creation schema (JSON)
-- includes user fields such as email, password, username, first_name, last_name, role_id, vendor_id
-
-Response type:
-
-- user object matching UserRead
-
-#### POST /auth/jwt/login
-Authenticates a user and returns a JWT bearer token.
-
-Request type:
-
-- form-urlencoded
-- required fields: username, password
-- optional fields: grant_type, scope, client_id, client_secret
-
-Response type:
-
-```json
-{
-  "access_token": "<jwt-token>",
-  "token_type": "bearer"
-}
+# Upgrade database to latest revision
+uv run alembic upgrade head
 ```
 
-#### POST /auth/jwt/logout
-Logs the user out from the JWT auth backend.
+---
 
-#### GET /users
-Returns registered users.
+## Authentication & Security Model
 
-Response type:
+1. **Two Login Doors**:
+   - `/auth/employee/login`: Accepts Indian mobile (`+919876543210`, `9876543210`, `09876543210`) or username. Rejects email addresses to prevent enumeration.
+   - `/auth/super-admin/login`: Accepts username only. Requires MFA challenge completion when enrolled.
+2. **Rotating Refresh Sessions**:
+   - Access tokens expire in 15 minutes.
+   - Refresh tokens rotate upon every exchange. Using a previously rotated token triggers immediate replay detection and revokes the entire session chain.
+3. **Multi-Factor Authentication (TOTP)**:
+   - Challenge tokens are short-lived (5 min) and restricted to MFA endpoints.
+   - 10 single-use recovery codes are issued upon enrollment and hashed at rest.
+4. **Adaptive Throttling (`AuthThrottle`)**:
+   - Tracks failed attempts by account, IP, and (account, IP) pair.
+   - Returns machine-readable HTTP 429 with `Retry-After` headers.
 
-- list[UserRead]
+---
 
-#### GET /users/{id}
-Returns one user by ID.
+## ERP Machine Integration
 
-Response type:
+The ERP system interacts via `/api/v1/integrations/erp/*` using HMAC-SHA256 request signatures:
 
-- UserRead
+- **Required Headers**: `X-ERP-Client-ID`, `X-ERP-Timestamp`, `X-ERP-Nonce`, `X-ERP-Signature`.
+- **Durable Outbox**: Leave approvals, rejections, and cancellations stage events in `erp_outbox_events` in the same transaction as the state change.
+- **Monotonic Cursor Feed**: `GET /integrations/erp/leaves/feed?cursor=...` enables reliable, gapless polling.
+- **Idempotent Acknowledgement**: `POST /integrations/erp/leaves/ack` marks events processed.
 
-#### PATCH /users/{id}
-Updates a user.
+---
 
-Response type:
+## Testing
 
-- UserRead
+Backend tests require an isolated PostgreSQL database ending in `_test` to prevent test runs from touching development or staging databases:
 
-### Protected user route
+```bash
+# Run complete test suite
+uv run pytest
 
-#### GET /profile
-Returns the currently authenticated user profile.
+# Run a specific test module
+uv run pytest tests/test_auth_hardening_http.py
 
-This route requires a valid JWT bearer token.
-
-Response type:
-
-- object
-- shape:
-
-```json
-{
-  "email": "admin@hrms.com",
-  "first_name": "SUPER",
-  "last_name": "ADMIN"
-}
+# Run with verbose output
+uv run pytest -v -s
 ```
-
-### Role endpoints
-
-#### GET /roles
-Returns all available roles.
-
-Response type:
-
-- list[RoleRead]
-
-Example item:
-
-```json
-{
-  "role_id": 1,
-  "role_name": "SUPER_ADMIN",
-  "description": "Platform-wide administrator",
-  "can_manage_roles": true,
-  "can_manage_bsl_users": true,
-  "can_manage_vendor_admins": true,
-  "can_manage_vendor_users": true,
-  "can_manage_vendors": true
-}
-```
-
-### Vendor endpoints
-
-#### GET /vendors
-Returns all vendors.
-
-Response type:
-
-- list[VendorRead]
-
-Example item:
-
-```json
-{
-  "vendor_id": 1,
-  "vendor_name": "Example Vendor",
-  "vendor_code": "VEND-001",
-  "is_active": true,
-  "created_by": 1
-}
-```
-
-## Authentication model
-
-This backend uses JWT bearer authentication.
-
-In Swagger UI:
-
-1. call /auth/jwt/login
-2. copy the access token
-3. click Authorize in the Swagger UI
-4. use the value: Bearer <access_token>
-
-Once authorized, protected endpoints such as /profile can be called.
-
-## Data models used by the API
-
-### UserRead
-Represents the user returned by the API.
-
-Fields include:
-
-- id: integer
-- email: string
-- username: string
-- first_name: string | null
-- last_name: string | null
-- role_id: integer | null
-- vendor_id: integer | null
-- created_by: integer | null
-
-### RoleRead
-Fields include:
-
-- role_id: integer
-- role_name: string
-- description: string | null
-- permission flags for role management and vendor operations
-
-### VendorRead
-Fields include:
-
-- vendor_id: integer
-- vendor_name: string
-- vendor_code: string
-- is_active: boolean
-- created_by: integer | null
-
-## Important notes
-
-- The app automatically creates database tables on startup and seeds default roles and the default super admin account.
-- Logging follows 12-factor: stdout by default (human-readable in dev, JSON in prod via `ENVIRONMENT=production` / `LOG_FORMAT=json`), level via `LOG_LEVEL`. File output is opt-in (`LOG_TO_FILE=true`, bounded by rotation) so `fastapi dev`'s file watcher is never triggered by our own logs.
-- Rate limiting is enabled for selected endpoints.
-- Postgres is the configured database backend.
-
-## Typical workflow
-
-1. Start the backend server.
-2. Open /docs.
-3. Register or seed a user.
-4. Login at /auth/jwt/login.
-5. Copy the token.
-6. Authorize in Swagger.
-7. Call protected endpoints like /profile, /roles, and /vendors.
-
-## Useful local URLs
-
-- Swagger UI: http://localhost:8000/docs
-- ReDoc: http://localhost:8000/redoc
-- OpenAPI schema: http://localhost:8000/openapi.json
-- Health check: http://localhost:8000/health
-
-## Current backend status
-
-This backend is designed to act as the source of truth for user identity, RBAC, vendor management, and operational monitoring for the BSL Vendor Portal.
