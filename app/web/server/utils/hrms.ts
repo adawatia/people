@@ -76,8 +76,8 @@ export function clearSessionCookies(event: H3Event) {
       if (entry.session.refresh_token === refresh) recentRefreshes.delete(previousToken)
     }
   }
-  deleteCookie(event, SESSION_COOKIE, { path: '/' })
-  deleteCookie(event, REFRESH_COOKIE, { path: '/' })
+  deleteCookie(event, SESSION_COOKIE, baseCookieOptions())
+  deleteCookie(event, REFRESH_COOKIE, baseCookieOptions())
 }
 
 export interface RefreshedSession {

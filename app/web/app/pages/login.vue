@@ -29,6 +29,10 @@ async function submit() {
     errorMessage.value = 'Enter your mobile number or username and your password.'
     return
   }
+  if (form.identity.includes('@')) {
+    errorMessage.value = 'Sign in with your mobile number or username, not your email address.'
+    return
+  }
   try {
     const result = await auth.login({ ...form, accountType: 'employee' })
     if ('mfa_required' in result) {

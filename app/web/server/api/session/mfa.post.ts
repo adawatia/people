@@ -1,5 +1,5 @@
 import type { CurrentUser } from '#shared/types/auth'
-import { apiUrl, setAccessCookie, setRefreshCookie, upstreamError } from '../../utils/hrms'
+import { apiUrl, clearSessionCookies, setAccessCookie, setRefreshCookie, upstreamError } from '../../utils/hrms'
 
 interface UpstreamLoginResponse {
   access_token?: string | null
@@ -39,10 +39,15 @@ export default defineEventHandler(async (event): Promise<CurrentUser> => {
     }
     setAccessCookie(event, auth.access_token, auth.expires_in)
     if (auth.refresh_token) setRefreshCookie(event, auth.refresh_token, auth.absolute_expires_at)
-    return await $fetch<CurrentUser>(apiUrl(event, 'users/me'), {
-      headers: { Authorization: `Bearer ${auth.access_token}` }
-    })
+    try {
+      return await $fetch<CurrentUser>(apiUrl(event, 'users/me'), {
+        headers: { Authorization: `Bearer ${auth.access_token}` }
+      })
+    } catch (error) {
+      clearSessionCookies(event)
+      throw upstreamError(error, event)
+    }
   } catch (error) {
-    throw upstreamError(error)
+    throw upstreamError(error, event)
   }
 })

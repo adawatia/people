@@ -19,12 +19,18 @@ function destination() {
 }
 const errorMessage = ref('')
 const challenge = ref<MfaChallenge | null>(null)
+/** Set when /settings sends the user back here after a password change. */
+const notice = computed(() => (typeof route.query.notice === 'string' ? route.query.notice : ''))
 
 async function submit() {
   if (auth.loading.value) return
   errorMessage.value = ''
   if (!form.identity.trim() || !form.password) {
     errorMessage.value = 'Enter the technical username and password.'
+    return
+  }
+  if (form.identity.includes('@') || form.identity.startsWith('+') || /^\d+$/.test(form.identity.trim())) {
+    errorMessage.value = 'Sign in with your technical username (not an email or mobile number).'
     return
   }
   try {
@@ -87,6 +93,17 @@ async function afterMfa() {
         >
           <AuthPasswordInput v-model="form.password" />
         </UFormField>
+        <div
+          v-if="notice === 'password-changed'"
+          role="status"
+        >
+          <UAlert
+            color="success"
+            variant="soft"
+            icon="i-lucide-shield-check"
+            description="Your password was changed and every device was signed out. Sign in with your new password."
+          />
+        </div>
         <div
           v-if="errorMessage"
           role="alert"

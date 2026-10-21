@@ -400,3 +400,22 @@ def test_in_memory_store_expires_counters_and_blocks():
     run_async(store.clear(key))
     assert run_async(store.count(key, window_seconds=900)) == 0
     assert run_async(store.blocked_for(key)) == 0
+
+
+def test_mobile_normalization_and_identity_resolution():
+    from core.mobile import normalize_indian_mobile
+    from routers.auth_login import account_key, normalize_business_identity
+
+    # Standard formats
+    assert normalize_indian_mobile("9876543210") == "+919876543210"
+    assert normalize_indian_mobile("+91 98765 43210") == "+919876543210"
+    assert normalize_indian_mobile("09876543210") == "+919876543210"
+    assert normalize_indian_mobile("919876543210") == "+919876543210"
+
+    # Usernames with digits are preserved and never raise
+    assert normalize_business_identity("emp_1020304050") == "emp_1020304050"
+    assert normalize_business_identity("user20261021") == "user20261021"
+
+    # Invalid mobile numbers do not crash account_key
+    key = account_key("1234567890")
+    assert isinstance(key, str) and len(key) == 32

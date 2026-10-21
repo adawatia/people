@@ -40,6 +40,10 @@ async function start() {
     errorMessage.value = 'Enter your mobile number or username.'
     return
   }
+  if (identity.value.includes('@')) {
+    errorMessage.value = 'Enter your mobile number or username, not your email address.'
+    return
+  }
   loading.value = true
   try {
     const result = await $fetch<{ recovery_token: string }>('/api/session/password-recovery/start', { method: 'POST', body: { identity: identity.value.trim() } })

@@ -28,7 +28,7 @@ export default defineEventHandler(async (event): Promise<CurrentUser> => {
     try {
       return await fetchUser(token)
     } catch (error) {
-      if (upstreamStatus(error) !== 401) throw upstreamError(error)
+      if (upstreamStatus(error) !== 401) throw upstreamError(error, event)
     }
   }
 
@@ -44,7 +44,7 @@ export default defineEventHandler(async (event): Promise<CurrentUser> => {
     refreshed = await refreshSession(event, refresh)
   } catch (error) {
     if ([400, 401, 403].includes(upstreamStatus(error))) clearSessionCookies(event)
-    throw upstreamError(error)
+    throw upstreamError(error, event)
   }
   setAccessCookie(event, refreshed.access_token, refreshed.expires_in)
   setRefreshCookie(event, refreshed.refresh_token, refreshed.absolute_expires_at)
@@ -52,6 +52,6 @@ export default defineEventHandler(async (event): Promise<CurrentUser> => {
     return await fetchUser(refreshed.access_token)
   } catch (error) {
     if (upstreamStatus(error) === 401) clearSessionCookies(event)
-    throw upstreamError(error)
+    throw upstreamError(error, event)
   }
 })

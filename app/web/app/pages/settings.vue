@@ -60,8 +60,9 @@ async function savePassword() {
     await api.request('auth/change-password', { method: 'POST', body: { current_password: currentPassword.value, new_password: newPassword.value } })
     currentPassword.value = ''
     newPassword.value = ''
+    const redirectTarget = isTechnicalAdmin.value ? '/admin/login?notice=password-changed' : '/login?notice=password-changed'
     auth.clear()
-    await navigateTo('/login?notice=password-changed')
+    await navigateTo(redirectTarget)
   } catch (error) {
     passwordError.value = message(error)
     toast.add({ title: 'Password not updated', description: message(error), color: 'error' })

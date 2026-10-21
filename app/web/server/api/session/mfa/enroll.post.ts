@@ -20,6 +20,6 @@ export default defineEventHandler(async (event): Promise<MfaEnrollment> => {
       body: { mfa_token: payload.mfa_token }
     })
   } catch (error) {
-    throw upstreamError(error)
+    throw upstreamError(error, event)
   }
 })

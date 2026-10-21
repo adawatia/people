@@ -1,5 +1,5 @@
 import type { CurrentUser, LoginPayload, LoginResult, MfaChallenge } from '#shared/types/auth'
-import { apiUrl, setAccessCookie, setRefreshCookie, upstreamError } from '../../utils/hrms'
+import { apiUrl, clearSessionCookies, setAccessCookie, setRefreshCookie, upstreamError } from '../../utils/hrms'
 
 /** Mirror of the API's `LoginResponse`: either a session or an MFA challenge. */
 interface UpstreamLoginResponse {
@@ -60,9 +60,14 @@ export default defineEventHandler(async (event): Promise<LoginResult> => {
     setAccessCookie(event, auth.access_token, auth.expires_in)
     if (auth.refresh_token) setRefreshCookie(event, auth.refresh_token, auth.absolute_expires_at)
 
-    return await $fetch<CurrentUser>(apiUrl(event, 'users/me'), {
-      headers: { Authorization: `Bearer ${auth.access_token}` }
-    })
+    try {
+      return await $fetch<CurrentUser>(apiUrl(event, 'users/me'), {
+        headers: { Authorization: `Bearer ${auth.access_token}` }
+      })
+    } catch (error) {
+      clearSessionCookies(event)
+      throw upstreamError(error, event)
+    }
   } catch (error) {
     throw upstreamError(error, event)
   }

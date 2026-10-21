@@ -47,7 +47,7 @@ export default defineEventHandler(async (event) => {
         refreshed = await refreshSession(event, refresh)
       } catch (refreshError) {
         if ([400, 401, 403].includes(upstreamStatus(refreshError))) clearSessionCookies(event)
-        throw upstreamError(refreshError)
+        throw upstreamError(refreshError, event)
       }
       setAccessCookie(event, refreshed.access_token, refreshed.expires_in)
       setRefreshCookie(event, refreshed.refresh_token, refreshed.absolute_expires_at)
@@ -55,10 +55,10 @@ export default defineEventHandler(async (event) => {
         return await call(refreshed.access_token)
       } catch (retryError) {
         if (upstreamStatus(retryError) === 401) clearSessionCookies(event)
-        throw upstreamError(retryError)
+        throw upstreamError(retryError, event)
       }
     }
     if (status === 401) clearSessionCookies(event)
-    throw upstreamError(error)
+    throw upstreamError(error, event)
   }
 })

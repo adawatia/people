@@ -8,5 +8,5 @@ export default defineEventHandler(async (event) => {
       method: 'POST',
       body: { recovery_token: payload.recovery_token, code: payload.code.trim() }
     })
-  } catch (error) { throw upstreamError(error) }
+  } catch (error) { throw upstreamError(error, event) }
 })

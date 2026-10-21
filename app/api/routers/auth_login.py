@@ -90,6 +90,9 @@ def normalize_business_identity(identity: str) -> str:
     candidate = (identity or "").strip()
     if not candidate or "@" in candidate:
         return candidate
+    # A candidate containing letters is a username, not a phone number.
+    if re.search(r"[a-zA-Z]", candidate):
+        return candidate
     digits = re.sub(r"\D", "", candidate)
     if len(digits) >= 10:
         return normalize_indian_mobile(candidate) or candidate
@@ -98,7 +101,11 @@ def normalize_business_identity(identity: str) -> str:
 
 def account_key(identity: str) -> str:
     """Throttle key for an account, normalised the same way on every path."""
-    return AuthThrottle.account_key(normalize_business_identity(identity).lower())
+    try:
+        normalized = normalize_business_identity(identity)
+    except ValueError:
+        normalized = identity
+    return AuthThrottle.account_key(normalized.lower())
 
 
 def _session_payload(issued: IssuedSession, *, must_change_password: bool) -> LoginResponse:

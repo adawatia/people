@@ -5,6 +5,7 @@ The command is a read-only preview unless every destructive guard is supplied::
     uv run python cleanup_db.py
     uv run python cleanup_db.py --execute --confirm "DELETE ALL HRMS DATA"
     uv run python cleanup_db.py --execute --confirm "DELETE ALL HRMS DATA" --reseed-bootstrap
+    uv run python cleanup_db.py --execute --confirm "DELETE ALL HRMS DATA" --reseed-bootstrap --admin-username myadmin --admin-password "StrongPass123!"
 
 ``alembic_version`` and Super Admin login accounts are preserved by default so
 the cleaned installation remains recoverable. Stop the API before executing.
@@ -22,6 +23,7 @@ from sqlalchemy.engine import URL, Connection, Engine, make_url
 from sqlalchemy.exc import SQLAlchemyError
 
 from core.settings import get_settings
+from db.models import User
 
 CONFIRMATION = "DELETE ALL HRMS DATA"
 PRESERVED_TABLES = frozenset({"alembic_version", "users"})
@@ -57,12 +59,32 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--reseed-bootstrap",
         action="store_true",
-        help="Recreate the bootstrap organization and Super Admin from environment settings after cleanup.",
+        help="Recreate the bootstrap organization and Super Admin after cleanup.",
     )
     parser.add_argument(
         "--delete-super-admin",
         action="store_true",
         help="Also delete Super Admin accounts. Use only when --reseed-bootstrap will recreate one.",
+    )
+    parser.add_argument(
+        "--admin-username",
+        help="Custom Super Admin username to use during --reseed-bootstrap (defaults to SUPER_ADMIN_USERNAME in .env).",
+    )
+    parser.add_argument(
+        "--admin-password",
+        help="Custom Super Admin password to use during --reseed-bootstrap (defaults to SUPER_ADMIN_PASSWORD in .env).",
+    )
+    parser.add_argument(
+        "--admin-email",
+        help="Custom Super Admin email to use during --reseed-bootstrap (defaults to SUPER_ADMIN_EMAIL in .env).",
+    )
+    parser.add_argument(
+        "--admin-first-name",
+        help="Custom Super Admin first name to use during --reseed-bootstrap.",
+    )
+    parser.add_argument(
+        "--admin-last-name",
+        help="Custom Super Admin last name to use during --reseed-bootstrap.",
     )
     return parser.parse_args()
 
@@ -104,13 +126,28 @@ def validate_execution(args: argparse.Namespace, url: URL) -> None:
         raise CleanupRefused("--delete-super-admin requires --reseed-bootstrap so the database stays accessible.")
 
 
-async def reseed_bootstrap() -> None:
+async def reseed_bootstrap(
+    *,
+    username: str | None = None,
+    password: str | None = None,
+    email: str | None = None,
+    first_name: str | None = None,
+    last_name: str | None = None,
+    force_update_credentials: bool = False,
+) -> User:
     """Recreate the minimum records required to sign in after a reset."""
     from core.database import auth_engine
     from db.seed import ensure_seed_data
 
     try:
-        await ensure_seed_data()
+        return await ensure_seed_data(
+            username=username,
+            password=password,
+            email=email,
+            first_name=first_name,
+            last_name=last_name,
+            force_update_credentials=force_update_credentials,
+        )
     finally:
         await auth_engine.dispose()
 
@@ -159,11 +196,27 @@ def main() -> int:
                 connection.exec_driver_sql(f"DELETE FROM {users_table} WHERE is_superuser IS NOT TRUE")
         print(f"\nEmptied {len(tables)} application tables and reset their owned identity sequences.")
         if args.reseed_bootstrap:
-            asyncio.run(reseed_bootstrap())
-            settings = get_settings()
+            force_update = bool(
+                args.delete_super_admin
+                or args.admin_username
+                or args.admin_password
+                or args.admin_email
+                or args.admin_first_name
+                or args.admin_last_name
+            )
+            admin_user = asyncio.run(
+                reseed_bootstrap(
+                    username=args.admin_username,
+                    password=args.admin_password,
+                    email=args.admin_email,
+                    first_name=args.admin_first_name,
+                    last_name=args.admin_last_name,
+                    force_update_credentials=force_update,
+                )
+            )
             print(
-                "Recreated the bootstrap organization and Super Admin "
-                f"({settings.super_admin_username!r}, {settings.super_admin_email!r})."
+                "Configured the bootstrap organization and Super Admin "
+                f"(username: {admin_user.username!r}, email: {admin_user.email!r})."
             )
         else:
             print("Super Admin login accounts were preserved; workforce accounts were removed.")

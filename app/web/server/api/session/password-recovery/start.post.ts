@@ -8,5 +8,5 @@ export default defineEventHandler(async (event) => {
       method: 'POST',
       body: { identity: payload.identity.trim() }
     })
-  } catch (error) { throw upstreamError(error) }
+  } catch (error) { throw upstreamError(error, event) }
 })

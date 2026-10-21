@@ -16,4 +16,7 @@ export default defineNuxtRouteMiddleware(async (to) => {
   const isPublic = publicPaths.some(path => to.path === path || to.path.startsWith(`${path}/`))
   if (!auth.user.value && !isPublic) return navigateTo({ path: '/login', query: { redirect: to.fullPath } })
   if (auth.user.value && signInPaths.includes(to.path)) return navigateTo('/')
+  if (auth.user.value && auth.mustChangePassword.value && to.path !== '/settings') {
+    return navigateTo('/settings?change-password=1')
+  }
 })

@@ -8,5 +8,5 @@ export default defineEventHandler(async (event) => {
       method: 'POST',
       body: { reset_token: payload.reset_token, new_password: payload.new_password }
     })
-  } catch (error) { throw upstreamError(error) }
+  } catch (error) { throw upstreamError(error, event) }
 })
