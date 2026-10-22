@@ -125,3 +125,84 @@ Generate a larger or smaller employee pool:
 ```bash
 uv run python db/seed_indian_data.py --clean --num-employees 60
 ```
+
+---
+
+## 5. Cleaning & Wiping the Database
+
+The repository includes a dedicated safety-guarded script: [`app/api/cleanup_db.py`](file:///D:/Projects/people/app/api/cleanup_db.py).
+
+### Safety Guards Built-In:
+- **Dry-Run Preview**: Running without `--execute` only prints the tables that would be deleted.
+- **Explicit Confirmation**: Requires `--confirm "DELETE ALL HRMS DATA"`.
+- **Environment Checks**: Refuses to run on remote hosts or non-development environments without explicit override flags (`--allow-remote`, `--allow-production`).
+- **Preserved Records**: Keeps `alembic_version` (migration history) and the Super Admin account intact by default.
+
+### Cleaning Commands (from `app/api/`):
+
+1. **Preview what tables will be emptied (Dry Run - completely safe)**:
+   ```bash
+   uv run python cleanup_db.py
+   ```
+
+2. **Execute Full Database Cleanup (Leaves DB empty with Super Admin preserved)**:
+   ```bash
+   uv run python cleanup_db.py --execute --confirm "DELETE ALL HRMS DATA"
+   ```
+
+3. **Cleanup and Recreate Baseline Bootstrap Organization + Super Admin**:
+   ```bash
+   uv run python cleanup_db.py --execute --confirm "DELETE ALL HRMS DATA" --reseed-bootstrap
+   ```
+
+4. **Cleanup and Wipe Everything Including Super Admin (with fresh Super Admin creation)**:
+   ```bash
+   uv run python cleanup_db.py --execute --confirm "DELETE ALL HRMS DATA" --delete-super-admin --reseed-bootstrap --admin-username superadmin --admin-password "DevAdmin@123"
+   ```
+
+---
+
+## 6. Industry Standards: Why Cleaning and Seeding Are Separated
+
+A common question is: *Should database cleaning be part of the seed script or kept separate?*
+
+In this codebase, we adhere to the **industry standard pattern used across modern web frameworks** (Django, Rails, Prisma, Laravel): **modular separation with an opt-in reset shortcut**.
+
+### Framework Comparison
+
+| Framework | Pure Clean / Wipe | Pure Seed / Populate | Combined Reset Shortcut |
+| :--- | :--- | :--- | :--- |
+| **Django (Python)** | `python manage.py flush` | `python manage.py loaddata` | *(manual combination)* |
+| **Rails (Ruby)** | `rails db:truncate` / `db:purge` | `rails db:seed` | `rails db:reset` |
+| **Prisma (Node/TS)** | `prisma migrate reset --skip-seed` | `prisma db seed` | `prisma migrate reset` |
+| **Laravel (PHP)** | `php artisan db:wipe` | `php artisan db:seed` | `php artisan migrate:fresh --seed` |
+| **People HRMS** | `uv run python cleanup_db.py --execute ...` | `uv run python db/seed_indian_data.py` | `uv run python db/seed_indian_data.py --clean` |
+
+### Why This Separation Is Best Practice:
+
+1. **Accidental Data Loss Prevention (Safety)**:
+   If seeding always wiped the database, running a seed command to add missing records or update reference holidays would destroy days of manual test data that a developer or QA engineer created.
+   - **Default Seeding is Idempotent**: It inserts missing records and does not delete existing user work.
+   - **Wiping is Explicit**: Wiping tables requires the user to opt-in via `--clean` or `--confirm`.
+
+2. **Testing "Zero-State" / Initial UI**:
+   Developers regularly need an empty database to test:
+   - What does the dashboard display when an organization has 0 employees?
+   - How does the onboarding wizard or ERP sync behave on a blank installation?
+   - If cleaning always auto-seeded, testing these empty states would be impossible.
+
+3. **Environment Safety in Shared / Staging Deployments**:
+   In staging or demo environments, developers may seed lookup data (e.g. 2026 holiday calendar). Having `cleanup_db.py` enforce strict `--confirm "DELETE ALL HRMS DATA"` guards prevents accidental data loss on shared databases.
+
+---
+
+## 7. Developer Cheat Sheet: Which Command Should I Run?
+
+| Your Goal | Recommended Command (from `app/api/`) |
+| :--- | :--- |
+| **"I want a fresh playground with full Indian data (CEO, HR, 45+ employees, biometric punches, leaves)"** | `uv run python db/seed_indian_data.py --clean` |
+| **"I want an empty database to test empty UI states or fresh onboarding"** | `uv run python cleanup_db.py --execute --confirm "DELETE ALL HRMS DATA"` |
+| **"I made manual test edits and only want to add missing seed records without losing my work"** | `uv run python db/seed_indian_data.py` |
+| **"I just want to see which tables exist and would be emptied without touching anything"** | `uv run python cleanup_db.py` |
+
+
