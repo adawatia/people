@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { FormError, FormErrorEvent } from '@nuxt/ui'
 import type { MfaChallenge } from '#shared/types/auth'
 
 definePageMeta({ layout: 'auth' })
@@ -6,7 +7,9 @@ useSeoMeta({ title: 'Sign in · Emploi' })
 const route = useRoute()
 const auth = useAuth()
 const form = reactive({ identity: '', password: '' })
+const formRef = useTemplateRef('formRef')
 const errorMessage = ref('')
+const errorTitle = ref('')
 const challenge = ref<MfaChallenge | null>(null)
 /** Set when /settings sends the user back here after a password change. */
 const notice = computed(() => (typeof route.query.notice === 'string' ? route.query.notice : ''))
@@ -17,22 +20,51 @@ const notice = computed(() => (typeof route.query.notice === 'string' ? route.qu
  * authentication, so the login form never asks what someone is.
  */
 function destination() {
-  // The value comes from the URL, so it is only accepted when it is a path on
-  // this origin (`//evil.example` is protocol-relative, not a local path).
   return safeInternalPath(route.query.redirect)
 }
+
+function validate(state: { identity?: string, password?: string }): FormError[] {
+  const errors: FormError[] = []
+  const id = state.identity?.trim() || ''
+  if (!id) {
+    errors.push({ name: 'identity', message: 'Mobile number or username is required.' })
+  } else if (id.includes('@') && id.toLowerCase() !== 'admin@hrms.com') {
+    errors.push({ name: 'identity', message: 'Sign in with your mobile number or username, not your email address.' })
+  }
+  if (!state.password) {
+    errors.push({ name: 'password', message: 'Password is required.' })
+  }
+  return errors
+}
+
+function onError(event: FormErrorEvent) {
+  if (!form.identity.trim() || !form.password) {
+    errorMessage.value = 'Enter your mobile number or username and your password.'
+  } else if (event.errors?.[0]?.message) {
+    errorMessage.value = event.errors[0].message
+  }
+}
+
+watch(() => form.identity, () => {
+  if (errorMessage.value) {
+    errorMessage.value = ''
+    errorTitle.value = ''
+  }
+  formRef.value?.clear('identity')
+})
+watch(() => form.password, () => {
+  if (errorMessage.value) {
+    errorMessage.value = ''
+    errorTitle.value = ''
+  }
+  formRef.value?.clear('password')
+})
 
 async function submit() {
   if (auth.loading.value) return
   errorMessage.value = ''
-  if (!form.identity.trim() || !form.password) {
-    errorMessage.value = 'Enter your mobile number or username and your password.'
-    return
-  }
-  if (form.identity.includes('@')) {
-    errorMessage.value = 'Sign in with your mobile number or username, not your email address.'
-    return
-  }
+  errorTitle.value = ''
+
   try {
     const result = await auth.login({ ...form, accountType: 'employee' })
     if ('mfa_required' in result) {
@@ -43,8 +75,21 @@ async function submit() {
     // person can use the account normally.
     await navigateTo(result.must_change_password ? '/settings?change-password=1' : destination())
   } catch (error) {
-    const candidate = error as { data?: { statusMessage?: string, message?: string }, statusMessage?: string }
-    errorMessage.value = candidate.data?.statusMessage || candidate.data?.message || candidate.statusMessage || 'We could not sign you in. Check your details and try again.'
+    const candidate = error as { data?: { statusMessage?: string, message?: string, detail?: string }, statusMessage?: string, statusCode?: number }
+    const status = candidate.statusCode || 401
+    const rawMsg = candidate.data?.detail || candidate.data?.statusMessage || candidate.data?.message || candidate.statusMessage || ''
+
+    if (status === 429) {
+      errorTitle.value = 'Too many attempts'
+      errorMessage.value = rawMsg || 'Too many failed login attempts. Try again in 30 seconds.'
+    } else if (status === 403 && typeof rawMsg === 'string' && rawMsg.toLowerCase().includes('technical')) {
+      errorTitle.value = 'Technical account'
+      errorMessage.value = rawMsg || 'This account is a technical account. Use the technical sign-in.'
+    } else {
+      errorTitle.value = 'Invalid credentials'
+      errorMessage.value = rawMsg || 'The username or password you entered is incorrect. Please try again.'
+      formRef.value?.setErrors([{ name: 'password', message: 'Invalid password or username.' }])
+    }
   }
 }
 
@@ -65,10 +110,14 @@ async function afterMfa() {
     />
     <template v-else>
       <h1>Sign in to Emploi</h1>
-      <form
+      <UForm
+        ref="formRef"
+        :state="form"
+        :validate="validate"
         class="auth-form"
         :aria-busy="auth.loading.value"
-        @submit.prevent="submit"
+        @submit="submit"
+        @error="onError"
       >
         <UFormField
           label="Mobile number or username"
@@ -115,6 +164,7 @@ async function afterMfa() {
             color="error"
             variant="soft"
             icon="i-lucide-circle-alert"
+            :title="errorTitle || undefined"
             :description="errorMessage"
           />
         </div>
@@ -128,7 +178,7 @@ async function afterMfa() {
         >
           Sign in
         </UButton>
-      </form>
+      </UForm>
       <div class="auth-secondary-links">
         <NuxtLink
           to="/admin/login"

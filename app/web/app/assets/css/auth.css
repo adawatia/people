@@ -70,8 +70,8 @@
 .auth-shell input { min-height: 48px; background: var(--auth-paper); caret-color: var(--auth-primary); }
 .auth-shell input::placeholder { color: var(--auth-muted); opacity: 1; }
 .auth-shell button[type=submit] { min-height: 48px; justify-content: center; }
-.auth-password-toggle { display: grid; place-items: center; min-width: 44px; min-height: 44px; color: var(--auth-muted); cursor: pointer; }
-.auth-password-toggle:hover { color: var(--auth-primary); }
+.auth-password-toggle { display: grid; place-items: center; min-width: 44px; min-height: 44px; color: var(--auth-muted, var(--ui-text-muted)); cursor: pointer; }
+.auth-password-toggle:hover { color: var(--auth-primary, var(--ui-primary)); }
 .auth-link { display: inline-flex; align-items: center; min-height: 44px; color: var(--auth-primary); font-size: 14px; text-underline-offset: 4px; }
 .auth-link:hover { text-decoration: underline; }
 .auth-secondary-links { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--auth-line); }

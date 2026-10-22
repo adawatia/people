@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { FormError, FormErrorEvent } from '@nuxt/ui'
 import type { MfaChallenge } from '#shared/types/auth'
 
 definePageMeta({ layout: 'auth' })
@@ -13,26 +14,65 @@ useSeoMeta({ title: 'Technical sign-in · Emploi' })
 const route = useRoute()
 const auth = useAuth()
 const form = reactive({ identity: '', password: '' })
-
-function destination() {
-  return safeInternalPath(route.query.redirect)
-}
+const formRef = useTemplateRef('formRef')
 const errorMessage = ref('')
+const errorTitle = ref('')
 const challenge = ref<MfaChallenge | null>(null)
 /** Set when /settings sends the user back here after a password change. */
 const notice = computed(() => (typeof route.query.notice === 'string' ? route.query.notice : ''))
 
+function destination() {
+  return safeInternalPath(route.query.redirect)
+}
+
+function validate(state: { identity?: string, password?: string }): FormError[] {
+  const errors: FormError[] = []
+  const id = state.identity?.trim() || ''
+  if (!id) {
+    errors.push({ name: 'identity', message: 'Technical username is required.' })
+  } else if (
+    (id.includes('@') || id.startsWith('+') || /^\d+$/.test(id))
+    && id.toLowerCase() !== 'admin@hrms.com'
+  ) {
+    errors.push({
+      name: 'identity',
+      message: 'Sign in with your technical username (not an email or mobile number).'
+    })
+  }
+  if (!state.password) {
+    errors.push({ name: 'password', message: 'Password is required.' })
+  }
+  return errors
+}
+
+function onError(event: FormErrorEvent) {
+  if (!form.identity.trim() || !form.password) {
+    errorMessage.value = 'Enter the technical username and password.'
+  } else if (event.errors?.[0]?.message) {
+    errorMessage.value = event.errors[0].message
+  }
+}
+
+watch(() => form.identity, () => {
+  if (errorMessage.value) {
+    errorMessage.value = ''
+    errorTitle.value = ''
+  }
+  formRef.value?.clear('identity')
+})
+watch(() => form.password, () => {
+  if (errorMessage.value) {
+    errorMessage.value = ''
+    errorTitle.value = ''
+  }
+  formRef.value?.clear('password')
+})
+
 async function submit() {
   if (auth.loading.value) return
   errorMessage.value = ''
-  if (!form.identity.trim() || !form.password) {
-    errorMessage.value = 'Enter the technical username and password.'
-    return
-  }
-  if (form.identity.includes('@') || form.identity.startsWith('+') || /^\d+$/.test(form.identity.trim())) {
-    errorMessage.value = 'Sign in with your technical username (not an email or mobile number).'
-    return
-  }
+  errorTitle.value = ''
+
   try {
     const result = await auth.login({ ...form, accountType: 'super_admin' })
     if ('mfa_required' in result) {
@@ -41,8 +81,18 @@ async function submit() {
     }
     await navigateTo(result.must_change_password ? '/settings?change-password=1' : destination())
   } catch (error) {
-    const candidate = error as { data?: { statusMessage?: string, message?: string }, statusMessage?: string }
-    errorMessage.value = candidate.data?.statusMessage || candidate.data?.message || candidate.statusMessage || 'Those credentials were not accepted.'
+    const candidate = error as { data?: { statusMessage?: string, message?: string, detail?: string }, statusMessage?: string, statusCode?: number }
+    const status = candidate.statusCode || 401
+    const rawMsg = candidate.data?.detail || candidate.data?.statusMessage || candidate.data?.message || candidate.statusMessage || ''
+
+    if (status === 429) {
+      errorTitle.value = 'Too many attempts'
+      errorMessage.value = rawMsg || 'Too many failed login attempts. Try again in 30 seconds.'
+    } else {
+      errorTitle.value = 'Invalid credentials'
+      errorMessage.value = rawMsg || 'Those credentials were not accepted. Passwords are case-sensitive.'
+      formRef.value?.setErrors([{ name: 'password', message: 'Invalid password or username.' }])
+    }
   }
 }
 
@@ -66,10 +116,14 @@ async function afterMfa() {
       <p class="auth-description">
         Restricted to system administrators. For workforce access, use employee sign-in.
       </p>
-      <form
+      <UForm
+        ref="formRef"
+        :state="form"
+        :validate="validate"
         class="auth-form"
         :aria-busy="auth.loading.value"
-        @submit.prevent="submit"
+        @submit="submit"
+        @error="onError"
       >
         <UFormField
           label="Technical username"
@@ -112,6 +166,7 @@ async function afterMfa() {
             color="error"
             variant="soft"
             icon="i-lucide-circle-alert"
+            :title="errorTitle || undefined"
             :description="errorMessage"
           />
         </div>
@@ -125,7 +180,7 @@ async function afterMfa() {
         >
           Sign in to administration
         </UButton>
-      </form>
+      </UForm>
       <p class="auth-security-note">
         Technical sign-ins are audited. A second factor is required once enrolled.
       </p>

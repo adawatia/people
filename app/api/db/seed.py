@@ -71,3 +71,11 @@ async def ensure_seed_data(
         await session.commit()
         await session.refresh(user)
         return user
+
+
+async def ensure_indian_seed_data(*, clean: bool = False, num_employees: int = 40) -> dict[str, int]:
+    """Seed comprehensive Indian English data using Faker ('en_IN') across all entities."""
+    from db.seed_indian_data import seed_indian_data
+
+    return await seed_indian_data(clean=clean, num_employees=num_employees)
+

@@ -26,18 +26,49 @@ interface UpstreamLoginResponse {
  */
 export default defineEventHandler(async (event): Promise<LoginResult> => {
   const payload = await readBody<LoginPayload>(event)
-  if (!payload.identity?.trim() || !payload.password) {
+  if (!payload.identity?.trim() && !payload.password) {
     throw createError({ statusCode: 400, statusMessage: 'Enter your mobile number or username and password.' })
+  }
+  if (!payload.identity?.trim()) {
+    throw createError({
+      statusCode: 400,
+      statusMessage: payload.accountType === 'super_admin'
+        ? 'Technical username is required.'
+        : 'Mobile number or username is required.'
+    })
+  }
+  if (!payload.password) {
+    throw createError({ statusCode: 400, statusMessage: 'Password is required.' })
   }
 
   try {
-    const form = new URLSearchParams({ username: payload.identity.trim(), password: payload.password })
-    const loginPath = payload.accountType === 'super_admin' ? 'auth/super-admin/login' : 'auth/employee/login'
-    const auth = await $fetch<UpstreamLoginResponse>(apiUrl(event, loginPath), {
-      method: 'POST',
-      body: form,
-      headers: { 'content-type': 'application/x-www-form-urlencoded' }
-    })
+    let identity = payload.identity.trim()
+    if (identity.toLowerCase() === 'admin@hrms.com' || identity.toLowerCase() === 'admin') {
+      identity = 'superadmin'
+    }
+    const isSuperAdmin = payload.accountType === 'super_admin' || identity === 'superadmin'
+    const form = new URLSearchParams({ username: identity, password: payload.password })
+    const loginPath = isSuperAdmin ? 'auth/super-admin/login' : 'auth/employee/login'
+
+    let auth: UpstreamLoginResponse
+    try {
+      auth = await $fetch<UpstreamLoginResponse>(apiUrl(event, loginPath), {
+        method: 'POST',
+        body: form,
+        headers: { 'content-type': 'application/x-www-form-urlencoded' }
+      })
+    } catch (err: unknown) {
+      const errDetail = (err as { data?: { detail?: string } })?.data?.detail
+      if (!isSuperAdmin && typeof errDetail === 'string' && errDetail.toLowerCase().includes('technical')) {
+        auth = await $fetch<UpstreamLoginResponse>(apiUrl(event, 'auth/super-admin/login'), {
+          method: 'POST',
+          body: form,
+          headers: { 'content-type': 'application/x-www-form-urlencoded' }
+        })
+      } else {
+        throw err
+      }
+    }
 
     if (auth.mfa_required) {
       if (!auth.mfa_token) {

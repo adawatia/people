@@ -111,3 +111,12 @@ html { scrollbar-color: var(--people-muted) var(--people-canvas); }
 @utility people-page { min-width: 0; }
 @utility people-remote-select { display: flex; align-items: center; gap: 4px; width: 100%; min-width: 0; }
 @utility people-data-feedback { margin-block: 12px; color: var(--people-muted); font-size: 13px; line-height: 1.6; }
+
+/* Suppress browser native password reveal and clear buttons (e.g. Edge, WebKit) */
+input::-ms-reveal,
+input::-ms-clear {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+

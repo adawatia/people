@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import re
 from datetime import UTC, datetime
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
@@ -143,7 +144,12 @@ async def _authenticate_human(
     identity = (form.username or "").strip()
     key = account_key(identity or "anonymous")
     if not identity:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=INVALID_CREDENTIALS)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Technical username is required." if super_admin else "Mobile number or username is required.",
+        )
+    if not (form.password or ""):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Password is required.")
     if not super_admin:
         try:
             identity = normalize_business_identity(identity)
@@ -283,11 +289,11 @@ async def _login(
 )
 async def employee_login(
     request: Request,
-    form: OAuth2PasswordRequestForm = Depends(),
-    manager: UserManager = Depends(get_user_manager),
-    session: AsyncSession = Depends(get_async_session),
-    throttle: AuthThrottle = Depends(get_auth_throttle),
-):
+    form: Annotated[OAuth2PasswordRequestForm, Depends()],
+    manager: Annotated[UserManager, Depends(get_user_manager)],
+    session: Annotated[AsyncSession, Depends(get_async_session)],
+    throttle: Annotated[AuthThrottle, Depends(get_auth_throttle)],
+) -> LoginResponse:
     return await _login(form, manager, session, request, throttle, super_admin=False)
 
 
@@ -304,11 +310,11 @@ async def employee_login(
 )
 async def super_admin_login(
     request: Request,
-    form: OAuth2PasswordRequestForm = Depends(),
-    manager: UserManager = Depends(get_user_manager),
-    session: AsyncSession = Depends(get_async_session),
-    throttle: AuthThrottle = Depends(get_auth_throttle),
-):
+    form: Annotated[OAuth2PasswordRequestForm, Depends()],
+    manager: Annotated[UserManager, Depends(get_user_manager)],
+    session: Annotated[AsyncSession, Depends(get_async_session)],
+    throttle: Annotated[AuthThrottle, Depends(get_auth_throttle)],
+) -> LoginResponse:
     return await _login(form, manager, session, request, throttle, super_admin=True)
 
 

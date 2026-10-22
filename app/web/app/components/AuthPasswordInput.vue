@@ -1,8 +1,17 @@
 <script setup lang="ts">
-withDefaults(defineProps<{ autocomplete?: string, placeholder?: string }>(), {
+import { useAttrs } from 'vue'
+
+withDefaults(defineProps<{
+  autocomplete?: string
+  placeholder?: string
+  disabled?: boolean
+}>(), {
   autocomplete: 'current-password',
-  placeholder: 'Enter your password'
+  placeholder: 'Enter your password',
+  disabled: false
 })
+
+const attrs = useAttrs()
 const model = defineModel<string>({ required: true })
 const visible = ref(false)
 </script>
@@ -15,20 +24,32 @@ const visible = ref(false)
     :type="visible ? 'text' : 'password'"
     :autocomplete="autocomplete"
     :placeholder="placeholder"
+    :disabled="disabled"
+    :ui="{ trailing: 'pe-1' }"
   >
     <template #trailing>
-      <button
+      <UButton
+        color="neutral"
+        variant="link"
+        size="sm"
         type="button"
-        class="auth-password-toggle"
+        class="auth-password-toggle cursor-pointer"
+        :icon="visible ? 'i-lucide-eye-off' : 'i-lucide-eye'"
         :aria-label="visible ? 'Hide password' : 'Show password'"
         :aria-pressed="visible"
+        :aria-controls="(attrs.id as string) || 'password'"
+        :disabled="disabled"
+        @mousedown.prevent
         @click="visible = !visible"
-      >
-        <UIcon
-          :name="visible ? 'i-lucide-eye-off' : 'i-lucide-eye'"
-          class="size-5"
-        />
-      </button>
+      />
     </template>
   </UInput>
 </template>
+
+<style>
+/* Hide the password reveal and clear buttons in Edge / IE */
+input::-ms-reveal,
+input::-ms-clear {
+  display: none !important;
+}
+</style>
