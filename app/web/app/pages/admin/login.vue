@@ -30,10 +30,7 @@ function validate(state: { identity?: string, password?: string }): FormError[] 
   const id = state.identity?.trim() || ''
   if (!id) {
     errors.push({ name: 'identity', message: 'Technical username is required.' })
-  } else if (
-    (id.includes('@') || id.startsWith('+') || /^\d+$/.test(id))
-    && id.toLowerCase() !== 'admin@hrms.com'
-  ) {
+  } else if (id.includes('@') || id.startsWith('+') || /^\d+$/.test(id)) {
     errors.push({
       name: 'identity',
       message: 'Sign in with your technical username (not an email or mobile number).'
@@ -58,14 +55,14 @@ watch(() => form.identity, () => {
     errorMessage.value = ''
     errorTitle.value = ''
   }
-  formRef.value?.clear('identity')
+  formRef.value?.clear()
 })
 watch(() => form.password, () => {
   if (errorMessage.value) {
     errorMessage.value = ''
     errorTitle.value = ''
   }
-  formRef.value?.clear('password')
+  formRef.value?.clear()
 })
 
 async function submit() {
@@ -91,7 +88,10 @@ async function submit() {
     } else {
       errorTitle.value = 'Invalid credentials'
       errorMessage.value = rawMsg || 'Those credentials were not accepted. Passwords are case-sensitive.'
-      formRef.value?.setErrors([{ name: 'password', message: 'Invalid password or username.' }])
+      formRef.value?.setErrors([
+        { name: 'identity', message: 'Check your technical username.' },
+        { name: 'password', message: 'Invalid password or username.' }
+      ])
     }
   }
 }
@@ -168,6 +168,7 @@ async function afterMfa() {
             icon="i-lucide-circle-alert"
             :title="errorTitle || undefined"
             :description="errorMessage"
+            :actions="errorTitle === 'Invalid credentials' ? [{ label: 'Employee sign-in', to: '/login' }] : undefined"
           />
         </div>
         <UButton

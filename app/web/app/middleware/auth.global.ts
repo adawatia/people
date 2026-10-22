@@ -14,7 +14,10 @@ export default defineNuxtRouteMiddleware(async (to) => {
   // Ensure session state is loaded before deciding (no-op after first fetch).
   await auth.fetchUser()
   const isPublic = publicPaths.some(path => to.path === path || to.path.startsWith(`${path}/`))
-  if (!auth.user.value && !isPublic) return navigateTo({ path: '/login', query: { redirect: to.fullPath } })
+  if (!auth.user.value && !isPublic) {
+    const loginPath = to.path.startsWith('/admin') ? '/admin/login' : '/login'
+    return navigateTo({ path: loginPath, query: { redirect: to.fullPath } })
+  }
   if (auth.user.value && signInPaths.includes(to.path)) return navigateTo('/')
   if (auth.user.value && auth.mustChangePassword.value && to.path !== '/settings') {
     return navigateTo('/settings?change-password=1')

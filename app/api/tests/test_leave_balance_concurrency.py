@@ -362,8 +362,8 @@ def test_rejected_pending_restores_pending(unique_suffix):
             app = await service.apply_leave(
                 type("Payload", (), {
                     "employee_id": emp.id,
-                    "leave_type_id": leave_type_id,                            "from_date": date(2026, 11, 24),
-                            "to_date": date(2026, 11, 25),
+                    "leave_type_id": leave_type_id,                            "from_date": date(2026, 11, 25),
+                            "to_date": date(2026, 11, 26),
                     "half_day": False,
                     "half_day_date": None,
                     "reason": "Reject test",

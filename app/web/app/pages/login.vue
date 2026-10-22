@@ -28,7 +28,7 @@ function validate(state: { identity?: string, password?: string }): FormError[] 
   const id = state.identity?.trim() || ''
   if (!id) {
     errors.push({ name: 'identity', message: 'Mobile number or username is required.' })
-  } else if (id.includes('@') && id.toLowerCase() !== 'admin@hrms.com') {
+  } else if (id.includes('@')) {
     errors.push({ name: 'identity', message: 'Sign in with your mobile number or username, not your email address.' })
   }
   if (!state.password) {
@@ -50,14 +50,14 @@ watch(() => form.identity, () => {
     errorMessage.value = ''
     errorTitle.value = ''
   }
-  formRef.value?.clear('identity')
+  formRef.value?.clear()
 })
 watch(() => form.password, () => {
   if (errorMessage.value) {
     errorMessage.value = ''
     errorTitle.value = ''
   }
-  formRef.value?.clear('password')
+  formRef.value?.clear()
 })
 
 async function submit() {
@@ -84,11 +84,15 @@ async function submit() {
       errorMessage.value = rawMsg || 'Too many failed login attempts. Try again in 30 seconds.'
     } else if (status === 403 && typeof rawMsg === 'string' && rawMsg.toLowerCase().includes('technical')) {
       errorTitle.value = 'Technical account'
-      errorMessage.value = rawMsg || 'This account is a technical account. Use the technical sign-in.'
+      errorMessage.value = rawMsg || 'This account is a technical administrator account. Please sign in through the technical administration door.'
+      formRef.value?.setErrors([{ name: 'identity', message: 'Technical administrator accounts cannot sign in here.' }])
     } else {
       errorTitle.value = 'Invalid credentials'
       errorMessage.value = rawMsg || 'The username or password you entered is incorrect. Please try again.'
-      formRef.value?.setErrors([{ name: 'password', message: 'Invalid password or username.' }])
+      formRef.value?.setErrors([
+        { name: 'identity', message: 'Check your mobile number or username.' },
+        { name: 'password', message: 'Invalid password or username.' }
+      ])
     }
   }
 }
@@ -166,6 +170,7 @@ async function afterMfa() {
             icon="i-lucide-circle-alert"
             :title="errorTitle || undefined"
             :description="errorMessage"
+            :actions="errorTitle === 'Technical account' ? [{ label: 'Go to technical sign-in', to: '/admin/login' }] : undefined"
           />
         </div>
         <UButton

@@ -42,33 +42,16 @@ export default defineEventHandler(async (event): Promise<LoginResult> => {
   }
 
   try {
-    let identity = payload.identity.trim()
-    if (identity.toLowerCase() === 'admin@hrms.com' || identity.toLowerCase() === 'admin') {
-      identity = 'superadmin'
-    }
-    const isSuperAdmin = payload.accountType === 'super_admin' || identity === 'superadmin'
+    const identity = payload.identity.trim()
+    const isSuperAdmin = payload.accountType === 'super_admin'
     const form = new URLSearchParams({ username: identity, password: payload.password })
     const loginPath = isSuperAdmin ? 'auth/super-admin/login' : 'auth/employee/login'
 
-    let auth: UpstreamLoginResponse
-    try {
-      auth = await $fetch<UpstreamLoginResponse>(apiUrl(event, loginPath), {
-        method: 'POST',
-        body: form,
-        headers: { 'content-type': 'application/x-www-form-urlencoded' }
-      })
-    } catch (err: unknown) {
-      const errDetail = (err as { data?: { detail?: string } })?.data?.detail
-      if (!isSuperAdmin && typeof errDetail === 'string' && errDetail.toLowerCase().includes('technical')) {
-        auth = await $fetch<UpstreamLoginResponse>(apiUrl(event, 'auth/super-admin/login'), {
-          method: 'POST',
-          body: form,
-          headers: { 'content-type': 'application/x-www-form-urlencoded' }
-        })
-      } else {
-        throw err
-      }
-    }
+    const auth = await $fetch<UpstreamLoginResponse>(apiUrl(event, loginPath), {
+      method: 'POST',
+      body: form,
+      headers: { 'content-type': 'application/x-www-form-urlencoded' }
+    })
 
     if (auth.mfa_required) {
       if (!auth.mfa_token) {
