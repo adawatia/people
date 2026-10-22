@@ -9,6 +9,7 @@ This directory contains the authoritative system architecture and technical spec
 | Document | Purpose & Scope |
 |---|---|
 | **[`system-architecture-and-flows.md`](./system-architecture-and-flows.md)** | **The Canonical System Reference (10 Chapters)**.<br>Layering rules, ERP ownership boundary, multi-factor authentication state machine, database schemas, permission matrix, per-role UI flows, and decision register. |
+| **[`seed-data-and-credentials.md`](./seed-data-and-credentials.md)** | **Seed Data & Developer Credentials Reference**.<br>Portals, usernames, passwords, test personas (CEO, HR, managers, employees), seed scripts, and database initialization lifecycle. |
 | **[`erp-integration.md`](./erp-integration.md)** | **ERP Machine Integration Specification**.<br>HMAC-SHA256 authentication protocol, request timestamp/nonce replay defense, outbox change feeds, and bulk upsert envelopes. |
 
 ---
