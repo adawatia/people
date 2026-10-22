@@ -11,6 +11,10 @@ const formRef = useTemplateRef('formRef')
 const errorMessage = ref('')
 const errorTitle = ref('')
 const challenge = ref<MfaChallenge | null>(null)
+const rememberMe = ref(false)
+const countdown = ref(0)
+let countdownTimer: ReturnType<typeof setInterval> | null = null
+
 /** Set when /settings sends the user back here after a password change. */
 const notice = computed(() => (typeof route.query.notice === 'string' ? route.query.notice : ''))
 
@@ -22,6 +26,47 @@ const notice = computed(() => (typeof route.query.notice === 'string' ? route.qu
 function destination() {
   return safeInternalPath(route.query.redirect)
 }
+
+function startCountdown(seconds: number) {
+  if (countdownTimer) clearInterval(countdownTimer)
+  countdown.value = seconds
+  countdownTimer = setInterval(() => {
+    if (countdown.value > 1) {
+      countdown.value -= 1
+    } else {
+      countdown.value = 0
+      if (countdownTimer) {
+        clearInterval(countdownTimer)
+        countdownTimer = null
+      }
+      if (errorTitle.value === 'Too many attempts') {
+        errorMessage.value = ''
+        errorTitle.value = ''
+      }
+    }
+  }, 1000)
+}
+
+onMounted(() => {
+  if (import.meta.client) {
+    try {
+      const saved = localStorage.getItem('emploi_remembered_identity')
+      if (saved) {
+        form.identity = saved
+        rememberMe.value = true
+      }
+    } catch {
+      // Storage access may be restricted in private browsing
+    }
+  }
+})
+
+onUnmounted(() => {
+  if (countdownTimer) {
+    clearInterval(countdownTimer)
+    countdownTimer = null
+  }
+})
 
 function validate(state: { identity?: string, password?: string }): FormError[] {
   const errors: FormError[] = []
@@ -46,14 +91,14 @@ function onError(event: FormErrorEvent) {
 }
 
 watch(() => form.identity, () => {
-  if (errorMessage.value) {
+  if (errorMessage.value && countdown.value === 0) {
     errorMessage.value = ''
     errorTitle.value = ''
   }
   formRef.value?.clear()
 })
 watch(() => form.password, () => {
-  if (errorMessage.value) {
+  if (errorMessage.value && countdown.value === 0) {
     errorMessage.value = ''
     errorTitle.value = ''
   }
@@ -61,12 +106,25 @@ watch(() => form.password, () => {
 })
 
 async function submit() {
-  if (auth.loading.value) return
+  if (auth.loading.value || countdown.value > 0) return
   errorMessage.value = ''
   errorTitle.value = ''
 
   try {
     const result = await auth.login({ ...form, accountType: 'employee' })
+
+    if (import.meta.client) {
+      try {
+        if (rememberMe.value && form.identity.trim()) {
+          localStorage.setItem('emploi_remembered_identity', form.identity.trim())
+        } else {
+          localStorage.removeItem('emploi_remembered_identity')
+        }
+      } catch {
+        // Storage access may be restricted
+      }
+    }
+
     if ('mfa_required' in result) {
       challenge.value = result
       return
@@ -81,18 +139,14 @@ async function submit() {
 
     if (status === 429) {
       errorTitle.value = 'Too many attempts'
-      errorMessage.value = rawMsg || 'Too many failed login attempts. Try again in 30 seconds.'
+      errorMessage.value = rawMsg || 'Too many failed login attempts.'
+      startCountdown(30)
     } else if (status === 403 && typeof rawMsg === 'string' && rawMsg.toLowerCase().includes('technical')) {
       errorTitle.value = 'Technical account'
       errorMessage.value = rawMsg || 'This account is a technical administrator account. Please sign in through the technical administration door.'
-      formRef.value?.setErrors([{ name: 'identity', message: 'Technical administrator accounts cannot sign in here.' }])
     } else {
       errorTitle.value = 'Invalid credentials'
       errorMessage.value = rawMsg || 'The username or password you entered is incorrect. Please try again.'
-      formRef.value?.setErrors([
-        { name: 'identity', message: 'Check your mobile number or username.' },
-        { name: 'password', message: 'Invalid password or username.' }
-      ])
     }
   }
 }
@@ -145,10 +199,25 @@ async function afterMfa() {
         >
           <AuthPasswordInput v-model="form.password" />
         </UFormField>
-        <NuxtLink
-          to="/forgot-password"
-          class="auth-link"
-        >Forgot your password?</NuxtLink>
+
+        <div class="flex items-center justify-between min-h-[44px]">
+          <UCheckbox
+            v-model="rememberMe"
+            label="Remember me"
+            name="remember"
+            size="md"
+            :ui="{
+              root: 'items-center cursor-pointer select-none',
+              base: 'cursor-pointer',
+              label: 'cursor-pointer text-sm font-normal text-muted hover:text-default transition-colors'
+            }"
+          />
+          <NuxtLink
+            to="/forgot-password"
+            class="auth-link text-sm"
+          >Forgot your password?</NuxtLink>
+        </div>
+
         <div
           v-if="notice === 'password-changed'"
           role="status"
@@ -160,6 +229,7 @@ async function afterMfa() {
             description="Your password was changed and every device was signed out. Sign in with your new password."
           />
         </div>
+
         <div
           v-if="errorMessage"
           role="alert"
@@ -169,19 +239,20 @@ async function afterMfa() {
             variant="soft"
             icon="i-lucide-circle-alert"
             :title="errorTitle || undefined"
-            :description="errorMessage"
+            :description="countdown > 0 ? `Too many failed login attempts. You can try again in ${countdown}s.` : errorMessage"
             :actions="errorTitle === 'Technical account' ? [{ label: 'Go to technical sign-in', to: '/admin/login' }] : undefined"
           />
         </div>
+
         <UButton
           type="submit"
           block
           size="xl"
           :loading="auth.loading.value"
-          :disabled="auth.loading.value"
+          :disabled="auth.loading.value || countdown > 0"
           trailing-icon="i-lucide-arrow-right"
         >
-          Sign in
+          {{ countdown > 0 ? `Try again in ${countdown}s` : 'Sign in' }}
         </UButton>
       </UForm>
       <div class="auth-secondary-links">

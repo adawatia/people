@@ -18,12 +18,42 @@ const formRef = useTemplateRef('formRef')
 const errorMessage = ref('')
 const errorTitle = ref('')
 const challenge = ref<MfaChallenge | null>(null)
+const countdown = ref(0)
+let countdownTimer: ReturnType<typeof setInterval> | null = null
+
 /** Set when /settings sends the user back here after a password change. */
 const notice = computed(() => (typeof route.query.notice === 'string' ? route.query.notice : ''))
 
 function destination() {
   return safeInternalPath(route.query.redirect)
 }
+
+function startCountdown(seconds: number) {
+  if (countdownTimer) clearInterval(countdownTimer)
+  countdown.value = seconds
+  countdownTimer = setInterval(() => {
+    if (countdown.value > 1) {
+      countdown.value -= 1
+    } else {
+      countdown.value = 0
+      if (countdownTimer) {
+        clearInterval(countdownTimer)
+        countdownTimer = null
+      }
+      if (errorTitle.value === 'Too many attempts') {
+        errorMessage.value = ''
+        errorTitle.value = ''
+      }
+    }
+  }, 1000)
+}
+
+onUnmounted(() => {
+  if (countdownTimer) {
+    clearInterval(countdownTimer)
+    countdownTimer = null
+  }
+})
 
 function validate(state: { identity?: string, password?: string }): FormError[] {
   const errors: FormError[] = []
@@ -51,14 +81,14 @@ function onError(event: FormErrorEvent) {
 }
 
 watch(() => form.identity, () => {
-  if (errorMessage.value) {
+  if (errorMessage.value && countdown.value === 0) {
     errorMessage.value = ''
     errorTitle.value = ''
   }
   formRef.value?.clear()
 })
 watch(() => form.password, () => {
-  if (errorMessage.value) {
+  if (errorMessage.value && countdown.value === 0) {
     errorMessage.value = ''
     errorTitle.value = ''
   }
@@ -66,7 +96,7 @@ watch(() => form.password, () => {
 })
 
 async function submit() {
-  if (auth.loading.value) return
+  if (auth.loading.value || countdown.value > 0) return
   errorMessage.value = ''
   errorTitle.value = ''
 
@@ -84,14 +114,11 @@ async function submit() {
 
     if (status === 429) {
       errorTitle.value = 'Too many attempts'
-      errorMessage.value = rawMsg || 'Too many failed login attempts. Try again in 30 seconds.'
+      errorMessage.value = rawMsg || 'Too many failed login attempts.'
+      startCountdown(30)
     } else {
       errorTitle.value = 'Invalid credentials'
       errorMessage.value = rawMsg || 'Those credentials were not accepted. Passwords are case-sensitive.'
-      formRef.value?.setErrors([
-        { name: 'identity', message: 'Check your technical username.' },
-        { name: 'password', message: 'Invalid password or username.' }
-      ])
     }
   }
 }
@@ -167,7 +194,7 @@ async function afterMfa() {
             variant="soft"
             icon="i-lucide-circle-alert"
             :title="errorTitle || undefined"
-            :description="errorMessage"
+            :description="countdown > 0 ? `Too many failed login attempts. You can try again in ${countdown}s.` : errorMessage"
             :actions="errorTitle === 'Invalid credentials' ? [{ label: 'Employee sign-in', to: '/login' }] : undefined"
           />
         </div>
@@ -176,10 +203,10 @@ async function afterMfa() {
           block
           size="xl"
           :loading="auth.loading.value"
-          :disabled="auth.loading.value"
+          :disabled="auth.loading.value || countdown > 0"
           trailing-icon="i-lucide-arrow-right"
         >
-          Sign in to administration
+          {{ countdown > 0 ? `Try again in ${countdown}s` : 'Sign in to administration' }}
         </UButton>
       </UForm>
       <p class="auth-security-note">
