@@ -208,7 +208,7 @@ async function afterMfa() {
             size="md"
             :ui="{
               root: 'items-center cursor-pointer select-none',
-              base: 'cursor-pointer',
+              base: 'cursor-pointer size-4 shrink-0',
               label: 'cursor-pointer text-sm font-normal text-muted hover:text-default transition-colors'
             }"
           />

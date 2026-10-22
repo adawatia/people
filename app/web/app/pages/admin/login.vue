@@ -118,7 +118,9 @@ async function submit() {
       startCountdown(30)
     } else {
       errorTitle.value = 'Invalid credentials'
-      errorMessage.value = rawMsg || 'Those credentials were not accepted. Passwords are case-sensitive.'
+      errorMessage.value = rawMsg === 'Invalid login credentials'
+        ? 'Check your technical username and password. Passwords are case-sensitive.'
+        : (rawMsg || 'Those credentials were not accepted. Passwords are case-sensitive.')
     }
   }
 }
@@ -195,7 +197,6 @@ async function afterMfa() {
             icon="i-lucide-circle-alert"
             :title="errorTitle || undefined"
             :description="countdown > 0 ? `Too many failed login attempts. You can try again in ${countdown}s.` : errorMessage"
-            :actions="errorTitle === 'Invalid credentials' ? [{ label: 'Employee sign-in', to: '/login' }] : undefined"
           />
         </div>
         <UButton
@@ -206,7 +207,7 @@ async function afterMfa() {
           :disabled="auth.loading.value || countdown > 0"
           trailing-icon="i-lucide-arrow-right"
         >
-          {{ countdown > 0 ? `Try again in ${countdown}s` : 'Sign in to administration' }}
+          {{ countdown > 0 ? `Try again in ${countdown}s` : 'Sign in' }}
         </UButton>
       </UForm>
       <p class="auth-security-note">
