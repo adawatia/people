@@ -1,74 +1,74 @@
 ---
-name: People
-description: Editorial violet authentication and compact Nuxt UI pages for operational work.
+name: Emploi
+description: Calm botanical forest green workspace and compact Nuxt UI pages for operational work.
 colors:
-  color-brand-50: '#f5f3ff'
-  color-brand-100: '#ede9fe'
-  color-brand-200: '#ddd6fe'
-  color-brand-300: '#c4b5fd'
-  color-brand-400: '#a78bfa'
-  color-brand-500: '#6c4df6'
-  color-brand-600: '#6040dc'
-  color-brand-700: '#5032bd'
-  color-brand-800: '#422b98'
-  color-brand-900: '#352473'
-  color-brand-950: '#231a46'
-  ui-primary: '#5637a5'
-  ui-success: '#226747'
-  ui-warning: '#805900'
-  ui-error: '#a52b46'
-  ui-info: '#345a96'
-  people-canvas: '#faf8f4'
-  people-surface: '#fffdfa'
-  people-border: '#ded8e5'
-  people-text: '#292335'
-  people-muted: '#665e70'
-  people-lavender: '#eee7f7'
-  people-mint: '#e7f4ed'
-  people-peach: '#f9eee4'
-  people-blue: '#e8eff9'
-  people-yellow: '#fff3d6'
-  people-rose: '#fce9ed'
-  people-blue-ink: '#345a96'
-  people-mint-ink: '#226747'
-  people-lavender-ink: '#5637a5'
-  people-peach-ink: '#925025'
-  people-yellow-ink: '#805900'
-  people-rose-ink: '#a52b46'
-  dark-ui-primary: '#c9b2ff'
-  dark-ui-success: '#94d8b4'
-  dark-ui-warning: '#efd184'
-  dark-ui-error: '#f2acbd'
-  dark-ui-info: '#abc9f5'
-  dark-people-canvas: '#1c1923'
-  dark-people-surface: '#25202e'
-  dark-people-border: '#51465e'
-  dark-people-text: '#f7f0e9'
-  dark-people-muted: '#beb2ce'
-  dark-people-lavender: '#30264b'
-  dark-people-mint: '#19362c'
-  dark-people-peach: '#382b22'
-  dark-people-blue: '#22334e'
-  dark-people-yellow: '#3b321c'
-  dark-people-rose: '#3e2631'
-  dark-people-blue-ink: '#abc9f5'
-  dark-people-mint-ink: '#94d8b4'
-  dark-people-lavender-ink: '#c4b5fd'
-  dark-people-peach-ink: '#ebbb94'
-  dark-people-yellow-ink: '#efd184'
-  dark-people-rose-ink: '#f2acbd'
-  auth-paper: '#faf8f4'
-  auth-ink: '#292335'
-  auth-muted: '#665e70'
-  auth-violet: '#5637a5'
-  auth-panel: '#eae3f4'
-  auth-line: '#d8d0df'
-  dark-auth-paper: '#1c1923'
-  dark-auth-ink: '#f7f0e9'
-  dark-auth-muted: '#beb2ce'
-  dark-auth-violet: '#c9b2ff'
-  dark-auth-panel: '#30283f'
-  dark-auth-line: '#51465e'
+  color-brand-50: '#f0f7f2'
+  color-brand-100: '#dceee1'
+  color-brand-200: '#bdddc5'
+  color-brand-300: '#93c9a2'
+  color-brand-400: '#65ad7b'
+  color-brand-500: '#438f5e'
+  color-brand-600: '#287448'
+  color-brand-700: '#1d613a'
+  color-brand-800: '#174d2f'
+  color-brand-900: '#123f27'
+  color-brand-950: '#092617'
+  ui-primary: '#287448'
+  ui-success: '#287448'
+  ui-warning: '#a16207'
+  ui-error: '#b42336'
+  ui-info: '#336b83'
+  people-canvas: '#f7f9f7'
+  people-surface: '#ffffff'
+  people-border: '#d7e0d9'
+  people-text: '#1b2820'
+  people-muted: '#617168'
+  people-forest: '#e2f0e6'
+  people-mint: '#e7f3e9'
+  people-peach: '#fff1e6'
+  people-blue: '#e8f1ee'
+  people-yellow: '#fff7df'
+  people-rose: '#fff0f2'
+  people-forest-ink: '#1d613a'
+  people-mint-ink: '#1d613a'
+  people-peach-ink: '#9a4f0a'
+  people-blue-ink: '#336b83'
+  people-yellow-ink: '#925d07'
+  people-rose-ink: '#b42336'
+  dark-ui-primary: '#8ad5a4'
+  dark-ui-success: '#8ad5a4'
+  dark-ui-warning: '#fcd34d'
+  dark-ui-error: '#fda4af'
+  dark-ui-info: '#9bc9da'
+  dark-people-canvas: '#111a14'
+  dark-people-surface: '#18241b'
+  dark-people-border: '#37483b'
+  dark-people-text: '#edf5ee'
+  dark-people-muted: '#afc0b3'
+  dark-people-forest: '#1c3b28'
+  dark-people-mint: '#1b4029'
+  dark-people-peach: '#422d1a'
+  dark-people-blue: '#1b3537'
+  dark-people-yellow: '#3d3215'
+  dark-people-rose: '#40212a'
+  dark-people-forest-ink: '#8ad5a4'
+  dark-people-mint-ink: '#8ad5a4'
+  dark-people-peach-ink: '#fdba74'
+  dark-people-blue-ink: '#9bc9da'
+  dark-people-yellow-ink: '#fcd34d'
+  dark-people-rose-ink: '#fda4af'
+  auth-paper: '#f7f9f7'
+  auth-ink: '#1b2820'
+  auth-muted: '#617168'
+  auth-primary: '#287448'
+  auth-panel: '#edf5ef'
+  auth-line: '#d7e0d9'
+  dark-auth-paper: '#111a14'
+  dark-auth-ink: '#edf5ee'
+  dark-auth-muted: '#afc0b3'
+  dark-auth-primary: '#8ad5a4'
+  dark-auth-panel: '#1c3b28'
+  dark-auth-line: '#37483b'
 typography:
   auth-display:
     fontFamily: '"People Editorial", Georgia, serif'
@@ -163,8 +163,8 @@ components:
     backgroundColor: '{colors.people-canvas}'
     textColor: '{colors.people-text}'
   platform-nav-current:
-    backgroundColor: '{colors.people-lavender}'
-    textColor: '{colors.people-lavender-ink}'
+    backgroundColor: '{colors.people-forest}'
+    textColor: '{colors.people-forest-ink}'
   workspace-select:
     backgroundColor: '{colors.people-canvas}'
     textColor: '{colors.people-text}'
@@ -179,8 +179,8 @@ components:
     height: 44px
     padding: '0'
   platform-sign-out:
-    backgroundColor: '{colors.people-lavender}'
-    textColor: '{colors.people-lavender-ink}'
+    backgroundColor: '{colors.people-forest}'
+    textColor: '{colors.people-forest-ink}'
   platform-sign-out-hover:
     backgroundColor: '{colors.people-surface}'
   people-card:
@@ -188,13 +188,13 @@ components:
     rounded: '{rounded.card}'
   auth-story:
     backgroundColor: '{colors.auth-panel}'
-    textColor: '{colors.auth-violet}'
+    textColor: '{colors.auth-primary}'
     rounded: '{rounded.auth-story}'
     padding: clamp(28px, 3vw, 48px)
   auth-input:
     backgroundColor: '{colors.auth-paper}'
   auth-link:
-    textColor: '{colors.auth-violet}'
+    textColor: '{colors.auth-primary}'
     height: 44px
   page-card:
     backgroundColor: '{colors.people-surface}'
@@ -224,133 +224,114 @@ components:
     typography: '{typography.page-feedback}'
 ---
 
-# Design System: People
+# Design System: Emploi
 
 ## Overview
 
-**Creative North Star: "Editorial violet, compact operations"**
+**Creative North Star: "The Calm Botanical Workspace"**
 
-People™ by Datlabs pairs warm paper and ink with violet selection and primary actions. Authentication retains the user-selected editorial violet direction, generous spacing and Newsreader display typography. The approved platform extension uses a clean, compact navigation frame and familiar system sans for frequent operational work.
+Emploi ("HR made calm") pairs quiet, organic forest greens with clean neutral surfaces to deliver an unhurried, reassuring environment for high-frequency workforce operations. Authentication couples warm paper and ink with editorial display typography and a balanced, informative story composition. The platform workspace uses a clean, compact navigation shell and familiar system sans for efficient daily operations.
 
-This system records the approved frontend extension across every existing page: authentication, shared platform shell, responsive dashboards, lists, forms and Nuxt UI dialogs. Existing routes, APIs, permissions, calculations and actions remain the product boundary; presentation refinements do not add business capabilities. Existing People and Datlabs symbols and Lucide icons supply identity; the authentication HRMS diagram is native UI, with no new raster assets.
+This design system records the established frontend design across every existing surface: authentication, shared platform shell, responsive dashboards, lists, filters, forms, and Nuxt UI dialogs. Existing routes, APIs, role boundaries, and ERP master data rules remain authoritative; presentation refinements polish clarity without modifying business logic.
 
 **Key Characteristics:**
-- Warm paper/ink neutrals with adaptive light and dark appearance.
-- Violet current selections and primary actions.
-- Editorial authentication; compact operational navigation.
-- Existing identity symbols, accessible controls and permission-aware workspaces.
+- Muted forest green palette (`--color-brand-700: #1d613a`, `--ui-primary: #287448`) paired with tranquil paper/canvas neutrals.
+- Strict door distinction: dedicated workforce entrance (`/login`) and isolated technical administration entrance (`/admin/login`).
+- Editorial authenticity on sign-in surfaces; compact, highly scannable operational controls in the workspace.
+- Flat & tonal elevation model: 1px borders, subtle tonal shifts, and restrained Nuxt UI components.
 
 ## Colors
 
-The frontmatter is normative and preserves the source CSS values. The `dark-` entries describe dark-mode overrides; the `auth-` entries remain scoped to authentication.
+The frontmatter is normative and reflects the implemented CSS variables in `main.css`, `auth.css`, and `platform.css`. The `dark-` entries describe dark-mode overrides; the `auth-` entries are scoped to authentication surfaces.
 
 ### Primary
 
-Violet (`ui-primary`) marks primary actions and keyboard focus. The platform's selected navigation pairs lavender fill (`people-lavender`) with violet ink (`people-lavender-ink`); dark selection ink intentionally differs from dark primary. The existing `color-brand-50` through `color-brand-950` ramp is available to Nuxt UI.
+Forest green (`ui-primary: #287448`, `--color-brand-700: #1d613a`) anchors primary actions, active indicators, and keyboard focus rings. Current navigation in the platform pairs subtle forest fill (`people-forest: #e2f0e6`) with deep forest ink (`people-forest-ink: #1d613a`). The full `color-brand-50` through `color-brand-950` ramp provides calibrated shades for Nuxt UI states.
 
 ### Neutral
 
-Warm canvas, elevated paper, ink, muted copy and borders use `people-canvas`, `people-surface`, `people-text`, `people-muted` and `people-border`. Authentication retains its own paper, ink, muted, panel and line aliases instead of inheriting platform surface changes.
+Clean canvas, elevated surface, ink, muted text, and borders use `people-canvas (#f7f9f7)`, `people-surface (#ffffff)`, `people-text (#1b2820)`, `people-muted (#617168)`, and `people-border (#d7e0d9)`. Authentication surfaces alias these tokens cleanly as `auth-paper`, `auth-ink`, `auth-muted`, `auth-panel`, and `auth-line`.
 
 ### Semantic
 
-Success/mint, warning/yellow, error/rose and information/blue use the paired semantic fill and ink tokens. Peach supplies the existing work-arrangement category tone. These category colors remain available to page components; the shell navigation uses a single violet current-selection treatment.
+Semantic status indicators use harmonized pastel fill and dark ink pairings:
+- **Success / Present:** Mint (`people-mint: #e7f3e9` / `people-mint-ink: #1d613a`)
+- **Warning / Pending:** Yellow (`people-yellow: #fff7df` / `people-yellow-ink: #925d07`)
+- **Error / Absent:** Rose (`people-rose: #fff0f2` / `people-rose-ink: #b42336`)
+- **Info / Regularization:** Blue (`people-blue: #e8f1ee` / `people-blue-ink: #336b83`)
+- **Work Arrangement / Shift:** Peach (`people-peach: #fff1e6` / `people-peach-ink: #9a4f0a`)
 
-**The Semantic Appearance Rule.** Read colors through the implemented CSS variables; do not bake light-mode colors into new controls.
+**The Semantic Appearance Rule.** Always consume colors through implemented CSS custom properties (`var(--people-*)`, `var(--ui-*)`). Never hardcode hex values directly into component templates.
 
 ## Typography
 
-Authentication uses the locally hosted Newsreader face under `People Editorial` with Georgia/serif fallback. Controls and platform copy use the system sans stack in the frontmatter. Authentication headings are editorial; platform headings are concise operational labels.
+Authentication surfaces use locally hosted Newsreader under `People Editorial` with Georgia/serif fallback for hero story displays. Platform workspace controls, navigation, and content use the high-performance system sans stack (`ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`).
 
-Authentication display copy is capped at 10ch and story body at 34ch. The story body uses 16px/1.7; form description uses the auth-body role. Below a desktop height of 851px, the display becomes `clamp(40px, 3.6vw, 56px)` and story body 14px/1.5. Platform selected navigation increases from weight 500 to 600. The controls-only header has no workspace breadcrumb or page title. Its profile name is 13px/600, capped at 160px and truncated. The platform sidebar uses only the existing People symbol; authentication brand is 26px/650 with 16px superscript.
+Authentication display headings are capped at 10ch and story body at 34ch (16px/1.7). On smaller desktop viewports (<851px height), display headings scale down to `clamp(40px, 3.6vw, 56px)` and story copy to 14px/1.5.
 
-Page and dashboard titles share the page-title role. Table and request-feedback copy use the compact 13px/1.6 roles; table headers use 12px, normal case and no added letter spacing. Dashboard panels use 16px/600 headings, summary labels use 12px/1.5 and summary values use the dashboard-metric role with tabular numerals. Dashboard descriptions use 14px/1.6, capped at 64ch. Detail values use 15px/600; approval titles use 14px/600/1.5. These roles extend the system sans hierarchy without changing authentication typography.
+Platform page headings use the `page-title` role (`clamp(24px, 2.4vw, 32px)`, 600 weight). Tables and status feedback use compact 13px/1.6 typography. Dashboard summary metrics use tabular numerals with `dashboard-metric` (`clamp(24px, 2.5vw, 32px)`, 600 weight), and summary cards feature concise 12px/1.5 labels.
 
 ## Layout
 
-At 1024px and above, the fixed desktop sidebar is 256px expanded or 76px collapsed. The body offset follows that width. Sidebar navigation flexes and scrolls independently, leaving branding/workspace above and account actions below. The toggle sits at the far left of the desktop top bar and persists in `people_sidebar_collapsed` (one-year, SameSite lax cookie, initially expanded). The collapsed rail centers 44px navigation targets, hides group labels, retains accessible titles/labels and uses a workspace dropdown. It has no animated width transition. Workspace controls appear only for multiple available workspaces; static workspace titles and descriptions are omitted.
+At 1024px and above, the fixed desktop sidebar is 256px wide (collapsible to 76px icon rail). Sidebar navigation flexes and scrolls independently from main content. The collapse toggle sits at the far left of the top header and persists in the `people_sidebar_collapsed` cookie.
 
-The solid sticky header is at least 72px tall, with 32px horizontal desktop padding. Its right group contains search, notifications, appearance and a profile link; desktop shows avatar/name, mobile avatar only. The sidebar shows the 40px People symbol without a wordmark or maker text. Content is capped at 1536px and padded 32px on desktop. Below 1024px the sidebar is replaced by the 32px brand symbol and up to five bottom destinations: Home, a Workspace tab whenever the account can use more than one workspace, the permitted role destinations and More — attendance and leave for My, approvals and attendance for Team, employees and approvals for HR, reports and organization for Executive, and system administration for Technical. The Workspace tab is omitted for single-workspace accounts, and at most two role destinations accompany it. The bottom bar honors safe-area inset; content has 104px bottom padding. Mobile content is otherwise padded 28px vertically and 20px horizontally; below 480px horizontal padding becomes 16px and header padding 12px. A bottom drawer is capped at 80dvh with a scrolling body and pinned sign-out footer in More. At 1280px the desktop search shortcut becomes visible; the desktop bordered search control is at least 180px wide.
+The sticky header is at least 72px tall with 32px horizontal padding on desktop. It houses the sidebar toggle, global command search, notifications, theme mode toggle, and profile menu. Content containers are capped at 1536px with 32px padding on desktop.
 
-Authentication has a shared masthead/footer, a two-column composition at 1024px and above, a story panel and a form capped at 440px within a 1600px outer maximum. Outer padding is `clamp(20px, 4vw, 72px)`. The masthead is at least 88px and footer 64px. Below 1024px the story is hidden, the form leads and the footer wraps/centers. Technical administration uses a centered single-column form without story panel or decorative animation; its heading identifies restricted access without repeated labels. Short desktop heights compact panel/form spacing. Desktop copyright and maker credits remain separate, aligned left and right.
+Below 1024px, the sidebar is replaced by a sticky 72px mobile header and a fixed bottom navigation bar (Home, Workspace, permitted role routes, and More). Content has 104px bottom padding to prevent overlap with the bottom navigation bar.
 
-Pages keep records and controls within their content width. Page headings and top-level flex content wrap below 768px. Tables use 52px desktop body rows, 60px rows below 768px, wrapping cell content and bounded horizontal containers. Existing employee, attendance, leave and holiday lists provide mobile record views below 768px; do not assume every table has a record alternative. Tab lists can scroll within their bounds. Mobile record links/articles have at least 60px height.
-
-Dashboards use 24px section gaps and grouped summary strips, with two columns initially. At 1024px workforce summaries use four columns and technical/executive summaries three; at 1600px technical summaries use five and executive summaries six. Attendance places its status chart on the left and its four summary values in a two-column grid on the right at 1024px and above; below 1024px the summary leads and the chart follows. Dashboard panels use 24px padding, reduced to 20px below 768px; summary items use 20px, reduced to 16px. Details become two columns at 640px. Main panels become two columns at 1024px, with owner analytics using a 1.45:1 split. Owner filters use two columns with the unit spanning both until 1024px, then three columns in a 1:1:1.3 ratio. The 320px chart has a text data alternative. Comparison tables show at 768px and above, with a 720px minimum table width inside a focusable scrolling container; smaller widths use grouped records with two-column details. Headings and metadata stack/wrap on mobile.
+Authentication surfaces use a 1600px outer container with `clamp(20px, 4vw, 72px)` padding: a two-column layout on desktop (story panel on the left, form capped at 440px on the right). Below 1024px, the story panel hides cleanly and the form takes center focus. Technical admin login (`/admin/login`) uses a single-column focused form without decorative distraction.
 
 ## Elevation & Depth
 
-The custom shell is flat: solid surfaces, 1px borders and tonal selection establish depth. The sidebar and bottom bar use z-index 40, sticky header 30 and focus-revealed skip link 100. No custom shell shadow tokens are defined. Shared page cards and dashboard panels are also flat: solid surface fill, 12px radius and no box shadow; dashboard panels and summary strips use 1px borders. Nuxt UI supplies modal, dropdown and drawer primitives; this document does not redefine their default elevation.
+**Flat & Tonal:** Surfaces are flat at rest. Depth is established through 1px solid borders (`var(--people-border)`), subtle background tonal shifts (canvas `#f7f9f7` vs surface `#ffffff`), and tinted selection fills (`var(--people-forest)`).
+
+Elevation and box-shadows are strictly reserved for transient floating layers:
+- Modals and dialogs
+- Dropdown menus and popovers
+- Toast notifications and tooltips
+
+No heavy ambient shadows are placed on cards or table rows.
 
 ## Shapes
 
-Small controls and navigation use the control radius; cards and icon containers use the card radius. Brand symbols use their own radius; the authentication story has a softer 16px corner. Authentication diagram nodes are 56px circles with a 1px current-color border. Shortcut badges use the smaller radius. Borders delineate workspace, account and header regions without nested navigation cards.
+Controls and inputs use an 8px radius (`control`). Cards and dashboard panels use a 12px radius (`card`). Authentication story panels use a softer 16px corner (`auth-story`). Keyboard shortcuts and tags use 4px (`shortcut`).
+
+Icon containers use the 12px card radius with centered grid alignment. Region borders clearly delineate workspace navigation, header, and content regions without nesting multiple heavy cards.
 
 ## Components
 
-### Navigation and workspace controls
+### Navigation and Workspace Controls
 
-Navigation rows have 44px minimum height, 12px icon/text gap and 20px icons. Default rows use muted ink; hover uses canvas fill and main ink; current rows use lavender fill/violet ink and weight 600 with `aria-current`. The expanded workspace selector is native, at least 44px high, with a 1px border and trailing chevron. The collapsed rail uses the existing available-workspace dropdown. Mobile highlights the current destination and the currently opened drawer; the Workspace sheet remains explicitly labeled and its tab is omitted when there is only one workspace. Route changes close drawer and search; changing to desktop closes the mobile drawer.
+Sidebar navigation links have a minimum 44px target height, 12px icon-to-text gap, and 20px icons. Hover applies canvas background; active/current route applies forest pastel background (`people-forest`) and forest ink (`people-forest-ink`) at weight 600 with `aria-current="page"`.
 
-### Search, appearance and account
+### Search, Appearance and Profile
 
-Search opens a keyboard-accessible modal from its trigger or Ctrl/Cmd+K, filters existing permitted page labels in the current workspace and opens the first result on Enter. Empty results provide a status message. Search result rows are at least 48px tall. Appearance follows system preference initially, persists the existing appearance cookie and mounts the color-mode button on the client with a reserved 44px placeholder. Its icon and accessible label reflect the resolved theme.
+Global search triggers via `Ctrl/Cmd+K` or header trigger, opening a keyboard-navigable modal that filters permitted routes in the active workspace. The theme toggle toggles light/dark mode and persists the preference. The profile dropdown displays truncated user names and exposes settings and sign-out actions.
 
-The profile link lives at the right end of the header, has a minimum 44px target and truncates long names. Sign-out has a 1px violet border, lavender fill and violet text/icon in both themes; hover uses the surface color and keyboard focus a 2px primary outline. Sign out is a dedicated labeled desktop action; it becomes a titled/accessible icon in the rail. Mobile More pins a 48px sign-out action in its footer. During sign-out the button shows loading and disables duplicate submission; failure announces an error toast and permits retry. Existing account/settings distinctions and permission filtering remain intact.
+### Authentication Forms
 
-### Authentication fields and links
+Inputs and primary submit buttons are at least 48px tall. Password fields provide toggleable eye icons with 44px minimum touch targets. Immediate field-level error clearing and clear `<UAlert>` banners provide actionable, recoverable feedback.
 
-Authentication inputs and submit buttons are at least 48px tall. Password visibility and other non-submit controls have 44px minimum targets; password fields reserve 56px trailing padding. Links have 44px minimum height and underline on hover. Forms retain keyboard submission, pending/error states, password visibility and accessible announcements. Current MFA/recovery steps use violet and weight 600.
+### Tables and Lists
 
-### Cards and native diagram
+Data tables feature 52px desktop body rows (60px on mobile) with clear column headers. List controls include search input with a clear button, debounced remote selection, active filter count badges, and one-click filter reset. Numbered pagination displays at 640px and above, switching to compact Previous/Next on mobile.
 
-The existing people-card uses a 1px border, card radius and 96% surface color mix. The authentication diagram connects Attendance, Time off and Schedules through existing Lucide icons. With motion permitted, its connecting line draws over 1.8s using `cubic-bezier(.16, 1, .3, 1)`; 1.2s pulses start at 0s, .6s and 1.2s, ending within 2.4s. Reduced-motion users see a static diagram. Platform navigation/profile/sign-out color transitions use 160ms ease-out only when reduced motion is not requested.
+### Request Feedback and Dialogs
 
-### Page controls, filters and pagination
-
-Use Nuxt UI buttons, inputs, selects and select menus with the configured 44px minimum control height. Shared page rules preserve 44px buttons, links used as controls, comboboxes and tabs; checkbox/radio native input geometry is exempt. Textareas have a 96px minimum. Keyboard controls keep the primary focus outline and 100px scroll margin to remain visible under the shell header.
-
-List controls group a labeled Search field with optional filters and sorting. Search provides a 44px clear action only when populated, empties its model and restores input focus. An active-filter badge and Reset filters appear when filters are active; resetting emits the existing page clear action and closes advanced filters. Below 768px, advanced filters toggle through Filters/Hide with expanded state and controlled-panel ID; at 768px they remain visible in an auto-fit grid of at least 10rem columns. Controls use 16px internal padding, increasing to 20px at 640px. Remote selects retain their searchable paged Nuxt UI menu, 300ms search debounce, selected option label and option-error Retry. Clear is opt-in via `clearable`, appears only for nonzero selection and resets to zero; required selectors do not acquire blanket clearability.
-
-Pagination announces the shown range, presents numbered Nuxt UI pagination at 640px and above and Previous/Page/Next below it. Loading disables paging and page-size controls; boundary buttons are disabled. The existing row-size options are 10, 25, 50 and 100, and changing size returns to page one.
-
-### Request feedback and dialogs
-
-The shared feedback component announces initial Loading results, Updating results with previous results visible, or last-successful-update data after refresh failure using a polite status region. Views retain successful data during refresh where integrated; the shared retained-data helper resets its remembered value on account, workspace or route-path changes. Error alerts retain explicit Retry and empty states remain distinct from unavailable data. Dashboard summaries show skeleton values only during initial pending/unavailable states; unavailable values use an em dash. Owner analytics retain the last successful response, report its stale status on error, validate date filters and expose refresh/reset actions; exception requests keep separate loading/error/empty states.
-
-Use the existing Nuxt UI modal and drawer primitives. Global content is capped at 90dvh with scrolling bodies and modal close targets at least 44px square; specific shell drawers retain their 80dvh override, and owner exception bodies cap at 70dvh. Existing workflow dialogs preserve titles, descriptions, validation and business actions; owner exception dismissal restores its trigger focus. Do not turn these presentation patterns into new backend or workflow behavior.
-
-**The Keyboard Visibility Rule.** Keep the 2px primary outline with 3px offset; retain the focus-revealed skip link. Search result rows retain their local 2px offset.
-
-### Period and account support controls
-
-Attendance and overtime can reset their selected period to the existing current-month default. Overtime and attendance charts use the same light/dark semantic ink colors as their status labels and remain static under reduced motion. Technical account support retains explicit Search submission; clearing search removes the submitted term while Reset filters restores the existing sorting defaults. Successful account rows remain visible during failed updates. Support dialogs use Nuxt UI structure, password visibility, inline request failures and disabled pending actions. Notifications expose a pending state for Mark all read and prevent duplicate actions.
-
-
-### Dashboard patterns across pages
-
-Attendance, overtime and holidays reuse the dashboard summary component, including their existing explanatory notes; holidays summarizes the selected calendar's declared holidays, generated weekly offs and the next upcoming holiday. Leave balances share a single divided surface while keeping allocations, usage, pending days and balance indicators. Page tabs use compact lavender selections and visible pressed states. Filters use quieter violet accents, tables use warm surfaces and row hover feedback, and notification unread rows use the same lavender selection tone. Employee details omit the empty decorative banner. Existing page features and semantic status meanings remain intact.
-
-### Resilient operational states
-
-Filtered empty states offer Reset filters and return focus to the page search field. Clearing optional selections returns focus to their trigger. Operational inputs and dialog fields use 16px text on mobile; wrapping names and forced-color focus outlines remain readable. Summary numbers use grouped Indian-locale formatting without changing calculations, and chart tooltips stay inside their chart. Security settings distinguish status loading and failure, expose retry, retain loaded sessions, show inline credential errors and block duplicate or competing requests. The project uses 44px controls and visible, unobscured focus as design conventions; conformance still requires verification.
-
-Reference guidance: [WCAG target sizing](https://www.w3.org/WAI/WCAG22/Understanding/target-size-minimum.html) and [focus visibility](https://www.w3.org/WAI/WCAG22/Understanding/focus-not-obscured-minimum.html).
+Network and mutation states display through consistent feedback components: loading skeletons, updating indicators that preserve existing data during background fetch, and error banners with explicit Retry triggers. Dialogs use Nuxt UI modals with 90dvh maximum height and accessible close buttons.
 
 ## Do's and Don'ts
 
 ### Do:
-- Do use the existing Nuxt UI primitives and shared page patterns across existing pages.
-- Do distinguish pending, empty, unavailable and stale results and preserve visible recovery actions.
-- Do retain People™ by Datlabs and the supplied light/dark symbols.
-- Do use semantic tokens so light and dark modes stay coherent.
-- Do preserve the 44px shell controls, visible keyboard focus and independently scrolling navigation.
-- Do retain accessible labels and titles when the desktop sidebar becomes an icon rail.
-- Do preserve existing routes, workspace permissions, MFA, recovery and forced-password-change flows.
+- Do use implemented CSS variables (`var(--people-*)`, `var(--ui-*)`) for colors and tokens.
+- Do keep 44px minimum clickable/tappable touch targets for all interactive controls.
+- Do maintain visible keyboard focus outlines (`outline: 2px solid var(--ui-primary)`, `outline-offset: 2px`).
+- Do distinguish between initial loading, background updating, empty states, and errors with actionable retry paths.
+- Do respect the ERP boundary: HRMS handles operational workflows, while ERP remains authoritative for employee master data.
+- Do preserve strict authentication door separation (`/login` for workforce, `/admin/login` for Super Admin).
 
 ### Don't:
-- Don't manufacture dashboard values, erase successful results during a supported refresh, or change ERP ownership boundaries.
-- Don't apply the authentication display composition to the platform shell.
-- Don't invent role choices, SSO, registration, session-persistence options, support/legal destinations or certification claims.
-- Don't use hidden navigation as an authorization boundary; endpoints retain permission and row-scope enforcement.
-- Don't introduce decorative platform motion or new raster identity assets.
+- Don't hardcode hex colors or introduce arbitrary unscaled colors outside the design system.
+- Don't apply heavy decorative shadows or gratuitous motion to operational workspace cards.
+- Don't bypass the BFF cookie proxy or expose raw JWT tokens to the client.
+- Don't invent unconfirmed workforce metrics, synthetic testimonials, or fake compliance logos.

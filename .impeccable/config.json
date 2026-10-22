@@ -32,5 +32,12 @@
         "reason": "Existing uppercase styling in this console applies only to short interface labels and reference section headings, not long body passages."
       }
     ]
+  },
+  "hook": {
+    "enabled": true,
+    "limits": {
+      "maxFindings": 5,
+      "maxChars": 8000
+    }
   }
 }
