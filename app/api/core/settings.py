@@ -10,7 +10,7 @@ from core.secret_box import DEVELOPMENT_KEY as DEVELOPMENT_MFA_KEY
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=(".env", ".env.local"),
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -244,6 +244,10 @@ class Settings(BaseSettings):
     def resolved_database_url(self) -> str:
         configured_database_url = self.database_url.strip()
         if configured_database_url:
+            if configured_database_url.startswith("postgresql+psycopg://"):
+                return configured_database_url.replace("postgresql+psycopg://", "postgresql+asyncpg://", 1)
+            if configured_database_url.startswith("postgresql://"):
+                return configured_database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
             return configured_database_url
 
         # Build the URL through SQLAlchemy rather than string formatting so the
