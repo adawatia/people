@@ -10,7 +10,7 @@ import asyncio
 import selectors
 import sys
 import uuid
-from datetime import date, time
+from datetime import date, time, timedelta
 from decimal import Decimal
 
 import pytest
@@ -30,6 +30,7 @@ from db.models import (
     Organization,
     Unit,
     User,
+    now_ist,
 )
 from schemas.shifts import ShiftAssignmentCreate, ShiftCreate
 from services.leave_service import LeaveService
@@ -298,11 +299,14 @@ def test_approved_leave_balance_reverts_on_cancel(unique_suffix):
 
         async with async_session_maker() as session:
             service = LeaveService(session)
+            f_date = now_ist().date() + timedelta(days=5)
+            t_date = f_date + timedelta(days=1)
             app = await service.apply_leave(
                 type("Payload", (), {
                     "employee_id": emp.id,
-                    "leave_type_id": leave_type_id,                            "from_date": date(2026, 11, 18),
-                            "to_date": date(2026, 11, 19),
+                    "leave_type_id": leave_type_id,
+                    "from_date": f_date,
+                    "to_date": t_date,
                     "half_day": False,
                     "half_day_date": None,
                     "reason": "Approve-cancel test",
@@ -357,13 +361,15 @@ def test_rejected_pending_restores_pending(unique_suffix):
             _, _ = await _create_test_data(session, emp.id, leave_type_id, period_id, allocated=5.0)
             await session.commit()
 
-        async with async_session_maker() as session:
             service = LeaveService(session)
+            f_date = now_ist().date() + timedelta(days=5)
+            t_date = f_date + timedelta(days=1)
             app = await service.apply_leave(
                 type("Payload", (), {
                     "employee_id": emp.id,
-                    "leave_type_id": leave_type_id,                            "from_date": date(2026, 11, 25),
-                            "to_date": date(2026, 11, 26),
+                    "leave_type_id": leave_type_id,
+                    "from_date": f_date,
+                    "to_date": t_date,
                     "half_day": False,
                     "half_day_date": None,
                     "reason": "Reject test",

@@ -37,22 +37,25 @@ The system divides human authentication into two separate portals:
   *(Every single employee, manager, HR admin, and the CEO uses this password)*
 - **Accepted Identifiers**: You can log in using either the **Username** or the Indian **Mobile Number** (with `+91` or just 10 digits).
 
-#### Key Pre-Configured Personas
+#### Pre-Configured Test Personas (14 Workforce Accounts + 1 Super Admin)
 
-| Persona / Designation | Business Role | Access Scope | Username | Mobile Number | Official Email |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **CEO / Org Owner** | `ORGANIZATION_OWNER` | Organization | `rajesh.sharma` | `+919810101010` | `rajesh.sharma@bharatdynamics.co.in` |
-| **HR Director** | `HR_ADMIN` | Organization | `priya.nair` | `+919820202020` | `priya.nair@bharatdynamics.co.in` |
-| **Bengaluru HRBP** | `HR_ADMIN` | Unit (`BLR-01`) | `ananya.iyer` | `+919830303030` | `ananya.iyer@bharatdynamics.co.in` |
-| **Hyderabad HRBP** | `HR_ADMIN` | Unit (`HYD-01`) | `suresh.reddy` | `+919840404040` | `suresh.reddy@bharatdynamics.co.in` |
-| **Engineering Manager** | `DEPARTMENT_MANAGER` | Dept (`ENG-HYD`) | `vikram.malhotra` | `+919850505050` | `vikram.malhotra@bharatdynamics.co.in` |
-| **Platform Manager** | `DEPARTMENT_MANAGER` | Dept (`ENG-BLR`) | `rohit.verma` | `+919860606060` | `rohit.verma@bharatdynamics.co.in` |
-| **Product Manager** | `DEPARTMENT_MANAGER` | Dept (`PRD-BLR`) | `sneha.rao` | `+919870707070` | `sneha.rao@bharatdynamics.co.in` |
-| **QA Lead** | `DEPARTMENT_MANAGER` | Dept (`QA-HYD`) | `arjun.kapoor` | `+919880808080` | `arjun.kapoor@bharatdynamics.co.in` |
-| **Finance Manager** | `DEPARTMENT_MANAGER` | Dept (`FIN-BOM`) | `kavita.deshmukh` | `+919890909090` | `kavita.deshmukh@bharatdynamics.co.in` |
-| **Sales Director** | `DEPARTMENT_MANAGER` | Dept (`SLS-BOM`) | `amit.sen` | `+919900000000` | `amit.sen@bharatdynamics.co.in` |
-| **Operations Lead** | `DEPARTMENT_MANAGER` | Dept (`OPS-GGN`) | `deepak.joshi` | `+919911111111` | `deepak.joshi@bharatdynamics.co.in` |
-| **Sample Team Member** | `EMPLOYEE` | Self | `xavier.solanki.112` | `+916910116526` | `xavier.solanki.112@bharatdynamics.co.in` |
+| Persona / Designation | Business Role | Access Scope | Department / Unit | Username | Mobile Number | Reports To |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **CEO / Org Owner** | `ORGANIZATION_OWNER` | Organization | Executive (`ENG-HYD`) | `rajesh.sharma` | `+919810101010` | *(None)* |
+| **HR Director** | `HR_ADMIN` | Organization | HR (`HR-HYD`) | `priya.nair` | `+919820202020` | `rajesh.sharma` |
+| **Hyderabad HRBP** | `HR_ADMIN` | Unit (`HYD-01`) | HR (`HR-HYD`) | `suresh.reddy` | `+919840404040` | `priya.nair` |
+| **Engineering Manager** | `DEPARTMENT_MANAGER` | Dept (`ENG-HYD`) | Engineering (`ENG-HYD`) | `vikram.malhotra` | `+919850505050` | `rajesh.sharma` |
+| **Bengaluru HRBP** | `HR_ADMIN` | Unit (`BLR-01`) | HR (`HR-BLR`) | `ananya.iyer` | `+919830303030` | `priya.nair` |
+| **Platform Manager** | `DEPARTMENT_MANAGER` | Dept (`ENG-BLR`) | Engineering (`ENG-BLR`) | `rohit.verma` | `+919860606060` | `rajesh.sharma` |
+| **Senior Software Eng** | `EMPLOYEE` | Self | Engineering (`ENG-HYD`) | `rahul.sharma` | `+919876543210` | `vikram.malhotra` |
+| **Software Engineer** | `EMPLOYEE` | Self | Engineering (`ENG-HYD`) | `neha.gupta` | `+919876543211` | `vikram.malhotra` |
+| **HR Operations Exec** | `EMPLOYEE` | Self | HR (`HR-HYD`) | `kavya.nair` | `+919876543212` | `suresh.reddy` |
+| **HR Operations Exec** | `EMPLOYEE` | Self | HR (`HR-HYD`) | `arun.kumar` | `+919876543213` | `suresh.reddy` |
+| **Senior Software Eng** | `EMPLOYEE` | Self | Engineering (`ENG-BLR`) | `priya.verma` | `+919876543214` | `rohit.verma` |
+| **Software Engineer** | `EMPLOYEE` | Self | Engineering (`ENG-BLR`) | `amit.patel` | `+919876543215` | `rohit.verma` |
+| **HR Operations Exec** | `EMPLOYEE` | Self | HR (`HR-BLR`) | `pooja.deshmukh` | `+919876543216` | `ananya.iyer` |
+| **HR Operations Exec** | `EMPLOYEE` | Self | HR (`HR-BLR`) | `deepak.joshi` | `+919876543217` | `ananya.iyer` |
+
 
 ---
 
@@ -108,23 +111,19 @@ Always run backend seed commands from `app/api/`:
 cd app/api
 ```
 
-### A. Seed / Update Indian Data (Non-destructive)
+### A. Clean & Re-Seed Fresh Data (Recommended)
+Wipes application records clean (cascade truncates) while preserving Alembic migration versions and the Super Admin account, then populates the lean role dataset:
+```bash
+uv run python db/seed_indian_data.py --clean
+```
+
+### B. Seed / Update Indian Data (Non-destructive)
 Populates missing records without deleting existing data:
 ```bash
 uv run python db/seed_indian_data.py
 ```
 
-### B. Clean & Re-Seed Fresh Data (Recommended)
-Wipes application records clean (cascade truncates) while preserving Alembic migration versions and the Super Admin account, then populates a clean dataset:
-```bash
-uv run python db/seed_indian_data.py --clean
-```
 
-### C. Seed with Custom Workforce Size
-Generate a larger or smaller employee pool:
-```bash
-uv run python db/seed_indian_data.py --clean --num-employees 60
-```
 
 ---
 
@@ -200,9 +199,11 @@ In this codebase, we adhere to the **industry standard pattern used across moder
 
 | Your Goal | Recommended Command (from `app/api/`) |
 | :--- | :--- |
-| **"I want a fresh playground with full Indian data (CEO, HR, 45+ employees, biometric punches, leaves)"** | `uv run python db/seed_indian_data.py --clean` |
+| **"I want a clean database with all 14 role personas and testing flows (2 employees per dept, zero bloat)"** | `uv run python db/seed_indian_data.py --clean` |
 | **"I want an empty database to test empty UI states or fresh onboarding"** | `uv run python cleanup_db.py --execute --confirm "DELETE ALL HRMS DATA"` |
 | **"I made manual test edits and only want to add missing seed records without losing my work"** | `uv run python db/seed_indian_data.py` |
 | **"I just want to see which tables exist and would be emptied without touching anything"** | `uv run python cleanup_db.py` |
+
+
 
 

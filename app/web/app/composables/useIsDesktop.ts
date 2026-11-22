@@ -1,7 +1,12 @@
 export function useIsDesktop() {
-  const isDesktop = ref(import.meta.client ? window.matchMedia('(min-width: 1024px)').matches : true)
+  const isDesktop = ref(
+    import.meta.client && typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+      ? window.matchMedia('(min-width: 1024px)').matches
+      : true
+  )
 
   onMounted(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return
     const media = window.matchMedia('(min-width: 1024px)')
     isDesktop.value = media.matches
 
