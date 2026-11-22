@@ -7,19 +7,19 @@ This document provides a comprehensive guide to database seeding, login portals,
 ## 1. Does the Seed Data Start Automatically on First Server Boot?
 
 ### Short Answer:
-**Only the baseline Super Admin account and Organization are created automatically.** The rich 45+ employee workforce, departments, units, leave ledgers, and attendance data are **not** seeded automatically on startup—they are seeded on-demand via a CLI command.
+**Only the baseline Super Admin account and Organization are created automatically on server boot.** The role-focused workforce personas (14 employees across 4 departments), units, leave balances, and flow records are seeded on-demand via a fast CLI command (`uv run python db/seed_indian_data.py --clean`).
 
 ### Detailed Lifecycle:
 When you start the FastAPI backend (`uv run fastapi dev main.py`):
 1. **Tables & Schema**: FastAPI lifespan checks `settings.is_development`. If true, it runs `create_db_and_tables()`, ensuring all PostgreSQL tables exist.
-2. **Baseline Bootstrap ([`db/seed.py`](file:///D:/Projects/people/app/api/db/seed.py))**:
+2. **Baseline Bootstrap ([`db/seed.py`](file:///home/adawatia/Projects/Personal/people/app/api/db/seed.py))**:
    - If `BOOTSTRAP_SEED_DATA=true` or in development mode, it calls `ensure_seed_data()`.
    - This creates **only**:
      - 1 baseline `Organization` record (`Bharat Dynamics & Tech Solutions Ltd.` or from `.env.local`)
      - 1 technical `superadmin` user account
-3. **Why the Full Workforce Isn't Auto-Seeded on Startup**:
-   - Populating 45+ employees with biometric punches, double-entry leave ledgers, and audit logs takes a few seconds. Running it automatically on every restart would slow down developer reload and `pytest` runs.
-   - Therefore, the complete Indian enterprise dataset is triggered with a single CLI command whenever needed.
+3. **On-Demand Role Workforce Seeding**:
+   - Running `uv run python db/seed_indian_data.py --clean` resets and populates the minimal role-based dataset in under 1 second.
+
 
 ---
 
@@ -89,17 +89,24 @@ app/api/db/
 - Exposes `ensure_indian_seed_data()`: Helper function that invokes `seed_indian_data()`.
 
 ### 2. `db/seed_indian_data.py`
-- Built using Python's `Faker("en_IN")` with seed `42` for 100% deterministic, reproducible data.
+- Streamlined, zero-bloat deterministic seed module.
 - **Enterprise Entities Created**:
   - **Organization**: Bharat Dynamics & Tech Solutions Ltd. (Cyber Gateway, HITEC City, Hyderabad).
-  - **5 Regional Units**: Hyderabad, Bengaluru, Mumbai, Pune, and Gurugram.
-  - **16 Departments**: Engineering, Product, QA, HR, Finance, Operations, Sales across units.
-  - **Designation Ladder**: Standard Indian IT & corporate hierarchy (CEO, CTO, DIR-HR, DIR-ENG, LEAD-PM, SR-SE, QA-ENG, etc.).
-  - **4 Shifts**: General (`GEN`: 09:00–18:00), Morning (`MORN`), Evening (`EVE`), Night (`NGT`).
-  - **17 Gazetted Indian Holidays (2026)**: Republic Day, Maha Shivratri, Holi, Eid, Independence Day, Diwali, Christmas, etc.
-  - **7 Leave Types**: Casual Leave (`CL`), Privilege Leave (`EL`), Sick Leave (`SL`), Compensatory Off (`COMP`), Maternity (`ML`), Paternity (`PL`), Loss of Pay (`LOP`).
-  - **Statutory Profiles**: Authentic Indian PAN (`ABCDE1234F`), 12-digit Aadhaar, and bank accounts across SBI, HDFC, ICICI, Axis, and Kotak with valid IFSC codes.
-  - **Operational Records**: Biometric attendance punches (`BIO-BDTS-xxxx`), attendance regularizations, overtime records, and realistic leave applications (e.g., weddings in Jaipur, Diwali, seasonal fever).
+  - **2 Regional Units**: Hyderabad Tech Campus (`HYD-01`) and Bengaluru Innovation Hub (`BLR-01`).
+  - **4 Departments**: Engineering & Architecture (`ENG-HYD`), HR Operations (`HR-HYD`), Platform Engineering (`ENG-BLR`), HR Operations (`HR-BLR`).
+  - **Role-Focused Workforce**: Exactly 14 workforce employees (CEO, HR Director, 4 Managers, and at least 2 direct report employees per department) + 1 Super Admin (15 total users).
+  - **2 Shifts**: General Day Shift (`GEN`: 09:30–18:30) and Early Morning Shift (`MORN`: 06:30–15:30).
+  - **4 Gazetted Indian Holidays (2026)**: Republic Day, Independence Day, Mahatma Gandhi Jayanti, Diwali.
+  - **5 Leave Types**: Casual Leave (`CL`: 12 days), Privilege Leave (`EL`: 18 days), Sick Leave (`SL`: 10 days), Compensatory Off (`COMP`: 6 days), Loss of Pay (`LOP`).
+  - **Pre-Wired Flow States**:
+    - PENDING Leave Applications (Rahul -> Vikram in Hyd, Neha -> Vikram in Hyd, Priya -> Rohit in Blr for cross-department visibility testing).
+    - APPROVED Leave Application with balance deduction, double-entry ledger debit, and synced ERP outbox event.
+    - PENDING Attendance Regularization & Discrepancy (Rahul -> Vikram).
+    - PENDING Work Arrangement / WFH Request (Rahul -> Vikram).
+    - PENDING Overtime Claim (Rahul -> Vikram).
+    - 3-day recent attendance records with biometric IN/OUT punches.
+    - Targeted manager alerts, employee approval notices, and broadcast announcements.
+
 
 ---
 

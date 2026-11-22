@@ -65,16 +65,30 @@ flowchart LR
 
 ### 2.1 Multi-Window Manual Testing Credentials Cheat-Sheet
 
-To test the system end-to-end (e.g. Employee requests leave in Window 1 ➔ Manager approves in Window 2 ➔ HR audits in Window 3 ➔ Owner views metrics in Window 4), open multiple browser windows or private/incognito tabs and log into these pre-configured personas:
+To test the system end-to-end (e.g. Employee requests leave in Window 1 ➔ Manager approves in Window 2 ➔ HR audits in Window 3 ➔ Owner views metrics in Window 4), open multiple browser windows or private/incognito tabs and log into these pre-configured personas.
 
-| Test Window | Role & Persona | Scope | Username | Mobile Number | Password | Login URL |
-|---|---|---|---|---|---|---|
-| **Window 1** | **Employee** (`rahul.sharma`) | `SELF` | `rahul.sharma` | `+919876543210` | `HrmsDev@2026!` | `/login` |
-| **Window 2** | **Dept Manager** (`vikram.malhotra`) | `DEPARTMENT` (`ENG-HYD`) | `vikram.malhotra` | `+919850505050` | `HrmsDev@2026!` | `/login` |
-| **Window 3** | **Unit HR** (`suresh.reddy`) | `UNIT` (`HYD-01`) | `suresh.reddy` | `+919840404040` | `HrmsDev@2026!` | `/login` |
-| **Window 4** | **Org HR** (`priya.nair`) | `ORGANIZATION` | `priya.nair` | `+919820202020` | `HrmsDev@2026!` | `/login` |
-| **Window 5** | **Org Owner / CEO** (`rajesh.sharma`) | `ORGANIZATION` | `rajesh.sharma` | `+919810101010` | `HrmsDev@2026!` | `/login` |
-| **Window 6** | **Super Admin** (`devansh` / `superadmin`) | *Technical Admin* | `superadmin` | *N/A* | `DevAdmin@123` | `/admin/login` |
+The seed data provisions **at least 2 direct report employees in each department**, making it easy to test team views, multi-item approval queues, and cross-department privacy boundaries:
+
+| Persona | Role | Scope | Department / Unit | Username | Mobile Number | Reports To | Pre-Wired Test State |
+|---|---|---|---|---|---|---|---|
+| **CEO / Org Owner** | `ORGANIZATION_OWNER` | `ORGANIZATION` | Executive (`ENG-HYD`) | `rajesh.sharma` | `+919810101010` | *(None)* | Executive rollups & cross-unit KPIs |
+| **HR Director** | `HR_ADMIN` | `ORGANIZATION` | HR (`HR-HYD`) | `priya.nair` | `+919820202020` | `rajesh.sharma` | Company-wide workforce & policy management |
+| **Hyderabad HRBP** | `HR_ADMIN` | `UNIT` | HR (`HR-HYD`) | `suresh.reddy` | `+919840404040` | `priya.nair` | Unit operations (manages Kavya & Arun) |
+| **Engineering Mgr** | `DEPARTMENT_MANAGER` | `DEPARTMENT` | Engineering (`ENG-HYD`) | `vikram.malhotra` | `+919850505050` | `rajesh.sharma` | Team approvals inbox (Rahul & Neha pending) |
+| **Bengaluru HRBP** | `HR_ADMIN` | `UNIT` | HR (`HR-BLR`) | `ananya.iyer` | `+919830303030` | `priya.nair` | Unit operations (manages Pooja & Deepak) |
+| **Platform Mgr** | `DEPARTMENT_MANAGER` | `DEPARTMENT` | Engineering (`ENG-BLR`) | `rohit.verma` | `+919860606060` | `rajesh.sharma` | Team approvals inbox (Priya pending; Rahul hidden) |
+| **Sr. Software Eng** | `EMPLOYEE` | `SELF` | Engineering (`ENG-HYD`) | `rahul.sharma` | `+919876543210` | `vikram.malhotra` | 1 PENDING leave, 1 PENDING correction, 1 WFH |
+| **Software Eng** | `EMPLOYEE` | `SELF` | Engineering (`ENG-HYD`) | `neha.gupta` | `+919876543211` | `vikram.malhotra` | 1 PENDING Sick Leave |
+| **HR Operations** | `EMPLOYEE` | `SELF` | HR (`HR-HYD`) | `kavya.nair` | `+919876543212` | `suresh.reddy` | Self-service attendance & leave balances |
+| **HR Operations** | `EMPLOYEE` | `SELF` | HR (`HR-HYD`) | `arun.kumar` | `+919876543213` | `suresh.reddy` | Self-service attendance & leave balances |
+| **Sr. Software Eng** | `EMPLOYEE` | `SELF` | Engineering (`ENG-BLR`) | `priya.verma` | `+919876543214` | `rohit.verma` | 1 PENDING leave (hidden from Vikram) |
+| **Software Eng** | `EMPLOYEE` | `SELF` | Engineering (`ENG-BLR`) | `amit.patel` | `+919876543215` | `rohit.verma` | Self-service attendance & leave balances |
+| **HR Operations** | `EMPLOYEE` | `SELF` | HR (`HR-BLR`) | `pooja.deshmukh` | `+919876543216` | `ananya.iyer` | Self-service attendance & leave balances |
+| **HR Operations** | `EMPLOYEE` | `SELF` | HR (`HR-BLR`) | `deepak.joshi` | `+919876543217` | `ananya.iyer` | Self-service attendance & leave balances |
+| **Super Admin** | `SUPER_ADMIN` | `SYSTEM` | *(Admin Portal)* | `superadmin` / `devansh` | *N/A* | *(None)* | System audit, ERP monitoring, MFA resets |
+
+* **Workforce Login Portal**: `http://localhost:3000/login` (Universal Password: `HrmsDev@2026!`, login via Username or Phone)
+* **Technical Admin Portal**: `http://localhost:3000/admin/login` (Password: `DevAdmin@123`, login via Username only)
 
 ---
 
