@@ -85,20 +85,32 @@ async function copyCodes() {
   if (!validCodes.value.length) return
   const text = validCodes.value.join('\n')
 
+  let succeeded = false
   try {
     if (navigator?.clipboard?.writeText) {
       await navigator.clipboard.writeText(text)
-    } else {
+      succeeded = true
+    }
+  } catch {
+    // navigator.clipboard may fail in unfocused or restricted context; fall through to textarea fallback
+  }
+
+  if (!succeeded) {
+    try {
       const textarea = document.createElement('textarea')
       textarea.value = text
       textarea.style.position = 'fixed'
       textarea.style.opacity = '0'
       document.body.appendChild(textarea)
       textarea.select()
-      document.execCommand('copy')
+      succeeded = document.execCommand('copy')
       document.body.removeChild(textarea)
+    } catch {
+      succeeded = false
     }
+  }
 
+  if (succeeded) {
     copied.value = true
     setTimeout(() => {
       copied.value = false
@@ -109,7 +121,7 @@ async function copyCodes() {
       description: 'All recovery codes have been copied to your clipboard.',
       color: 'success'
     })
-  } catch {
+  } else {
     toast.add({
       title: 'Copy unavailable',
       description: 'Select and copy the recovery codes manually.',
@@ -153,7 +165,7 @@ async function copyCodes() {
     <div class="grid grid-cols-1 gap-1.5 rounded-lg border border-[var(--people-border)] bg-muted/5 p-3 font-mono text-xs sm:grid-cols-2">
       <div
         v-for="(recovery, index) in validCodes"
-        :key="recovery"
+        :key="`${index}-${recovery}`"
         class="flex items-center justify-between rounded px-2 py-1 text-xs tracking-wider"
       >
         <span class="select-none text-muted">{{ String(index + 1).padStart(2, '0') }}.</span>

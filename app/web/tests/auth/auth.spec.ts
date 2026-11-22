@@ -56,7 +56,7 @@ test('both account types: visibility, pending, error and correct payload', async
     await page.getByRole('button', { name: /^Sign in/ }).click()
     await expect(page.getByRole('button', { name: /^Sign in/ })).toBeDisabled()
     await page.getByLabel('Password', { exact: true }).press('Enter')
-    await expect(page.getByRole('alert')).toContainText('Try again in 30 seconds.')
+    await expect(page.getByRole('alert')).toContainText(/Too many failed login attempts/i)
     expect(requests).toBe(1)
     await page.unroute('**/api/session/login')
   }
@@ -98,7 +98,7 @@ test('MFA enrollment requires desktop screen and provides recovery key download 
   await page.setViewportSize({ width: 360, height: 640 })
   await open(page, '/admin/login')
   await credentials(page)
-  await page.getByRole('button', { name: 'Sign in to administration' }).click()
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click()
   await expect(page.getByText('Desktop required for setup')).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
 
