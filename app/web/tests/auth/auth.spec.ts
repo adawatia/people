@@ -90,18 +90,32 @@ test('MFA supports recovery codes, errors and cancellation', async ({ page }) =>
   await expect(page.getByRole('heading', { name: 'Sign in to Emploi' })).toBeVisible()
 })
 
-test('MFA enrollment remains readable on small screens', async ({ page }) => {
-  await page.setViewportSize({ width: 360, height: 640 })
+test('MFA enrollment requires desktop screen and provides recovery key download on desktop', async ({ page }) => {
   await page.route('**/api/session/login', route => route.fulfill({ json: { mfa_required: true, mfa_token: 'mock-token', enrollment_required: true, expires_in: 300 } }))
   await page.route('**/api/session/mfa/enroll', route => route.fulfill({ json: { secret: 'JBSWY3DPEHPK3PXP', otpauth_uri: 'otpauth://totp/People:test?secret=JBSWY3DPEHPK3PXP&issuer=People', recovery_codes: ['ABCD-EFGH', 'IJKL-MNOP'] } }))
+
+  // 1. Mobile screen: verifies desktop requirement advisory is shown and fits viewport
+  await page.setViewportSize({ width: 360, height: 640 })
   await open(page, '/admin/login')
   await credentials(page)
   await page.getByRole('button', { name: 'Sign in to administration' }).click()
+  await expect(page.getByText('Desktop required for setup')).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+
+  // 2. Desktop screen: verifies QR code, manual entry, recovery codes, download and copy options
+  await page.setViewportSize({ width: 1280, height: 800 })
   await expect(page.getByRole('img', { name: /QR code/ })).toBeVisible()
   await page.getByRole('button', { name: /Can’t scan/ }).click()
   await expect(page.getByText('JBSW Y3DP EHPK 3PXP')).toBeVisible()
   await expect(page.getByText('ABCD-EFGH', { exact: true })).toBeVisible()
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await expect(page.getByRole('button', { name: 'Download (.txt)' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Copy all' })).toBeVisible()
+
+  // Verify download triggers
+  const downloadPromise = page.waitForEvent('download')
+  await page.getByRole('button', { name: 'Download (.txt)' }).click()
+  const download = await downloadPromise
+  expect(download.suggestedFilename()).toBe('people-mfa-recovery-codes.txt')
 })
 
 test('recovery: keyboard submission, mismatch, completion and expiry', async ({ page }) => {

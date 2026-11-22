@@ -72,6 +72,7 @@ async function savePassword() {
 }
 
 // ── MFA ──────────────────────────────────────────────────────────────────────
+const { isDesktop } = useIsDesktop()
 const mfaStatus = ref<MfaStatus | null>(null)
 const loadingMfa = ref(true)
 const mfaStatusError = ref('')
@@ -100,6 +101,14 @@ async function loadMfaStatus() {
 /** Step 1 of enrolment: issue a secret (password re-verified server-side). */
 async function startEnrollment() {
   if (busyMfa.value || busyCodes.value) return
+  if (!isDesktop.value) {
+    toast.add({
+      title: 'Desktop required',
+      description: 'MFA setup requires a desktop browser to scan the QR code and download your recovery keys.',
+      color: 'warning'
+    })
+    return
+  }
   mfaActionError.value = ''
   busyMfa.value = true
   try {
@@ -499,22 +508,20 @@ onMounted(async () => {
           title="Your current authenticator still works"
           description="It keeps signing you in, and your existing recovery codes stay valid, until you confirm the new one below."
         />
+        <UAlert
+          v-if="!isDesktop"
+          color="warning"
+          variant="soft"
+          icon="i-lucide-monitor"
+          title="Desktop required for setup"
+          description="Authenticator setup must be completed on a desktop browser so you can scan the QR code with your mobile authenticator app. Please open Settings on your desktop to complete setup."
+        />
         <div class="space-y-3 rounded-xl border border-[var(--people-border)] p-4">
           <MfaQrCode
             :uri="pendingEnrollment.otpauth_uri"
             :secret="pendingEnrollment.secret"
           />
-          <div v-if="pendingEnrollment.recovery_codes.length">
-            <p class="text-xs font-medium uppercase tracking-wide text-muted">
-              Recovery codes (shown once)
-            </p>
-            <div class="mt-2 grid gap-2 font-mono text-sm sm:grid-cols-2">
-              <span
-                v-for="recovery in pendingEnrollment.recovery_codes"
-                :key="recovery"
-              >{{ recovery }}</span>
-            </div>
-          </div>
+          <MfaRecoveryCodes :codes="pendingEnrollment.recovery_codes" />
         </div>
         <UFormField
           label="Code from the app"
@@ -549,6 +556,14 @@ onMounted(async () => {
       </template>
 
       <template v-else-if="mfaStatus && !loadingMfa">
+        <UAlert
+          v-if="!isDesktop"
+          color="neutral"
+          variant="soft"
+          icon="i-lucide-monitor"
+          title="Desktop required to set up MFA"
+          description="Setting up or replacing an authenticator requires a desktop computer so you can scan the QR code and safely store your recovery keys."
+        />
         <UFormField
           label="Current password"
           name="mfa-password"
@@ -566,7 +581,7 @@ onMounted(async () => {
         <div class="flex flex-wrap gap-3">
           <UButton
             :loading="busyMfa"
-            :disabled="busyMfa || busyCodes || !mfaPassword"
+            :disabled="busyMfa || busyCodes || !mfaPassword || !isDesktop"
             icon="i-lucide-shield-plus"
             @click="startEnrollment"
           >
@@ -597,27 +612,15 @@ onMounted(async () => {
 
         <div
           v-if="regeneratedCodes.length"
-          class="space-y-2 rounded-xl border border-[var(--people-border)] p-4"
+          class="rounded-xl border border-[var(--people-border)] p-4"
         >
-          <p class="text-xs font-medium uppercase tracking-wide text-muted">
-            New recovery codes (shown once)
-          </p>
-          <div class="grid gap-2 font-mono text-sm sm:grid-cols-2">
-            <span
-              v-for="code in regeneratedCodes"
-              :key="code"
-            >{{ code }}</span>
-          </div>
-          <p class="text-xs text-muted">
-            Save these now. Your previous codes no longer work. Each one signs you in once if you lose your device.
-          </p>
-          <UButton
-            variant="ghost"
-            size="sm"
-            @click="regeneratedCodes = []"
-          >
-            I’ve saved them
-          </UButton>
+          <MfaRecoveryCodes
+            :codes="regeneratedCodes"
+            title="New recovery codes (shown once)"
+            description="Save these now. Your previous codes no longer work. Each one signs you in once if you lose your device."
+            dismissable
+            @dismiss="regeneratedCodes = []"
+          />
         </div>
       </template>
     </section>
