@@ -3,8 +3,14 @@ name: Deploy to AWS EC2
 on:
   push:
     branches:
+      - uat
       - development
-  workflow_dispatch: # Allows manual deployment trigger from GitHub UI
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to deploy'
+        required: false
+        default: 'uat'
 
 jobs:
   deploy:
@@ -21,4 +27,4 @@ jobs:
           port: ${{ secrets.EC2_PORT || 22 }}
           script_stop: true
           script: |
-            /var/www/people/tools/deploy.sh
+            /var/www/people/tools/deploy.sh "${{ inputs.branch || github.ref_name }}"

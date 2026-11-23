@@ -7,18 +7,22 @@ set -eo pipefail
 
 export PATH="/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 
+# Target branch passed as $1 (defaults to currently checked-out branch, or 'uat')
+TARGET_BRANCH="${1:-$(git -C /var/www/people rev-parse --abbrev-ref HEAD 2>/dev/null || echo "uat")}"
+
 echo "=================================================="
 echo "🚀 People HRMS Deployment Triggered"
+echo "🌿 Target Branch: ${TARGET_BRANCH}"
 echo "📅 Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
 echo "💻 Host: $(hostname)"
 echo "=================================================="
 
 # 1. Update Repository Code
-echo "📥 [1/5] Fetching and pulling latest development branch..."
+echo "📥 [1/5] Fetching and pulling latest ${TARGET_BRANCH} branch..."
 cd /var/www/people
-git fetch origin development
-git checkout -f development
-git reset --hard origin/development
+git fetch origin "${TARGET_BRANCH}"
+git checkout -f "${TARGET_BRANCH}"
+git reset --hard "origin/${TARGET_BRANCH}"
 
 # 2. Update Backend Runtime & Migrations
 echo "⚙️ [2/5] Updating backend dependencies and database schema..."
