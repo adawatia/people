@@ -386,6 +386,13 @@ sudo systemctl enable --now hrms-backend
 sudo systemctl enable --now hrms-frontend
 ```
 
+#### 4. Configure Passwordless Daemon Restarts (for CI/CD & Deploy Scripts):
+Allow the `ubuntu` user to restart the application services without being prompted for a `sudo` password. This is required so that automated, non-interactive deployment scripts (`tools/deploy.sh` or GitHub Actions over SSH) can reload the daemons without hanging:
+```bash
+sudo bash -c 'echo "ubuntu ALL=(ALL) NOPASSWD: /bin/systemctl restart hrms-backend, /bin/systemctl restart hrms-frontend" > /etc/sudoers.d/hrms-deploy'
+```
+*(To verify this rule: `sudo -l -U ubuntu`. It strictly permits restarting only these two services).*
+
 ---
 
 ### Phase 10: Verification & Health Checks
