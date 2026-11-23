@@ -39,22 +39,47 @@ sudo systemctl restart hrms-frontend
 
 # 5. Smoke Test & Health Check
 echo "🩺 [5/5] Running service health checks..."
-sleep 4
 
-# Check backend API
-if curl -sf http://127.0.0.1:8000/health > /dev/null; then
+# Check backend API with retry loop (FastAPI startup takes 5-10s on t3.small after build)
+BACKEND_OK=false
+for i in $(seq 1 10); do
+    if curl -sf http://127.0.0.1:8000/health > /dev/null; then
+        BACKEND_OK=true
+        break
+    fi
+    echo "  ⏳ Waiting for backend API to initialize ($i/10)..."
+    sleep 2
+done
+
+if [ "$BACKEND_OK" = true ]; then
     echo "  ✅ Backend API (FastAPI) is healthy!"
 else
     echo "  ❌ Backend health check failed on http://127.0.0.1:8000/health"
+    echo "  📋 Checking backend service status:"
+    sudo systemctl status hrms-backend --no-pager || true
+    echo "  📋 Recent backend system logs:"
+    journalctl -u hrms-backend -n 30 --no-pager || true
     exit 1
 fi
 
-# Check frontend SSR
-FRONTEND_STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3000 || echo "000")
-if [ "$FRONTEND_STATUS" = "200" ] || [ "$FRONTEND_STATUS" = "302" ]; then
+# Check frontend SSR with retry loop
+FRONTEND_OK=false
+for i in $(seq 1 8); do
+    FRONTEND_STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3000 || echo "000")
+    if [ "$FRONTEND_STATUS" = "200" ] || [ "$FRONTEND_STATUS" = "302" ]; then
+        FRONTEND_OK=true
+        break
+    fi
+    echo "  ⏳ Waiting for frontend SSR to initialize ($i/8)..."
+    sleep 2
+done
+
+if [ "$FRONTEND_OK" = true ]; then
     echo "  ✅ Frontend Server (Nuxt Nitro) is healthy! (HTTP $FRONTEND_STATUS)"
 else
     echo "  ❌ Frontend health check failed with HTTP $FRONTEND_STATUS"
+    echo "  📋 Recent frontend system logs:"
+    journalctl -u hrms-frontend -n 30 --no-pager || true
     exit 1
 fi
 
