@@ -1,10 +1,9 @@
-name: Deploy to AWS EC2
+name: Deploy to UAT (AWS EC2)
 
 on:
   push:
     branches:
       - uat
-      - development
   workflow_dispatch:
     inputs:
       branch:
@@ -14,7 +13,7 @@ on:
 
 jobs:
   deploy:
-    name: Deploy People HRMS to EC2
+    name: Deploy People HRMS UAT to EC2
     runs-on: ubuntu-latest
 
     steps:

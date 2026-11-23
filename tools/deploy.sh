@@ -7,11 +7,11 @@ set -eo pipefail
 
 export PATH="/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 
-# Target branch passed as $1 (defaults to currently checked-out branch, or 'uat')
-TARGET_BRANCH="${1:-$(git -C /var/www/people rev-parse --abbrev-ref HEAD 2>/dev/null || echo "uat")}"
+# Target branch passed as $1 (defaults strictly to 'uat')
+TARGET_BRANCH="${1:-uat}"
 
 echo "=================================================="
-echo "🚀 People HRMS Deployment Triggered"
+echo "🚀 People HRMS UAT Deployment Triggered"
 echo "🌿 Target Branch: ${TARGET_BRANCH}"
 echo "📅 Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
 echo "💻 Host: $(hostname)"

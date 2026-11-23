@@ -1,6 +1,8 @@
-# People HRMS — Testing Deployment & Documentation Reference
+# People HRMS — UAT Deployment & Testing Reference
 
-**Live Environment**: [https://16-179-29-185.sslip.io](https://16-179-29-185.sslip.io)  
+**Environment**: UAT (User Acceptance Testing)  
+**Tracked Branch**: `uat`  
+**Live Host**: [https://16-179-29-185.sslip.io](https://16-179-29-185.sslip.io)  
 **Host Architecture**: AWS EC2 `t3.small` (2 vCPU, 2 GiB RAM, 4 GiB Swap, Ubuntu 24.04 LTS)  
 **Security**: Let's Encrypt Wildcard-compatible SSL (`sslip.io`), `__Host-` prefixed secure cookies, HSTS
 
@@ -124,7 +126,7 @@ Internet (Port 80/443)
 
 ### Continuous Deployment (CI/CD) Pipeline
 
-An automated GitHub Actions workflow is configured in [`.github/workflows/deploy.yml`](../../.github/workflows/deploy.yml) that triggers on every push to the `development` branch.
+An automated GitHub Actions workflow is configured in [`.github/workflows/deploy.yml`](../../.github/workflows/deploy.yml) that triggers on every push to the `uat` branch.
 
 It invokes the version-controlled deployment script [`tools/deploy.sh`](../../tools/deploy.sh) on the server.
 
