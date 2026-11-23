@@ -1,5 +1,5 @@
 import type { CurrentUser, LoginPayload, LoginResult, MfaChallenge } from '#shared/types/auth'
-import { apiUrl, clearSessionCookies, setAccessCookie, setRefreshCookie, upstreamError } from '../../utils/hrms'
+import { apiUrl, clearSessionCookies, clientForwardHeaders, setAccessCookie, setRefreshCookie, upstreamError } from '../../utils/hrms'
 
 /** Mirror of the API's `LoginResponse`: either a session or an MFA challenge. */
 interface UpstreamLoginResponse {
@@ -50,7 +50,10 @@ export default defineEventHandler(async (event): Promise<LoginResult> => {
     const auth = await $fetch<UpstreamLoginResponse>(apiUrl(event, loginPath), {
       method: 'POST',
       body: form,
-      headers: { 'content-type': 'application/x-www-form-urlencoded' }
+      headers: {
+        ...clientForwardHeaders(event),
+        'content-type': 'application/x-www-form-urlencoded'
+      }
     })
 
     if (auth.mfa_required) {
@@ -76,7 +79,10 @@ export default defineEventHandler(async (event): Promise<LoginResult> => {
 
     try {
       return await $fetch<CurrentUser>(apiUrl(event, 'users/me'), {
-        headers: { Authorization: `Bearer ${auth.access_token}` }
+        headers: {
+          ...clientForwardHeaders(event),
+          Authorization: `Bearer ${auth.access_token}`
+        }
       })
     } catch (error) {
       clearSessionCookies(event)

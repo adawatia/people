@@ -1,5 +1,5 @@
 import type { CurrentUser } from '#shared/types/auth'
-import { apiUrl, clearSessionCookies, setAccessCookie, setRefreshCookie, upstreamError } from '../../utils/hrms'
+import { apiUrl, clearSessionCookies, clientForwardHeaders, setAccessCookie, setRefreshCookie, upstreamError } from '../../utils/hrms'
 
 interface UpstreamLoginResponse {
   access_token?: string | null
@@ -32,7 +32,8 @@ export default defineEventHandler(async (event): Promise<CurrentUser> => {
     const path = payload.enrollment ? 'auth/mfa/activate' : 'auth/mfa/verify'
     const auth = await $fetch<UpstreamLoginResponse>(apiUrl(event, path), {
       method: 'POST',
-      body: { mfa_token: payload.mfa_token, code: payload.code.trim() }
+      body: { mfa_token: payload.mfa_token, code: payload.code.trim() },
+      headers: clientForwardHeaders(event)
     })
     if (!auth.access_token) {
       throw createError({ statusCode: 502, statusMessage: 'The HRMS service did not return a session.' })
@@ -41,7 +42,10 @@ export default defineEventHandler(async (event): Promise<CurrentUser> => {
     if (auth.refresh_token) setRefreshCookie(event, auth.refresh_token, auth.absolute_expires_at)
     try {
       return await $fetch<CurrentUser>(apiUrl(event, 'users/me'), {
-        headers: { Authorization: `Bearer ${auth.access_token}` }
+        headers: {
+          ...clientForwardHeaders(event),
+          Authorization: `Bearer ${auth.access_token}`
+        }
       })
     } catch (error) {
       clearSessionCookies(event)

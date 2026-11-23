@@ -1,0 +1,24 @@
+name: Deploy to AWS EC2
+
+on:
+  push:
+    branches:
+      - development
+  workflow_dispatch: # Allows manual deployment trigger from GitHub UI
+
+jobs:
+  deploy:
+    name: Deploy People HRMS to EC2
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Trigger Server Deployment via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME || 'ubuntu' }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          port: ${{ secrets.EC2_PORT || 22 }}
+          script_stop: true
+          script: |
+            /var/www/people/tools/deploy.sh

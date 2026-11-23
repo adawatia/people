@@ -2,6 +2,7 @@ import type { CurrentUser } from '#shared/types/auth'
 import {
   apiUrl,
   clearSessionCookies,
+  clientForwardHeaders,
   REFRESH_COOKIE,
   refreshSession,
   SESSION_COOKIE,
@@ -19,7 +20,10 @@ import {
  */
 export default defineEventHandler(async (event): Promise<CurrentUser> => {
   const fetchUser = (token: string) => $fetch<CurrentUser>(apiUrl(event, 'users/me'), {
-    headers: { Authorization: `Bearer ${token}` }
+    headers: {
+      ...clientForwardHeaders(event),
+      Authorization: `Bearer ${token}`
+    }
   })
 
   const token = getCookie(event, SESSION_COOKIE)

@@ -1,4 +1,4 @@
-import { apiUrl, clearSessionCookies, REFRESH_COOKIE, upstreamStatus } from '../../utils/hrms'
+import { apiUrl, clearSessionCookies, clientForwardHeaders, REFRESH_COOKIE, upstreamStatus } from '../../utils/hrms'
 
 /**
  * Log out: revoke the server-side session, then clear both cookies.
@@ -11,7 +11,11 @@ export default defineEventHandler(async (event) => {
   const refresh = getCookie(event, REFRESH_COOKIE)
   if (refresh) {
     try {
-      await $fetch(apiUrl(event, 'auth/session'), { method: 'DELETE', body: { refresh_token: refresh } })
+      await $fetch(apiUrl(event, 'auth/session'), {
+        method: 'DELETE',
+        body: { refresh_token: refresh },
+        headers: clientForwardHeaders(event)
+      })
     } catch (error) {
       // 404/401 means the session was already gone server-side.
       const status = upstreamStatus(error)

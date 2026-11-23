@@ -231,7 +231,7 @@ async function revokeAllSessions() {
   }
 }
 
-const deviceLabel = (session: SessionSummary) => session.user_agent?.split(')')[0]?.replace(/^Mozilla\/5\.0 \(/, '') || 'Unknown device'
+const deviceLabel = (session: SessionSummary) => formatDeviceLabel(session.user_agent)
 const shortTime = (value: string | null | undefined) => value ? new Date(value).toLocaleString() : '—'
 
 onMounted(async () => {

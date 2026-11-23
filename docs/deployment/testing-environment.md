@@ -122,6 +122,34 @@ Internet (Port 80/443)
                                                   PostgreSQL (127.0.0.1:5432)
 ```
 
+### Continuous Deployment (CI/CD) Pipeline
+
+An automated GitHub Actions workflow is configured in [`.github/workflows/deploy.yml`](../../.github/workflows/deploy.yml) that triggers on every push to the `development` branch.
+
+It invokes the version-controlled deployment script [`tools/deploy.sh`](../../tools/deploy.sh) on the server.
+
+#### One-Time Setup on EC2:
+1. Ensure `tools/deploy.sh` is executable:
+   ```bash
+   chmod +x /var/www/people/tools/deploy.sh
+   ```
+2. Allow passwordless daemon restart for `ubuntu` user:
+   ```bash
+   sudo bash -c 'echo "ubuntu ALL=(ALL) NOPASSWD: /bin/systemctl restart hrms-backend, /bin/systemctl restart hrms-frontend" > /etc/sudoers.d/hrms-deploy'
+   ```
+
+#### One-Time Setup on GitHub:
+In your GitHub repository settings, navigate to **Settings** → **Secrets and variables** → **Actions** and add:
+- `EC2_HOST`: Your EC2 public IP (`16.179.29.185`) or domain (`16-179-29-185.sslip.io`).
+- `EC2_SSH_KEY`: The contents of your private `.pem` SSH key file.
+- `EC2_USERNAME` *(optional, defaults to `ubuntu`)*: The SSH user.
+
+#### Manual One-Command Deployment (Without GitHub Actions)
+You can also run the deployment script directly on the server at any time:
+```bash
+/var/www/people/tools/deploy.sh
+```
+
 ### Essential System Management
 
 ```bash

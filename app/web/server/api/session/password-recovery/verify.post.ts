@@ -1,4 +1,4 @@
-import { apiUrl, upstreamError } from '../../../utils/hrms'
+import { apiUrl, clientForwardHeaders, upstreamError } from '../../../utils/hrms'
 
 export default defineEventHandler(async (event) => {
   const payload = await readBody<{ recovery_token?: string, code?: string }>(event)
@@ -6,7 +6,8 @@ export default defineEventHandler(async (event) => {
   try {
     return await $fetch(apiUrl(event, 'auth/password-recovery/verify'), {
       method: 'POST',
-      body: { recovery_token: payload.recovery_token, code: payload.code.trim() }
+      body: { recovery_token: payload.recovery_token, code: payload.code.trim() },
+      headers: clientForwardHeaders(event)
     })
   } catch (error) { throw upstreamError(error, event) }
 })

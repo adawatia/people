@@ -9,7 +9,7 @@ function handler({ retryStatus, refreshStatus, initialStatus = 401 }) {
   const calls = { upstream: 0, refresh: 0, clear: 0, access: 0, refreshCookie: 0 }
   const context = {
     defineEventHandler: fn => fn, getRouterParam: () => 'leaves/1/approve', getMethod: () => 'PATCH', getQuery: () => ({ page: '2' }), readBody: async () => ({}), apiUrl: () => '/api/v1/leaves/1/approve',
-    getCookie: () => 'cookie', SESSION_COOKIE: 'access', REFRESH_COOKIE: 'refresh',
+    getCookie: () => 'cookie', SESSION_COOKIE: 'access', REFRESH_COOKIE: 'refresh', clientForwardHeaders: () => ({}),
     upstreamStatus: error => error.statusCode, upstreamError: error => error,
     clearSessionCookies: () => calls.clear++, setAccessCookie: () => calls.access++, setRefreshCookie: () => calls.refreshCookie++,
     refreshSession: async () => {

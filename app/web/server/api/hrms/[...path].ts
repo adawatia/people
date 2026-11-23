@@ -1,6 +1,7 @@
 import {
   apiUrl,
   clearSessionCookies,
+  clientForwardHeaders,
   REFRESH_COOKIE,
   refreshSession,
   SESSION_COOKIE,
@@ -30,7 +31,10 @@ export default defineEventHandler(async (event) => {
     query,
     body,
     retry: 0,
-    headers: { Authorization: `Bearer ${token}` }
+    headers: {
+      ...clientForwardHeaders(event),
+      Authorization: `Bearer ${token}`
+    }
   })
 
   const token = getCookie(event, SESSION_COOKIE)

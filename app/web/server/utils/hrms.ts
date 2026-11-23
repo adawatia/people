@@ -27,10 +27,41 @@ export function sessionToken(event: H3Event) {
   return getCookie(event, SESSION_COOKIE)
 }
 
+/**
+ * Forward browser context headers (User-Agent, client IP, Request ID) to the
+ * FastAPI backend so that session tables, throttling, and audit events reflect
+ * the actual device and caller rather than the local Node.js BFF process.
+ */
+export function clientForwardHeaders(event?: H3Event): Record<string, string> {
+  if (!event) return {}
+  const headers: Record<string, string> = {}
+
+  const ua = getRequestHeader(event, 'user-agent')
+  if (ua) {
+    headers['user-agent'] = ua
+  }
+
+  const clientIp = getRequestIP(event, { xForwardedFor: true }) || getRequestHeader(event, 'x-forwarded-for')
+  if (clientIp) {
+    headers['x-forwarded-for'] = clientIp
+    headers['x-real-ip'] = clientIp
+  }
+
+  const requestId = getRequestHeader(event, 'x-request-id')
+  if (requestId) {
+    headers['x-request-id'] = requestId
+  }
+
+  return headers
+}
+
 export function authHeaders(event: H3Event) {
   const token = sessionToken(event)
   if (!token) throw createError({ statusCode: 401, statusMessage: 'Your session has expired.' })
-  return { Authorization: `Bearer ${token}` }
+  return {
+    ...clientForwardHeaders(event),
+    Authorization: `Bearer ${token}`
+  }
 }
 
 /** Shared attributes: HttpOnly, Secure outside development, SameSite=Lax, Path=/. */
@@ -136,7 +167,8 @@ export function refreshSession(event: H3Event, refreshToken: string): Promise<Re
 
   const pending = $fetch<RefreshedSession>(apiUrl(event, 'auth/session/refresh'), {
     method: 'POST',
-    body: { refresh_token: refreshToken }
+    body: { refresh_token: refreshToken },
+    headers: clientForwardHeaders(event)
   }).then((session) => {
     recentRefreshes.set(refreshToken, { session, expiresAt: Date.now() + REFRESH_GRACE_MS })
     if (recentRefreshes.size > MAX_RECENT_REFRESHES) {

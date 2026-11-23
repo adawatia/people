@@ -420,7 +420,46 @@ curl -I https://${DOMAIN}
 
 ---
 
-## 5. Day-2 Operations Runbook
+## 5. Automated CI/CD Pipeline (GitHub Actions)
+
+Continuous Deployment is configured via GitHub Actions in [`.github/workflows/deploy.yml`](../../.github/workflows/deploy.yml) and executes the server deployment script [`tools/deploy.sh`](../../tools/deploy.sh) over SSH on every push to the `development` branch.
+
+```
+git push origin development
+         │
+         ▼
+GitHub Actions CI/CD
+         │
+         ▼ (SSH over Port 22)
+AWS EC2 (/var/www/people/tools/deploy.sh)
+         ├── 1. git pull origin development
+         ├── 2. uv sync && alembic upgrade head
+         ├── 3. pnpm install && NODE_OPTIONS="--max-old-space-size=1536" pnpm build
+         ├── 4. sudo systemctl restart hrms-backend hrms-frontend
+         └── 5. curl health verification (:8000 and :3000)
+```
+
+### Initial One-Time Configuration
+
+#### On the EC2 Server:
+1. Ensure the deployment script is executable:
+   ```bash
+   chmod +x /var/www/people/tools/deploy.sh
+   ```
+2. Enable passwordless systemctl restart for the deployment script:
+   ```bash
+   sudo bash -c 'echo "ubuntu ALL=(ALL) NOPASSWD: /bin/systemctl restart hrms-backend, /bin/systemctl restart hrms-frontend" > /etc/sudoers.d/hrms-deploy'
+   ```
+
+#### On GitHub Repository Settings:
+Navigate to **Settings** → **Secrets and variables** → **Actions** → **New repository secret**:
+- `EC2_HOST`: Your EC2 public IP (`16.179.29.185`) or domain (`16-179-29-185.sslip.io`).
+- `EC2_SSH_KEY`: The contents of your private `.pem` SSH key file.
+- `EC2_USERNAME` *(optional, defaults to `ubuntu`)*: The SSH user.
+
+---
+
+## 6. Day-2 Operations Runbook
 
 ### Streaming Application Logs
 ```bash
@@ -466,7 +505,7 @@ uv run python db/seed_indian_data.py --clean
 
 ---
 
-## 6. Troubleshooting FAQ
+## 7. Troubleshooting FAQ
 
 ### 1. `FATAL: password authentication failed for user "hrms-user"`
 - **Cause**: The PostgreSQL password does not match `DATABASE_URL` in `app/api/.env`, or the password contains special characters (`@`, `:`, `/`) breaking URL parsing.

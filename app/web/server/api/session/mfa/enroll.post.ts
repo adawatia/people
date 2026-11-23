@@ -1,5 +1,5 @@
 import type { MfaEnrollment } from '#shared/types/auth'
-import { apiUrl, upstreamError } from '../../../utils/hrms'
+import { apiUrl, clientForwardHeaders, upstreamError } from '../../../utils/hrms'
 
 /**
  * Start first-time MFA enrolment for the account named by a login challenge.
@@ -17,7 +17,8 @@ export default defineEventHandler(async (event): Promise<MfaEnrollment> => {
   try {
     return await $fetch<MfaEnrollment>(apiUrl(event, 'auth/mfa/enroll'), {
       method: 'POST',
-      body: { mfa_token: payload.mfa_token }
+      body: { mfa_token: payload.mfa_token },
+      headers: clientForwardHeaders(event)
     })
   } catch (error) {
     throw upstreamError(error, event)
