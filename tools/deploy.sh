@@ -34,7 +34,10 @@ uv run alembic upgrade head
 echo "⚙️ [3/5] Installing frontend dependencies and compiling Nuxt..."
 cd /var/www/people/app/web
 pnpm install --frozen-lockfile || pnpm install
-NODE_OPTIONS="--max-old-space-size=1536" pnpm build
+# Prevent lock collisions from rapid pushes or stale previous builds
+pkill -f "nuxt build" 2>/dev/null || true
+sleep 1
+NODE_OPTIONS="--max-old-space-size=1536" NUXT_IGNORE_LOCK=1 pnpm build
 
 # 4. Restart Background Daemons
 echo "🔄 [4/5] Restarting backend and frontend daemons..."

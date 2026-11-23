@@ -11,6 +11,11 @@ on:
         required: false
         default: 'uat'
 
+# Ensure only one deployment runs at a time; cancel queued or superseded builds
+concurrency:
+  group: ec2-uat-deployment
+  cancel-in-progress: true
+
 jobs:
   deploy:
     name: Deploy People HRMS UAT to EC2
