@@ -186,8 +186,12 @@ pnpm build
 
 ## Documentation & Tools Index
 
-- **[System Architecture & Workflows](file:///docs/system-architecture-and-flows.md)**: The end-to-end reference covering layering rules, permissions, access scopes, state machines, and ERP boundaries.
-- **[ERP Integration Specification](file:///docs/erp-integration.md)**: In-depth guide on HMAC SHA-256 signatures, replay prevention, outbox change feeds, and bulk upsert envelopes.
-- **[ERP Test Simulator Harness](file:///tools/erp-simulator/README.md)**: Interactive testing tool to generate mock ERP events, sync attendance, and test outbox flows.
-- **[Design & Tokens Reference](file:///DESIGN.md)**: Editorial violet design system tokens, color palettes, and responsive layouts.
-- **[Repository Rules & Guidelines](file:///AGENTS.md)**: Module organization, coding style, and pull request rules.
+- **[System Architecture & Workflows](file:///d:/Projects/people/docs/architecture/system-architecture-and-flows.md)**: The end-to-end reference covering layering rules, permissions, access scopes, state machines, and ERP boundaries.
+- **[EC2 Deployment & Setup Guide](file:///d:/Projects/people/docs/deployment/ec2-setup-guide.md)**: Complete guide with inventory of tools, step-by-step commands, systemd units, Nginx setup, and troubleshooting.
+- **[Live Testing Environment Reference](file:///d:/Projects/people/docs/deployment/testing-environment.md)**: Live host links (`16-179-29-185.sslip.io`), interactive Swagger docs, and pre-seeded accounts.
+- **[User Roles & Permissions](file:///d:/Projects/people/docs/security/user-roles-permissions-and-flows.md)**: 5 user personas, additive permission codes, and 4-tier access scopes.
+- **[ERP Integration Specification](file:///d:/Projects/people/docs/integrations/erp-integration.md)**: In-depth guide on HMAC SHA-256 signatures, replay prevention, outbox change feeds, and bulk upsert envelopes.
+- **[Seed Data & Credentials](file:///d:/Projects/people/docs/data/seed-data-and-credentials.md)**: Test personas, seed lifecycle scripts, and dev credentials.
+- **[ERP Test Simulator Harness](file:///d:/Projects/people/tools/erp-simulator/README.md)**: Interactive testing tool to generate mock ERP events, sync attendance, and test outbox flows.
+- **[Design & Tokens Reference](file:///d:/Projects/people/DESIGN.md)**: Editorial violet design system tokens, color palettes, and responsive layouts.
+- **[Repository Rules & Guidelines](file:///d:/Projects/people/AGENTS.md)**: Module organization, coding style, and pull request rules.
